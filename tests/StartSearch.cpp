@@ -83,16 +83,20 @@ int main(){
                 Check(std::abs(handle.StrokeThickness()-2*20.0/24)<.001 && handle.StrokeStartLineCap()==sx::Media::PenLineCap::Round && handle.StrokeEndLineCap()==sx::Media::PenLineCap::Round
                     && std::abs(bounds.X-16.66*20/24)<.01 && std::abs(bounds.Y-16.66*20/24)<.01 && std::abs(bounds.Width-4.34*20/24)<.01,"Lucide handle scales uniformly to 20 DIP with round caps");
                 Check(std::abs(circle.Width()-16*20.0/24)<.001 && circle.Height()==circle.Width() && sx::Controls::Canvas::GetLeft(circle)==2.5 && sx::Controls::Canvas::GetTop(circle)==2.5,"circle retains Lucide proportions at 20 DIP");
-                Check(std::abs(position.X-64)<.1 && icon.Width()==20 && icon.Height()==20,"20-DIP canvas aligns with stock section inset");
+                Check(std::abs(position.X-32)<.1 && icon.Width()==20 && icon.Height()==20,"20-DIP canvas aligns with shared section inset");
                 Check(handle.Stroke()==primary && circle.Stroke()==primary && nativePlaceholder.Foreground()!=primary,"magnifier uses native primary ink while placeholder stays secondary");
                 Check(std::abs(sx::Controls::Canvas::GetTop(icon)-(button.ActualHeight()-20)/2)<.1,"smaller magnifier stays vertically centered");
                 const auto lineLayer=FindStartElement(pane,L"JellyflowerSearchDivider").as<sx::Controls::Canvas>();const auto line=lineLayer.Children().GetAt(0).as<sx::Controls::Border>();
                 Check(line.Width()==pane.ActualWidth() && line.Height()==1 && std::abs(line.TransformToVisual(pane).TransformPoint({0,0}).Y-63)<.1,"one-DIP stroke spans the entire header below search");
                 const auto color=line.Background().as<sx::Media::SolidColorBrush>().Color();Check(color.R==(light?210:69),"divider follows existing translucent-menu border theme");
                 RenderChecks(pane,icon,light);
-                heading.Margin({80,80,0,0});Layout(pane);Check(std::abs(icon.TransformToVisual(pane).TransformPoint({0,0}).X-80)<.1,"layout updates follow heading alignment");heading.Margin({64,80,0,0});
+                heading.Margin({80,80,0,0});Layout(pane);Check(std::abs(icon.TransformToVisual(pane).TransformPoint({0,0}).X-32)<.1,"heading layout changes do not move the persistent header anchor");heading.Margin({64,80,0,0});
+                sx::Media::TranslateTransform offscreen;offscreen.X(5000);heading.RenderTransform(offscreen);heading.Visibility(sx::Visibility::Collapsed);Layout(pane);
+                Check(std::abs(icon.TransformToVisual(pane).TransformPoint({0,0}).X-32)<.1,"Show all's hidden/offscreen home heading cannot displace search");
+                const auto showAllText=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(showAllText.X-60)<.1,"Show all keeps the placeholder after the magnifier");
+                heading.ClearValue(sx::UIElement::RenderTransformProperty());heading.Visibility(sx::Visibility::Visible);
                 pane.Width(720);Layout(pane);Check(line.Width()==720,"divider follows native width changes");pane.Width(640);
-                const auto text=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(text.X-92)<.1,"placeholder has 8 DIP after the 20-DIP icon");
+                const auto text=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(text.X-60)<.1,"placeholder has 8 DIP after the 20-DIP icon");
                 button.IsChecked(true);Check(checked,"native toggle behavior and event handlers retained");button.IsChecked(false);checked=false;
                 search.Refresh(false,light);Layout(pane);
                 Check(!search.Applied() && nativePlaceholder.Text()==L"Search for apps, settings, and documents" && nativeOutline.Background()==originalBackground,"disable restores native label and input fill");
@@ -101,7 +105,7 @@ int main(){
             }
             heading.Name(L"UnrecognizedHeading");search.Refresh(true,false);Layout(pane);
             const auto compactIcon=FindStartElement(button,L"JellyflowerSearchIcon").as<sx::Controls::Canvas>().Children().GetAt(0).as<sx::Controls::Canvas>();
-            Check(header.Margin().Left==24 && header.Margin().Right==24 && std::abs(compactIcon.TransformToVisual(pane).TransformPoint({0,0}).X-24)<.1,"compact header has symmetric margins and 24-DIP fallback alignment");
+            Check(header.Margin().Left==32 && header.Margin().Right==32 && std::abs(compactIcon.TransformToVisual(pane).TransformPoint({0,0}).X-32)<.1,"compact header has symmetric margins and 32-DIP shared alignment");
             search.Restore();heading.Name(L"PinnedListHeaderText");Layout(pane);Check(header.Margin().Left==32 && header.Margin().Right==28,"native asymmetric header margins restore");
             search.Refresh(true,false);nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==L"search","shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
             sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true);search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");

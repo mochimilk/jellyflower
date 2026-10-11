@@ -40,20 +40,20 @@ int main(){try{
         adapters.push_back(std::make_unique<StartSpacing>(element,rule));adapters.back()->Refresh(true);
     }
     Layout(root);
-    Check(heading.Margin().Left==24 && heading.Margin().Top==6 && heading.Margin().Bottom==7,"headings compact without changing vertical spacing");
+    Check(heading.Margin().Left==32 && heading.Margin().Top==6 && heading.Margin().Bottom==7,"headings compact without changing vertical spacing");
     Check(cells.Margin().Left==52 && cells.Margin().Right==52,"spacing adapter leaves grid measurement to StartGrid");
-    Check(footer.Margin().Left==12 && footer.Margin().Right==12 && footer.ActualWidth()==616,"footer expands through native layout rather than a translated overlay");
-    Check(FindStartElement(root,L"ShowPinned").Margin().Right==12 && FindStartElement(root,L"ViewSelectionButton").Margin().Right==12,"right-side controls follow the same compact inset");
+    Check(footer.Margin().Left==20 && footer.Margin().Right==20 && footer.ActualWidth()==600,"footer expands through native layout rather than a translated overlay");
+    Check(FindStartElement(root,L"ShowPinned").Margin().Right==20 && FindStartElement(root,L"ViewSelectionButton").Margin().Right==20,"right-side controls follow the same compact inset");
     Check(other.Margin().Left==52,"unknown list remains stock");
-    footer.Margin({60,4,60,18});Check(footer.Margin().Left==12 && footer.Margin().Right==12 && footer.Margin().Top==4 && footer.Margin().Bottom==18,"later shell margin changes retain vertical updates and symmetric insets");
+    footer.Margin({60,4,60,18});Check(footer.Margin().Left==20 && footer.Margin().Right==20 && footer.Margin().Top==4 && footer.Margin().Bottom==18,"later shell margin changes retain vertical updates and symmetric insets");
     for(auto& adapter:adapters)adapter->Refresh(false);
     Check(heading.Margin().Left==63 && footer.Margin().Left==60 && footer.Margin().Top==4,"disable restores latest stock margins");
     Check(CompactStartMargin({4,0,6,0},StartSpacingRule::Left).Left==4,"already-small insets are never enlarged");
     sx::Data::Binding binding;binding.Source(winrt::box_value(sx::Thickness{52,3,52,9}));footer.SetBinding(sx::FrameworkElement::MarginProperty(),binding);
-    {StartSpacing spacing(footer,StartSpacingRule::Both);spacing.Refresh(true);Check(footer.Margin().Left==12,"bound margin is compacted");}
+    {StartSpacing spacing(footer,StartSpacingRule::Both);spacing.Refresh(true);Check(footer.Margin().Left==20,"bound margin is compacted");}
     Check(footer.GetBindingExpression(sx::FrameworkElement::MarginProperty()).ParentBinding()==binding && footer.Margin().Left==52,"destructor restores original binding");
     heading.ClearValue(sx::FrameworkElement::MarginProperty());
-    {StartSpacing spacing(heading,StartSpacingRule::Heading);spacing.Refresh(true);Check(heading.Margin().Left==24,"unset margin gets the compact heading inset");}
+    {StartSpacing spacing(heading,StartSpacingRule::Heading);spacing.Refresh(true);Check(heading.Margin().Left==32,"unset margin gets the compact heading inset");}
     Check(heading.ReadLocalValue(sx::FrameworkElement::MarginProperty())==sx::DependencyProperty::UnsetValue(),"unset value restored without adding a local style");
     host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();
     std::puts("PASS: recognized native Start headings/apps/footer/right controls, symmetrical compact layout, unknown-list guard, vertical updates and latest/local/unset/binding/destructor restoration.");return 0;

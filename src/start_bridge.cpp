@@ -7,6 +7,7 @@
 #include "start_search.hpp"
 #include "start_spacing.hpp"
 #include "start_grid.hpp"
+#include "start_pinned.hpp"
 #include "start_corners.hpp"
 #include <shobjidl.h>
 #include <xamlOM.h>
@@ -123,6 +124,9 @@ void Refresh() noexcept {
         std::vector<std::shared_ptr<LayoutStyle<StartGrid>>> grids;
         for(const auto& item:Layouts<StartGrid>())grids.push_back(item.second);
         for(const auto& item:grids)item->Refresh();
+        std::vector<std::shared_ptr<LayoutStyle<StartPinned>>> pins;
+        for(const auto& item:Layouts<StartPinned>())pins.push_back(item.second);
+        for(const auto& item:pins)item->Refresh();
         std::vector<std::shared_ptr<LayoutStyle<StartCorners>>> corners;
         for(const auto& item:Layouts<StartCorners>())corners.push_back(item.second);
         for(const auto& item:corners)item->Refresh();
@@ -145,7 +149,7 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
     explicit Watcher(IUnknown* site) { winrt::check_hresult(site->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void())); }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation,VisualElement element,VisualMutationType mutation) noexcept override {
         try {
-            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); Spacings().erase(element.Handle); Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);return S_OK; }
+            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); Spacings().erase(element.Handle); Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);Layouts<StartPinned>().erase(element.Handle);return S_OK; }
             // Only Handle is valid for Remove. Add strings use the same BSTR
             // ownership contract as the taskbar diagnostics callback.
             struct Strings { VisualElement& e; ~Strings(){SysFreeString(e.Type);SysFreeString(e.Name);} } strings{element};
@@ -154,13 +158,20 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
             const bool surface=element.Name && std::wstring_view(element.Type)==L"Windows.UI.Xaml.Controls.Border"
                 && (std::wstring_view(element.Name)==L"AcrylicBorder" || std::wstring_view(element.Name)==L"AcrylicOverlay");
             const std::wstring_view type(element.Type);
+            const bool pinned=type==L"StartMenu.PinnedListTile" || type==L"StartMenu.PinnedListCollapsedFolder" || type==L"StartDocked.PinnedListTile" || type==L"StartDocked.PinnedListCollapsedFolder";
             const bool grid=type==L"Windows.UI.Xaml.Controls.GridView";
             const bool corner=element.Name && (type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Windows.UI.Xaml.Controls.Border");
             const bool spacing=type==L"Windows.UI.Xaml.Controls.ItemsWrapGrid" || type==L"Windows.UI.Xaml.Controls.Button"
                 || (element.Name && (type==L"Windows.UI.Xaml.Controls.TextBlock" || type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Microsoft.UI.Xaml.Controls.DropDownButton"));
-            if(!search && !surface && !spacing && !grid && !corner) return S_OK;
+            if(!search && !surface && !spacing && !grid && !corner && !pinned) return S_OK;
             winrt::Windows::Foundation::IInspectable object{nullptr};
             winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+            if(pinned) {
+                auto tile=object.try_as<sx::FrameworkElement>();
+                if(IsStartPinnedTile(tile) && !Layouts<StartPinned>().count(element.Handle)) {
+                    EnsureReceiver();auto item=std::make_shared<LayoutStyle<StartPinned>>(tile);Layouts<StartPinned>().emplace(element.Handle,item);item->Refresh();
+                }
+            }
             if(grid) {
                 auto view=object.try_as<sx::Controls::GridView>();
                 if(IsStartGrid(view) && !Layouts<StartGrid>().count(element.Handle)) {
@@ -179,6 +190,18 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
                 if(rule!=StartSpacingRule::None && !Spacings().count(element.Handle)) {
                     EnsureReceiver();const auto item=std::make_shared<Spacing>(framework,rule);
                     Spacings().emplace(element.Handle,item);item->Refresh();
+                }
+            }
+            if(pinned || type==L"Windows.UI.Xaml.Controls.ItemsWrapGrid" || (element.Name &&
+                (std::wstring_view(element.Name)==L"RootGrid" || std::wstring_view(element.Name)==L"DisplayName"
+                || std::wstring_view(element.Name)==L"LogoContainer" || std::wstring_view(element.Name)==L"LogosContainer"
+                || std::wstring_view(element.Name)==L"SeeAllButton"))) {
+                auto ancestor=object.try_as<sx::DependencyObject>();
+                for(unsigned depth=0;ancestor && depth<64;++depth) {
+                    for(const auto& item:Layouts<StartGrid>())if(item.second->view.Element()==ancestor)item.second->view.Invalidate();
+                    if(element.Name && std::wstring_view(element.Name)==L"DisplayName")
+                        for(const auto& item:Layouts<StartPinned>())if(item.second->view.Element()==ancestor)item.second->Refresh();
+                    ancestor=sx::Media::VisualTreeHelper::GetParent(ancestor);
                 }
             }
             if(!search && !surface) return S_OK;

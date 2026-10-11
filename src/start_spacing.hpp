@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "start_properties.hpp"
+#include "start_metrics.hpp"
 #include <algorithm>
 namespace acrylic {
-enum class StartSpacingRule { None, Heading, Left, Right, Both, PinnedPadding };
+enum class StartSpacingRule { None, Heading, SectionTop, Left, Right, Both, PinnedPadding };
 inline StartSpacingRule StartSpacingFor(const sx::FrameworkElement& element, StartClassName name = nullptr) {
     if (!element) return StartSpacingRule::None;
     bool start = false;
@@ -27,12 +28,14 @@ inline StartSpacingRule StartSpacingFor(const sx::FrameworkElement& element, Sta
     }
     if (element.try_as<sx::Controls::Control>() && (id==L"ViewSelectionButton" || id==L"ShowMoreSuggestionsButton"
         || id==L"ZoomInButton" || id==L"HideMoreSuggestionsButton" || (parent && parent.Name()==L"ShowMorePinnedGrid"))) return StartSpacingRule::Right;
+    if(element.try_as<sx::Controls::Grid>() && (id==L"TopLevelHeader" || id==L"AllListHeading" || id==L"TopLevelSuggestionsListHeader" || (parent && parent.Name()==L"MoreSuggestionsRoot" && id.empty()))) return StartSpacingRule::SectionTop;
     // Main app panels are owned by StartGrid, which also balances their cells.
     return StartSpacingRule::None;
 }
 inline sx::Thickness CompactStartMargin(sx::Thickness margin, StartSpacingRule rule) {
-    const auto inset=[](double original) {return original>12 ? std::max(12.0, original-40.0) : original;};
-    if (rule==StartSpacingRule::Heading) margin.Left=24;
+    const auto inset=[](double original) {return original>StartMetrics::RowInset ? StartMetrics::RowInset : original;};
+    if (rule==StartSpacingRule::SectionTop) margin.Top=StartMetrics::HeadingTop;
+    if (rule==StartSpacingRule::Heading) margin.Left=StartMetrics::SectionInset;
     else if (rule==StartSpacingRule::Left || rule==StartSpacingRule::Both) margin.Left=inset(margin.Left);
     if (rule==StartSpacingRule::Right || rule==StartSpacingRule::Both) margin.Right=inset(margin.Right);
     return margin;
@@ -53,7 +56,7 @@ public:
             });
         } else values_.Set(element_,sx::FrameworkElement::MarginProperty(),nullptr,[rule=rule_](const auto& value) {
             auto p=CompactStartMargin(winrt::unbox_value<sx::Thickness>(value),rule);
-            if(rule==StartSpacingRule::Both) p.Left=p.Right=12;
+            if(rule==StartSpacingRule::Both) p.Left=p.Right=StartMetrics::RowInset;
             return winrt::box_value(p);
         });
         applied_=true;

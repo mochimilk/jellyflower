@@ -1,7 +1,7 @@
-jellyflower 0.16.11
+jellyflower 0.16.12
 
-Start's category, name-grid, name-list, pinned and Recommended views distribute columns evenly inside balanced side insets. Expanded Recommended no longer retains its old inset. Native vertical spacing and inner padding remain; pinned page-indicator space stays free. Start keeps its existing width and translucent material.
+Start uses shared, roomier section padding and responsive inner containers across pinned apps/folders, List, Grid, Category and expanded Recommended. Lists fill the available width; category cards and their inner grid follow evenly distributed columns. Search stays aligned to the persistent header when opening Show all.
 
-The native shadow now matches the 20-DIP outer radius, and the inset native background uses a matching 19-DIP radius. Windows retains its existing layout and compositor clips. The Start search magnifier is 20 DIP and uses primary text color; its placeholder stays secondary and typography stays native.
+Pinned apps and folder tiles now show icons without visible captions. Icons are centered; native tooltips, accessible names and interaction remain. Typography and the acrylic material recipe are unchanged.
 
-Update through general's version/download row. No sign-out or Explorer/Start restart is needed; Start v8 waits for older helpers to restore before applying. The native x64 installer, portable build and matching source are included.
+Update through general's version/download row. Start v10 waits for older helpers to restore before applying, without requiring sign-out or a forced shell restart. The native x64 installer, portable build and matching source are included.

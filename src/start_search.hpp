@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "start_properties.hpp"
+#include "start_metrics.hpp"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
@@ -74,18 +75,15 @@ class StartSearch {
         try {
             const auto button = button_.TransformToVisual(pane_).TransformPoint({0,0});
             const auto header = header_.TransformToVisual(pane_).TransformPoint({0,0});
-            // Compact Start's section inset is 24 DIP. Follow a named stock
-            // heading when available, including a resized/localized layout.
-            double left = 24;
-            const auto heading = heading_.get();
-            if (heading && heading.ActualWidth() > 0) left = heading.TransformToVisual(pane_).TransformPoint({0,0}).X;
-            left = std::clamp(left, 16.0, std::max(16.0, pane_.ActualWidth() - 64));
+            // A hidden home heading can retain its offscreen navigation
+            // transform in Show all. Anchor to the persistent header viewport.
+            const double left = StartMetrics::SectionInset;
             const double iconLeft = left - button.X;
             if (sx::Controls::Canvas::GetLeft(icon_) != iconLeft) sx::Controls::Canvas::SetLeft(icon_, iconLeft);
-            const double top = (button_.ActualHeight() - 20) / 2;
+            const double top = (button_.ActualHeight() - StartMetrics::SearchIcon) / 2;
             if (sx::Controls::Canvas::GetTop(icon_) != top) sx::Controls::Canvas::SetTop(icon_, top);
             const auto text = presenter_.TransformToVisual(pane_).TransformPoint({0,0});
-            const double shift = left + 20 + 8 - (text.X - textShift_.X());
+            const double shift = left + StartMetrics::SearchIcon + StartMetrics::SearchGap - (text.X - textShift_.X());
             if (std::abs(textShift_.X() - shift) > .01) textShift_.X(shift);
             if (caretShift_ && std::abs(caretShift_.X() - shift) > .01) caretShift_.X(shift);
             const double bottom = header_.ActualHeight() <= button_.ActualHeight() + 64
@@ -120,7 +118,7 @@ public:
             try {
                 sx::Media::SolidColorBrush clear(winrt::Windows::UI::Color{0,0,0,0});
                 values_.Set(header_, sx::FrameworkElement::MarginProperty(), nullptr, [](const auto& value) {
-                    auto margin=winrt::unbox_value<sx::Thickness>(value);margin.Left=24;margin.Right=24;return winrt::box_value(margin);
+                    auto margin=winrt::unbox_value<sx::Thickness>(value);margin.Left=StartMetrics::SectionInset;margin.Right=StartMetrics::SectionInset;return winrt::box_value(margin);
                 });
                 values_.Set(button_, sx::Controls::Control::BackgroundProperty(), clear);
                 values_.Set(button_, sx::Controls::Control::BorderBrushProperty(), clear);
