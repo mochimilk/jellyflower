@@ -1,9 +1,7 @@
-jellyflower 0.16.6
+jellyflower 0.16.7
 
-General now contains github, the installed version/update row, then a divider and red exit. The GitHub mark uses the official Octicons SVG. The supplied Lucide external-link icon appears at the right on hover and keyboard focus. The link opens the jellyflower repository in your default browser. Menu font settings are unchanged.
+Use the supplied Lucide checkmark for selected cursor choices, chevron-right for nested menus, and sunset for automatic system light/dark mode. Checkmarks share the other icons' square canvas and alignment. Right-side chevrons and the GitHub hover/keyboard-focus external-link indicator match the secondary status-text color in light and dark modes. Windows contrast themes retain their own normal/highlight colors.
 
-Click an open general/cursor parent row to collapse its submenu. It stays closed until the pointer leaves and hovers back, or you explicitly reopen it by click or keyboard.
+Selecting auto immediately shows auto and the sunset icon while location is obtained. Location permission, sunrise/sunset scheduling, and useful location-error messages retain their behavior. The current Windows theme stays unchanged until a location is available.
 
-Fix the overly opaque Start background by replacing the stacked acrylic tint/luminosity brush with a backdrop blur and one tint layer. Light/dark tint and border colors match jellyflower's menu. Original Start styling is restored on exit or controller loss, and disabled transparency/high contrast use stock Start. A separately versioned helper supports upgrading without restarting Start or Explorer. Windows layouts and compositor behavior can vary; exact pixel parity is not promised.
-
-Fast startup, taskbar helper v13, cursor behavior and in-app updates are retained. Update from general's version row. The installer, portable build and matching source are included. See VALIDATION.md and START_MENU.md for checks and limitations.
+Menu typography, spacing, acrylic materials, startup and cursor behavior are retained. Install from general's version/download row; no Explorer/Start restart or sign-out is needed for this controller-only update. The native installer, portable build and matching source are included.

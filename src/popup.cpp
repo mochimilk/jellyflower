@@ -84,6 +84,56 @@ std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     return result;
 }
 bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayGeneralCommand; }
+HICON LoadTintedIcon(int resource, int pixels, COLORREF ink) {
+    const auto source = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, pixels, pixels, 0));
+    ICONINFO info{};
+    const bool read = source && GetIconInfo(source, &info);
+    if (source) DestroyIcon(source);
+    const HDC dc = CreateCompatibleDC(nullptr);
+    BITMAPINFO format{};
+    format.bmiHeader = {sizeof(BITMAPINFOHEADER), pixels, -pixels, 1, 32, BI_RGB};
+    void* bits = nullptr;
+    const HBITMAP bitmap = dc ? CreateDIBSection(dc, &format, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    HICON result = nullptr;
+    if (read && info.hbmColor && bitmap && GetDIBits(dc, info.hbmColor, 0, pixels, bits, &format, DIB_RGB_COLORS) == pixels) {
+        auto* rgba = static_cast<DWORD*>(bits);
+        for (int i = 0; i < pixels * pixels; ++i) {
+            const DWORD alpha = rgba[i] >> 24;
+            auto channel = [alpha](BYTE value) { return (value * alpha + 127) / 255; };
+            rgba[i] = (alpha << 24) | (channel(GetRValue(ink)) << 16) | (channel(GetGValue(ink)) << 8) | channel(GetBValue(ink));
+        }
+        ICONINFO tinted{TRUE, 0, 0, info.hbmMask, bitmap};
+        result = CreateIconIndirect(&tinted);
+    }
+    if (bitmap) DeleteObject(bitmap);
+    if (dc) DeleteDC(dc);
+    if (info.hbmColor) DeleteObject(info.hbmColor);
+    if (info.hbmMask) DeleteObject(info.hbmMask);
+    return result;
+}
+// Cache both Windows contrast-theme states; normal themes use the same ink
+// when hovered. Tint only the alpha mask, preserving the supplied SVG edges.
+struct MenuIndicator {
+    HICON icons[2]{};
+    MenuIndicator() = default;
+    MenuIndicator(const MenuIndicator&) = delete;
+    MenuIndicator& operator=(const MenuIndicator&) = delete;
+    ~MenuIndicator() { for (const auto icon : icons) if (icon) DestroyIcon(icon); }
+    HICON Get(bool highlighted) const { return icons[highlighted ? 1 : 0]; }
+    explicit operator bool() const { return icons[0] && icons[1]; }
+    bool Load(int resource, int pixels, COLORREF normal, COLORREF highlighted) {
+        HICON next[]{LoadTintedIcon(resource, pixels, normal), LoadTintedIcon(resource, pixels, highlighted)};
+        if (!next[0] || !next[1]) {
+            for (const auto icon : next) if (icon) DestroyIcon(icon);
+            return false;
+        }
+        for (size_t i = 0; i < std::size(icons); ++i) {
+            if (icons[i]) DestroyIcon(icons[i]);
+            icons[i] = next[i];
+        }
+        return true;
+    }
+};
 struct Popup;
 Popup* activePopup = nullptr;
 LRESULT CALLBACK PopupProc(HWND, UINT, WPARAM, LPARAM);
@@ -102,7 +152,8 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
-    HICON githubIcon = nullptr, externalIcon = nullptr;
+    HICON githubIcon = nullptr;
+    MenuIndicator checkIcon, chevronIcon, externalIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -141,7 +192,6 @@ struct Popup {
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
         if (generalIcon) DestroyIcon(generalIcon);
         if (githubIcon) DestroyIcon(githubIcon);
-        if (externalIcon) DestroyIcon(externalIcon);
         for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
@@ -276,6 +326,14 @@ struct Popup {
         RepaintButtons();
         if (child) child->RefreshCursors();
     }
+    COLORREF SecondaryInk(bool highlighted) const {
+        return highContrast ? (highlighted ? highlightedText : text) : light ? RGB(100, 100, 100) : RGB(170, 170, 170);
+    }
+    bool UpdateIndicators() {
+        return checkIcon.Load(IDI_CHECK_LIGHT, Px(MenuGlyphSize), text, highlightedText)
+            && chevronIcon.Load(IDI_CHEVRON_RIGHT_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true))
+            && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
+    }
     bool UpdateTheme(bool systemMode) {
         systemLight = systemMode;
         light = systemMode;
@@ -301,12 +359,16 @@ struct Popup {
         background = nextBackground; highlight = nextHighlight; separator = nextSeparator;
         text = high ? GetSysColor(COLOR_MENUTEXT) : light ? RGB(26, 26, 26) : RGB(243, 243, 243);
         highlightedText = high ? GetSysColor(COLOR_HIGHLIGHTTEXT) : text;
+        if (!UpdateIndicators()) return false;
         if (!parent) {
+            const auto automatic = static_cast<AutoThemeStatus>(SendMessageW(controller, TrayThemeQueryMessage, 1, 0));
+            const bool autoSelected = automatic == AutoThemeStatus::Automatic || automatic == AutoThemeStatus::Locating;
             const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
             const int resources[]{darkInk ? IDI_ACRYLIC_OFF_LIGHT : IDI_ACRYLIC_OFF_DARK,
                 darkInk ? IDI_ACRYLIC_SYSTEM_LIGHT : IDI_ACRYLIC_SYSTEM_DARK,
                 darkInk ? IDI_ACRYLIC_PURE_LIGHT : IDI_ACRYLIC_PURE_DARK,
-                systemLight ? (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK) : (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK),
+                autoSelected ? (darkInk ? IDI_SUNSET_LIGHT : IDI_SUNSET_DARK)
+                    : systemLight ? (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK) : (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK),
                 darkInk ? IDI_CALENDAR_OFF_LIGHT : IDI_CALENDAR_OFF_DARK,
                 darkInk ? IDI_CALENDAR_LIGHT : IDI_CALENDAR_DARK,
                 darkInk ? IDI_SETTINGS_LIGHT : IDI_SETTINGS_DARK};
@@ -318,9 +380,8 @@ struct Popup {
             }
             RefreshCursorIcon();
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayThemeCommand) {
-                const auto automatic = static_cast<AutoThemeStatus>(SendMessageW(controller, TrayThemeQueryMessage, 1, 0));
                 rows[i].label = L"system";
-                rows[i].secondary = automatic == AutoThemeStatus::Automatic ? L"auto" : automatic == AutoThemeStatus::Locating ? L"locating..."
+                rows[i].secondary = autoSelected ? L"auto"
                     : automatic == AutoThemeStatus::Denied ? L"location off" : automatic == AutoThemeStatus::Unavailable ? L"no location"
                     : automatic == AutoThemeStatus::Error ? L"try again" : systemLight ? L"light" : L"dark";
                 if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
@@ -331,9 +392,8 @@ struct Popup {
             const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
                 darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
                 darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK,
-                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK,
-                darkInk ? IDI_EXTERNAL_LIGHT : IDI_EXTERNAL_DARK};
-            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon, &externalIcon};
+                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK};
+            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon};
             for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
@@ -571,16 +631,10 @@ struct Popup {
             const int statusWidth=menuText.Width(row.secondary);
             SIZE fallback{};if(!statusWidth) GetTextExtentPoint32W(item.hDC,row.secondary.c_str(),static_cast<int>(row.secondary.size()),&fallback);
             status.left = status.right - (statusWidth?statusWidth:fallback.cx);
-            SetTextColor(item.hDC, light ? RGB(100, 100, 100) : RGB(170, 170, 170));
-            HIGHCONTRASTW contrast{sizeof(contrast)};
-            if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON)) SetTextColor(item.hDC, ink);
-            DrawLabel(item.hDC, status, row.secondary, GetTextColor(item.hDC), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-            SetTextColor(item.hDC, ink);
+            DrawLabel(item.hDC, status, row.secondary, SecondaryInk(highlighted), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
         DrawLabel(item.hDC, bounds, row.label, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
-        const auto pen = CreatePen(PS_SOLID, std::max(1, Px(1)), ink);
-        const auto oldPen = SelectObject(item.hDC, pen);
         // Font line boxes include unused space. Align every glyph to the
         // label's visible ink instead, using the selected font at this DPI.
         const int cy = menuText.InkCenter(row.label,bounds);
@@ -604,20 +658,12 @@ struct Popup {
             graphics.RotateTransform(static_cast<Gdiplus::REAL>((frameTime - updateStarted) % 1000) * .36f);
             graphics.DrawImage(spinnerBitmap.get(), -iconSize / 2.0f, -iconSize / 2.0f, static_cast<Gdiplus::REAL>(iconSize), static_cast<Gdiplus::REAL>(iconSize));
         } else if (icon) DrawIconEx(item.hDC, iconLeft, iconTop, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
-        if (row.checked) {
-            POINT mark[]{{Px(12), cy}, {Px(16), cy + Px(4)}, {Px(23), cy - Px(4)}};
-            Polyline(item.hDC, mark, 3);
-        }
-        if (HasSubmenu(row.command)) {
-            const int right = item.rcItem.right - Px(14);
-            POINT chevron[]{{right - Px(3), cy - Px(4)}, {right + Px(1), cy}, {right - Px(3), cy + Px(4)}};
-            Polyline(item.hDC, chevron, 3);
-        }
+        if (row.checked) DrawIconEx(item.hDC, iconLeft, cy - iconSize / 2, checkIcon.Get(highlighted), iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        if (HasSubmenu(row.command)) DrawIconEx(item.hDC, item.rcItem.right - Px(12) - iconSize, cy - iconSize / 2,
+            chevronIcon.Get(highlighted), iconSize, iconSize, 0, nullptr, DI_NORMAL);
         if (row.command == TrayGithubCommand && highlighted && externalIcon)
             DrawIconEx(item.hDC, item.rcItem.right - Px(12) - iconSize, cy - iconSize / 2,
-                externalIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
-        SelectObject(item.hDC, oldPen);
-        DeleteObject(pen);
+                externalIcon.Get(highlighted), iconSize, iconSize, 0, nullptr, DI_NORMAL);
         if (focused) {
             RECT focus = item.rcItem;
             InflateRect(&focus, -Px(3), -Px(3));

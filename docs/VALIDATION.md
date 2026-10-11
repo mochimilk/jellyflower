@@ -1,5 +1,15 @@
 # Validation results
 
+## jellyflower 0.16.7, 2026-10-11
+
+The menu uses the supplied Lucide check, chevron-right and sunset paths, rendered into eight-size light/dark ICOs by the existing generator. Raster checks compare each decoded frame against the supplied SVG geometry, with identical light/dark alpha masks. Menu checkmarks retain primary ink; right-side chevrons and the hover/focused GitHub external-link glyph use the same secondary ink as status text (#646464 in light, #AAAAAA in dark). Tinting preserves premultiplied coverage. Contrast themes use the Windows normal/highlight text colors. Typography, menu spacing, material recipes, taskbar/Start helper protocols and startup are unchanged.
+
+The production native MenuPresentation fixture passes both themes at 96/120/144/168/192 DPI, including exact icon-mask coverage and ink, contrast-palette handling, immediate auto selection, sunset artwork in pending/active states, accessible system/auto labels, and retained location-error labels. The fixture uses a mock location/controller and does not request real location or change system theme. Existing date/cursor/update actions, submenu collapse/hover re-entry, red exit, DirectWrite text/alpha, spinner, inherited Windows font metrics and fallback checks pass. A controlled desktop compositor run also passes: dark samples red=0x20204D / blue=0x621F1F; light red=0xC9C9E9 / blue=0xE7C8C8 (COLORREF), proving the menu background responds to the content behind it.
+
+Native x64 Release app and setup build with MSVC 19.44 / SDK 10.0.26100. UpdateLogic and SetupRecovery pass, including strict update origin/architecture/hash checks and production snapshot rollback without real registry writes. The installer extraction check confirms normal-user/PerMonitorV2 version 0.16.7 manifests, both app icons and exact embedded app/helper/document bytes. No account installation or actual system-theme/cursor/location setting was changed by these checks.
+
+Selecting auto now immediately presents auto and sunset while the asynchronous location request continues. The scheduler and permission code are unchanged; live permission, sunrise/sunset transitions and GPU appearance on other PCs remain acceptance checks in INSTALLATION_TESTS step 30. This controller-only release does not require signing out or restarting Explorer/Start.
+
 ## jellyflower 0.16.6, 2026-10-11
 
 Native x64 Release app, versioned Start v2 helper, setup and relevant tests build with MSVC 19.44 / SDK 10.0.26100. General has github, installed version/update, a separator and red exit. The official GitHub Octicons mark and supplied external-link SVG have theme-aware multi-resolution ICOs. Typography, taskbar material, Explorer helper v13 and startup behavior are unchanged.

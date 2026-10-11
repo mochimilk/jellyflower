@@ -1,6 +1,6 @@
 # jellyflower installer and updater checks
 
-Current release: 0.16.6. Use steps 27–29 for general, GitHub, submenu clicks and Start material. Step 24 records the retired Fluent Body experiment; use step 26 for current typography. Steps 21–23 describe retired font/network experiments; use 24–25 for current checks. Run these on the normal Windows desktop. The build environment's extract/JSON checks do not prove desktop registration or rendering.
+Current release: 0.16.7. Use steps 27–30 for general, GitHub, submenu clicks and Start material. Step 24 records the retired Fluent Body experiment; use step 26 for current typography. Steps 21–23 describe retired font/network experiments; use 24–25 for current checks. Run these on the normal Windows desktop. The build environment's extract/JSON checks do not prove desktop registration or rendering.
 
 1. Quit TranslucentTB and any other taskbar modifiers. Double-click jellyflower-setup-x64.exe on x64 Windows. Confirm installation succeeds without elevation, the flower appears under show hidden icons, and the Start menu shortcut launches the same instance.
 2. Confirm Windows Settings > Apps > Installed apps lists jellyflower with the correct version. Task Scheduler should have one enabled jellyflower-<your SID> logon task and Startup apps one jellyflower Run fallback; upgrading the earlier AcrylicTaskbar build should remove its duplicate Run registration.
@@ -97,3 +97,12 @@ Follow START_MENU.md's acceptance checks for matching colors/stroke, native Star
 3. Update from 0.16.5 while Start is open and while hidden. Verify v1 restores before v2 styles, without restarting Explorer or Start; Diagnose must report startAttached=1 and startSurfaces>0. Exit/force-end jellyflower and verify stock Start returns. If Start was suspended, reopen it to let its UI thread process restoration.
 4. Disable Windows transparency or enable a contrast theme: stock Start must return. Restore settings and verify styling resumes. Repeat after a Windows update, in battery saver and a remote session. Successful diagnostics alone do not prove GPU blur.
 5. Hover into general or cursor, then click its parent row. Only that submenu closes; moving within the same row must not reopen it. Move away and hover back: it reopens after the normal delay. A second click or keyboard Right/Enter can reopen without moving away. Test switching branches, outside click dismissal and the tray toggle as before.
+
+
+## 30. Lucide indicators and immediate auto status (0.16.7)
+
+1. Update through general's version/download row. Confirm v0.16.7 after automatic relaunch, without signing out or restarting Explorer/Start. Menu typography, acrylic appearance and startup should retain their previous behavior.
+2. With a cursor pack imported, select several colors and disable. The selected row uses the supplied Lucide check in the same square icon slot as other menu icons. Selection keeps the menu open. Check both themes and 100/125/150/175/200% scaling.
+3. General and cursor show the supplied Lucide chevron-right in the secondary text color. Hover/focus github: its external-link icon uses that same color and is hidden at rest. The right indicators align within the same square canvas; native hover, submenu collapse and leave/re-enter behavior should still work.
+4. Cycle system from dark to auto. Immediately show auto and the sunset icon, with no locating label; the current theme stays unchanged while Windows resolves location. Allow permission and verify daylight scheduling. Deny/revoke access or disable location and confirm useful location off/no location/try again messages remain. Resume after sleep and check that manual light/dark stops scheduling. Windows may show its own location-use indicator.
+5. Test a Windows contrast theme: normal and highlighted indicators must follow the Windows text colors rather than gray. Restore the theme and confirm secondary ink returns, with crisp edges on the translucent menu.

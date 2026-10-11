@@ -9,6 +9,7 @@
 using namespace acrylic;
 namespace {
 bool light = false;
+AutoThemeStatus automatic = AutoThemeStatus::Manual;
 UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
@@ -101,8 +102,9 @@ void GithubChecks(Popup& popup) {
         return region;
     };
     auto coverage=[&] {
-        const auto with=pixels();const auto saved=popup.externalIcon;popup.externalIcon=nullptr;
-        const auto without=pixels();popup.externalIcon=saved;size_t count=0;
+        const auto with=pixels();HICON saved[]{popup.externalIcon.icons[0],popup.externalIcon.icons[1]};
+        popup.externalIcon.icons[0]=popup.externalIcon.icons[1]=nullptr;
+        const auto without=pixels();std::copy(std::begin(saved),std::end(saved),popup.externalIcon.icons);size_t count=0;
         for(size_t i=0;i<with.size();++i) count+=with[i]!=without[i];
         return count;
     };
@@ -110,6 +112,61 @@ void GithubChecks(Popup& popup) {
     popup.hovered=0;Check(coverage()>10,"external arrow paints at the right on hover");
     popup.hovered=-1;popup.keyboard=true;SetFocus(popup.buttons[0]);Check(coverage()>10,"external arrow also appears for keyboard focus");
     popup.keyboard=false;
+}
+std::vector<DWORD> IconPixels(HICON icon) {
+    ICONINFO source{};Check(icon && GetIconInfo(icon,&source),"indicator icon is readable");
+    BITMAP bitmap{};Check(GetObjectW(source.hbmColor,sizeof(bitmap),&bitmap)!=0,"indicator has color surface");
+    BITMAPINFO info{};info.bmiHeader={sizeof(BITMAPINFOHEADER),bitmap.bmWidth,-bitmap.bmHeight,1,32,BI_RGB};
+    std::vector<DWORD> pixels(static_cast<size_t>(bitmap.bmWidth)*bitmap.bmHeight);
+    const HDC dc=GetDC(nullptr);
+    const int read=GetDIBits(dc,source.hbmColor,0,bitmap.bmHeight,pixels.data(),&info,DIB_RGB_COLORS);
+    ReleaseDC(nullptr,dc);DeleteObject(source.hbmColor);DeleteObject(source.hbmMask);
+    Check(read==bitmap.bmHeight,"indicator pixels read completely");return pixels;
+}
+void IndicatorChecks(Popup& popup) {
+    auto verify=[&](const MenuIndicator& glyph,int resource,COLORREF normal,COLORREF hover) {
+        const auto original=static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(resource),IMAGE_ICON,popup.Px(MenuGlyphSize),popup.Px(MenuGlyphSize),0));
+        const auto mask=IconPixels(original);DestroyIcon(original);
+        for(int highlighted=0;highlighted<2;++highlighted) {
+            const COLORREF ink=highlighted?hover:normal;const auto pixels=IconPixels(glyph.Get(highlighted!=0));
+            Check(pixels.size()==mask.size(),"indicators share the menu glyph canvas at this DPI");size_t visible=0;
+            for(size_t i=0;i<pixels.size();++i) {
+                const DWORD alpha=pixels[i]>>24;
+                Check(alpha==mask[i]>>24,"tinting preserves every supplied SVG coverage sample");visible+=alpha>0;
+                Check(((pixels[i]>>16)&255)==(GetRValue(ink)*alpha+127)/255
+                    && ((pixels[i]>>8)&255)==(GetGValue(ink)*alpha+127)/255
+                    && (pixels[i]&255)==(GetBValue(ink)*alpha+127)/255,"indicator uses the expected premultiplied ink");
+            }
+            Check(visible>10,"indicator contains visible artwork");
+        }
+    };
+    auto all=[&] {
+        verify(popup.checkIcon,IDI_CHECK_LIGHT,popup.text,popup.highlightedText);
+        verify(popup.chevronIcon,IDI_CHEVRON_RIGHT_LIGHT,popup.SecondaryInk(false),popup.SecondaryInk(true));
+        if(popup.kind==TrayGeneralCommand) verify(popup.externalIcon,IDI_EXTERNAL_LIGHT,popup.SecondaryInk(false),popup.SecondaryInk(true));
+    };
+    Check(popup.SecondaryInk(false)==(light?RGB(100,100,100):RGB(170,170,170)),"arrows and status labels share secondary ink");all();
+    popup.highContrast=true;popup.text=RGB(20,230,80);popup.highlightedText=RGB(240,30,180);
+    Check(popup.UpdateIndicators(),"indicator contrast palette refresh");
+    Check(popup.SecondaryInk(false)==popup.text && popup.SecondaryInk(true)==popup.highlightedText,"contrast themes use Windows normal and highlight colors");all();
+    Check(popup.UpdateTheme(light),"restore fixture menu palette");
+}
+void AutoThemeChecks(Popup& popup) {
+    const bool saved=light;light=false;automatic=AutoThemeStatus::Manual;popup.UpdateTheme(light);
+    const HWND same=popup.window;popup.Activate(0,false);
+    Check(automatic==AutoThemeStatus::Locating && !light,"selecting auto keeps the current theme while location is pending");
+    Check(popup.rows[0].secondary==L"auto" && popup.window==same && !popup.done,"auto appears immediately without closing the menu");
+    for(const auto status:{AutoThemeStatus::Locating,AutoThemeStatus::Automatic}) for(const bool theme:{false,true}) {
+        light=theme;automatic=status;Check(popup.UpdateTheme(light),"automatic theme presentation refresh");
+        const auto expected=static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(light?IDI_SUNSET_LIGHT:IDI_SUNSET_DARK),IMAGE_ICON,popup.Px(MenuGlyphSize),popup.Px(MenuGlyphSize),0));
+        Check(IconPixels(popup.themeIcon)==IconPixels(expected),"pending and active auto use the supplied sunset in both themes");DestroyIcon(expected);
+        wchar_t name[128]{};GetWindowTextW(popup.buttons[0],name,128);
+        Check(popup.rows[0].secondary==L"auto" && std::wstring(name)==L"system, auto","visible and accessible labels both say auto");
+    }
+    for(const auto& entry:std::initializer_list<std::pair<AutoThemeStatus,const wchar_t*>>{{AutoThemeStatus::Denied,L"location off"},{AutoThemeStatus::Unavailable,L"no location"},{AutoThemeStatus::Error,L"try again"}}) {
+        automatic=entry.first;popup.UpdateTheme(light);Check(popup.rows[0].secondary==entry.second,"actionable location failures remain visible");
+    }
+    automatic=AutoThemeStatus::Manual;light=saved;popup.UpdateTheme(light);
 }
 void SubmenuToggleChecks(Popup& popup,int index) {
     auto click=[&]{SendMessageW(popup.window,WM_COMMAND,MAKEWPARAM(popup.rows[index].command,BN_CLICKED),reinterpret_cast<LPARAM>(popup.buttons[index]));};
@@ -126,7 +183,12 @@ void SubmenuToggleChecks(Popup& popup,int index) {
 }
 LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other) {
     if(message==TraySettingMessage && parameter==TrayGithubCommand) {++githubOpens;return 1;}
-    if (message == TrayThemeQueryMessage) return parameter ? static_cast<UINT>(AutoThemeStatus::Manual) : light;
+    if (message == TrayThemeQueryMessage) return parameter ? static_cast<UINT>(automatic) : light;
+    if (message == TraySettingMessage && parameter == TrayThemeCommand) {
+        if (automatic==AutoThemeStatus::Manual && !light) automatic=AutoThemeStatus::Locating;
+        else {light=automatic!=AutoThemeStatus::Manual || !light;automatic=AutoThemeStatus::Manual;}
+        return light;
+    }
     if (message == TrayDateQueryMessage) return dateEnabled;
     if (message == TraySettingMessage && parameter == TrayDateCommand) { dateEnabled = !dateEnabled; return dateEnabled; }
     if (message == TrayUpdateQueryMessage) return static_cast<UINT>(state);
@@ -244,6 +306,11 @@ int wmain(int argc,wchar_t** argv) {
             Check(wcscmp(font.lfFaceName,metrics.lfMenuFont.lfFaceName)==0 && font.lfHeight==metrics.lfMenuFont.lfHeight
                 && font.lfWeight==metrics.lfMenuFont.lfWeight,"Windows supplies the complete menu family, size and weight");
             NativeTextChecks(popup);
+            IndicatorChecks(popup);
+            AutoThemeChecks(popup);
+            automatic=AutoThemeStatus::Locating;popup.UpdateTheme(light);
+            Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"auto-light-":L"auto-dark-")+std::to_wstring(dpi)+L".bmp"));
+            automatic=AutoThemeStatus::Manual;popup.UpdateTheme(light);
             Check(popup.rows[0].label==L"system" && popup.rows[0].secondary==(light?L"light":L"dark"),"system first with current theme secondary");
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
@@ -266,6 +333,7 @@ int wmain(int argc,wchar_t** argv) {
             const HWND generalWindow=general.window;
             SubmenuToggleChecks(popup,4);
             GithubChecks(general);
+            IndicatorChecks(general);
             general.hovered=0;
             Capture(general,std::filesystem::path(argv[1])/(std::wstring(light?L"github-light-":L"github-dark-")+std::to_wstring(dpi)+L".bmp"));
             general.hovered=-1;
