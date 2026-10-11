@@ -1,5 +1,7 @@
 # Native and laptop test checklist
 
+Current 0.16.3 uses the Fluent Body role for menu text and native network artwork. Historical Element 2/network tests below are retired. See INSTALLATION_TESTS steps 24–25 for current typography/startup acceptance.
+
 Current 0.14.1 clock behavior is system font only, with a date row directly below acrylic. Earlier font/submenu checks below describe retired behavior and are retained as development history; use INSTALLATION_TESTS.md steps 13–17 for current acceptance.
 
 The x64 Release build, basic native lifecycle checks, and desktop XAML attachment on Windows build 26200 **passed**. Desktop attachment required an Explorer restart to clear a stalled session, and the user confirmed the original build's frosted effect. Tray update and battery-saver checks below remain **pending** unless recorded in VALIDATION.md. Record the Windows build, architecture, GPU/driver version, date, and whether the taskbar is stock. Windows may label the power mode Battery saver or Energy saver.
@@ -258,3 +260,10 @@ For 0.16.1, NetworkLayout models the full IconView/ContentPresenter/ContentGrid/
 
 
 For 0.16.2, NetworkLayout runs the full production overlay suite twice: direct ContainerGrid > ContentGrid, and optional ContentPresenter > ContentGrid. The direct fixture failed against the previous production selector before applying the fix. This corrects the mandatory-wrapper assumption in the 0.16.1 test. MenuPresentation compares family, size and weight to Windows' NONCLIENTMETRICS. Injected alternate metrics and a failed-query fallback establish that all three values come from Windows. Production drawing must use DirectWrite without GDI fallbacks, with premultiplied native alpha, opaque glyph stems, smooth edge coverage, transparent empty pixels and ink-based icon alignment in both themes at 96/144/192 DPI. Width checks use DirectWrite too. The compositor fixture keeps its controlled background visible without taking focus and checks that another app has not covered it before sampling transparency. BridgeNotify rejects pinned v11 mappings for v12.
+
+
+## 0.16.3 native checks
+
+MenuPresentation validates the installed Segoe UI Variable typographic family, regular weight, 14-DIP size, 20-DIP line height and automatic optical axis at 96/120/144/168/192 DPI. Both themes and all menu states use native DirectWrite; the forced compatibility test uses Segoe UI. Premultiplied alpha, glyph stems/edges, transparent empty pixels, text measurement, icon alignment, live compositor backdrops and no production GDI fallbacks are checked. VolumeLayout retains native network neighbors; BridgeNotify rejects helper v12 for v13.
+
+StartupLogic parses the production definition through Windows Task Scheduler without registering a task, checks account/logon/normal privilege/no delay/battery/network/idle/runtime settings and exact XML-escaped paths, tests obsolete-owner removal and task-XML rollback with in-memory storage, and checks bounded fast shell retry policy. SetupRecovery tests Run/uninstall snapshots without real registry writes. Task Scheduler access may require running the read-only definition test outside a restricted build sandbox. Real task registration, cold boot latency, AC/battery startup, duplicate startup, failed update and uninstall are desktop checks in INSTALLATION_TESTS step 25.

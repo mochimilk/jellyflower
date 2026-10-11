@@ -54,9 +54,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
-
-
-The connected-network artwork in assets/network.svg and src/network_art.hpp preserves the two paths from the user-supplied Y2K Bold Icons Element 2-01.svg. Its fill is replaced by the current native network foreground; no font or cursor pack is embedded. The artwork is supplied for this project and retains its creator's applicable license; this project does not claim it is GPL-original artwork.
-
-
-The Windows 11 taskbar template and network glyph identification were cross-checked against m417z's GPL-3.0 taskbar tray system icon tweaks implementation, https://github.com/ramensoftware/windhawk-mods/blob/main/mods/taskbar-tray-system-icon-tweaks.wh.cpp . Jellyflower's bounded selector and reversible vector overlay implementation are maintained in this project's GPL-3.0-or-later source.

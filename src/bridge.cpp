@@ -6,7 +6,6 @@
 #include "theme.hpp"
 #include "clock.hpp"
 #include "volume.hpp"
-#include "network.hpp"
 #include "chevron.hpp"
 #include "acrylic_material.hpp"
 #include <unknwn.h>
@@ -261,9 +260,6 @@ class Volume {
     xaml::FrameworkElement root;
     xaml::Controls::Grid target{nullptr};
     std::unique_ptr<VolumeView> view;
-    NetworkTarget networkTarget;
-    std::unique_ptr<NetworkView> network;
-    bool networkCounted = false;
     bool counted = false;
 public:
     UINT_PTR timer = 0;
@@ -279,29 +275,6 @@ public:
     }
     void Refresh() noexcept {
         const bool enabled = owner.Alive();
-        try {
-            if (enabled) {
-                const auto found = FindNetworkTarget(root);
-                if(state) {
-                    const auto text=found?found.glyph.Text():winrt::hstring{};
-                    InterlockedExchange(&state->networkGlyph,text.size()==1?static_cast<LONG>(text[0]):0);
-                    InterlockedExchange(&state->networkResult,S_OK);
-                }
-                if (found.glyph != networkTarget.glyph || found.slot != networkTarget.slot || (found && !network)) {
-                    network.reset(); networkTarget = found;
-                    if (found) network = std::make_unique<NetworkView>(found);
-                }
-            }
-            if (network) network->Refresh(enabled);
-        } catch (...) {
-            if (state) InterlockedExchange(&state->networkResult, winrt::to_hresult());
-            try { if (network) network->Restore(); } catch (...) {}
-        }
-        const bool currentNetwork = network && network->Applied();
-        if (networkCounted != currentNetwork) {
-            networkCounted = currentNetwork;
-            if (state) { if (networkCounted) InterlockedIncrement(&state->networkCount); else InterlockedDecrement(&state->networkCount); }
-        }
         try {
             if (enabled) {
                 // Glyph text can arrive after its Add callback, and the shell
@@ -331,8 +304,6 @@ public:
     ~Volume() {
         if (timer) KillTimer(nullptr, timer);
         try { if (view) view->Restore(); } catch (...) {}
-        try { if (network) network->Restore(); } catch (...) {}
-        if (networkCounted && state) InterlockedDecrement(&state->networkCount);
         if (counted && state) InterlockedDecrement(&state->volumeCount);
     }
 };

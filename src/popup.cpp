@@ -613,7 +613,7 @@ struct Popup {
         if (!UpdateTheme(systemLight)) return false;
         font = CreateSystemMenuFont(dpi);
         if (!background || !highlight || !separator || !font) return false;
-        menuText.Initialize(font); // GDI remains a readable fallback if graphics initialization fails.
+        menuText.Initialize(dpi); // GDI remains a readable fallback if graphics initialization fails.
         MONITORINFO monitor{sizeof(monitor)};
         if (!GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
         // Reserve the same breathing room at the taskbar and screen edge.

@@ -27,18 +27,31 @@ void FontSourceChecks() {
     const auto font=CreateSystemMenuFont(144,AlternateMenuMetrics);Check(font!=nullptr,"queried alternate menu font created");
     LOGFONTW selected{};GetObjectW(font,sizeof(selected),&selected);DeleteObject(font);
     Check(wcscmp(selected.lfFaceName,L"Tahoma")==0 && selected.lfHeight==-18 && selected.lfWeight==FW_BOLD,
-        "menu inherits the queried family, size and weight without overrides");
+        "classic failure fallback inherits the queried family, size and weight");
     LOGFONTW stock{};Check(GetObjectW(GetStockObject(DEFAULT_GUI_FONT),sizeof(stock),&stock)!=0,"stock GUI font available");
     const auto fallback=CreateSystemMenuFont(96,MissingMenuMetrics);Check(fallback!=nullptr,"failed metrics query falls back to Windows GUI font");
     GetObjectW(fallback,sizeof(selected),&selected);DeleteObject(fallback);
     Check(wcscmp(selected.lfFaceName,stock.lfFaceName)==0 && selected.lfHeight==stock.lfHeight && selected.lfWeight==stock.lfWeight,
-        "fallback family, size and weight also come from Windows");
+        "classic failure fallback metrics come from Windows");
+    MenuText legacy;Check(legacy.Initialize(96,false),"Body role initializes without variable fonts");
+    wchar_t family[64]{};legacy.Format()->GetFontFamilyName(family,64);
+    Check(!legacy.VariableFont() && wcscmp(family,L"Segoe UI")==0 && legacy.Format()->GetFontWeight()==400
+        && legacy.Format()->GetFontSize()==14,"compatible Segoe UI preserves the Body role when variable support is unavailable");
 }
 void NativeTextChecks(Popup& popup) {
     const auto format=popup.menuText.Format();Check(format!=nullptr,"native DirectWrite text format initialized");
-    LOGFONTW native{};GetObjectW(popup.font,sizeof(native),&native);
-    Check(format->GetFontWeight()==native.lfWeight && std::abs(format->GetFontSize()+native.lfHeight)<.01f,
-        "DirectWrite preserves the inherited size and weight at the actual display DPI");
+    Check(format->GetFontWeight()==400 && format->GetFontSize()==14,"Fluent Body is regular at 14 DIPs independently of display DPI");
+    DWRITE_LINE_SPACING_METHOD method{};float line=0,baseline=0;
+    Check(SUCCEEDED(format->GetLineSpacing(&method,&line,&baseline)) && method==DWRITE_LINE_SPACING_METHOD_UNIFORM
+        && line==20 && baseline>0 && baseline<line,"Body line height is 20 DIPs with a font-derived baseline");
+    wchar_t family[64]{};format->GetFontFamilyName(family,64);
+    Check(wcscmp(family,popup.menuText.VariableFont()?L"Segoe UI Variable":L"Segoe UI")==0,"Body uses the real typographic variable family or the compatible Windows face");
+    if(popup.menuText.VariableFont()) {
+        Microsoft::WRL::ComPtr<IDWriteTextFormat3> variable;
+        Check(SUCCEEDED(format->QueryInterface(IID_PPV_ARGS(&variable))) &&
+            variable->GetAutomaticFontAxes()==DWRITE_AUTOMATIC_FONT_AXES_OPTICAL_SIZE,"optical sizing uses the 14-DIP em rather than the physical DPI-scaled pixels");
+    }
+    if(!light) std::wcout<<L"Fluent Body at "<<popup.dpi<<L" DPI: "<<family<<L", size="<<format->GetFontSize()<<L" DIP, line="<<line<<L", weight="<<format->GetFontWeight()<<L'\n';
     const RECT bounds{0,0,popup.Px(240),popup.Px(40)};
     for(const auto color:{RGB(0,0,0),RGB(255,255,255),RGB(100,100,100)}) {
         MenuSurface surface(nullptr,bounds,false);Check(surface.pixels!=nullptr,"transparent text fixture bitmap");
@@ -158,7 +171,7 @@ int wmain(int argc,wchar_t** argv) {
         const HWND controller=CreateWindowW(owner.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,owner.hInstance,nullptr);
         WNDCLASSW wc{};wc.lpfnWndProc=PopupProc;wc.hInstance=owner.hInstance;wc.lpszClassName=PopupClass;
         Check(RegisterClassW(&wc)!=0,"production popup class");
-        for (int theme=0;theme<2;++theme) for (UINT dpi : {96u,144u,192u}) {
+        for (int theme=0;theme<2;++theme) for (UINT dpi : {96u,120u,144u,168u,192u}) {
             light=theme!=0;state=UpdateStatus::Idle;
             Popup popup;popup.controller=controller;popup.dpi=dpi;popup.light=light;popup.systemLight=light;
             cursorMask=1u<<CursorDisabled;
@@ -167,13 +180,11 @@ int wmain(int argc,wchar_t** argv) {
             Check(popup.acrylic,"Windows accepts explicit acrylic on root menu");
             LOGFONTW font{};GetObjectW(popup.font,sizeof(font),&font);
             Check(font.lfQuality==ANTIALIASED_QUALITY,"GDI fallback uses grayscale smoothing for glass");
-            const HDC fontDc=CreateCompatibleDC(nullptr);const auto previous=SelectObject(fontDc,popup.font);wchar_t face[LF_FACESIZE]{};GetTextFaceW(fontDc,LF_FACESIZE,face);TEXTMETRICW resolved{};GetTextMetricsW(fontDc,&resolved);SelectObject(fontDc,previous);DeleteDC(fontDc);
             NONCLIENTMETRICSW metrics{sizeof(metrics)};
             Check(SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0,dpi)!=FALSE,"Windows menu font queried at display DPI");
             Check(wcscmp(font.lfFaceName,metrics.lfMenuFont.lfFaceName)==0 && font.lfHeight==metrics.lfMenuFont.lfHeight
-                && font.lfWeight==metrics.lfMenuFont.lfWeight,"menu inherits Windows' family, size and weight without overrides");
+                && font.lfWeight==metrics.lfMenuFont.lfWeight,"GDI failure fallback retains the classic Windows menu metrics");
             NativeTextChecks(popup);
-            if(theme==0) std::wcout<<L"Menu font at "<<dpi<<L" DPI: "<<face<<L", height="<<font.lfHeight<<L", weight="<<font.lfWeight<<L'\n';
             Check(popup.rows[0].label==L"system" && popup.rows[0].secondary==(light?L"light":L"dark"),"system first with current theme secondary");
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
@@ -245,7 +256,7 @@ int wmain(int argc,wchar_t** argv) {
         }
         if(argc==3 && wcscmp(argv[2],L"--compositor")==0) Compositor(controller,argv[1]);
         DestroyWindow(controller);
-        std::cout<<"PASS: production menus at 96/144/192 DPI in both themes; regular fonts, root date/icon toggles, acrylic attributes/foreground alpha/fallback, installed version/update states/spinner frames, locked cursor actions and keyboard skipping, live unlocking without changing selection.\n";
+        std::cout<<"PASS: Fluent Body and native variable optical sizing at 96/120/144/168/192 DPI in both themes; Segoe UI compatibility, alpha/ink alignment, root date/icon toggles, acrylic/fallback, version/update states/spinner frames, cursor actions and keyboard selection.\n";
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

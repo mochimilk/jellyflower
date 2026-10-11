@@ -10,6 +10,7 @@
 #include "version.hpp"
 #include "resource.h"
 #include "setup_lock.hpp"
+#include "startup.hpp"
 
 using namespace acrylic;
 namespace fs = std::filesystem;
@@ -227,6 +228,7 @@ void Install() {
     const auto previous = PreviousInstall(base);
     const auto running = RunningController();
     const RegistryBackup startup(RunKey, RunValue), legacyStartup(RunKey, L"AcrylicTaskbar"), registration(UninstallKey);
+    const auto logonTask = ReadStartupTask();
     const auto shortcut = Shortcut(), backup = folder / L"shortcut.backup";
     const bool hadShortcut = fs::exists(shortcut);
     if (hadShortcut) fs::copy_file(shortcut, backup);
@@ -248,6 +250,7 @@ void Install() {
         if (result) throw result;
     } catch (...) {
         if (silentUpdate) UpdateOutcome(ERROR_INSTALL_FAILURE);
+        try { RestoreStartupTask(logonTask); } catch (...) {}
         startup.Restore(); legacyStartup.Restore(); registration.Restore();
         std::error_code ignored;
         if (hadShortcut) fs::copy_file(backup, shortcut, fs::copy_options::overwrite_existing, ignored);

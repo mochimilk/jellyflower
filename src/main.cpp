@@ -12,6 +12,7 @@
 #include "updates.hpp"
 #include "update_download.hpp"
 #include "version.hpp"
+#include "startup.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <algorithm>
@@ -25,6 +26,7 @@ namespace {
 constexpr UINT_PTR RefreshTimer = 1;
 constexpr UINT_PTR DebounceTimer = 2;
 constexpr UINT_PTR UpdateTimer = 3;
+constexpr UINT_PTR FastAttachTimer = 4;
 constexpr UINT RefreshMs = 5000;
 struct AccentPolicy { int state; UINT flags; DWORD color; DWORD animation; };
 struct CompositionData { int attribute; void* data; SIZE_T size; };
@@ -101,43 +103,7 @@ void Log(const std::wstring& message) {
     DWORD written = 0;
     WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
 }
-DWORD Startup(bool install) {
-    HKEY key = nullptr;
-    LONG result = install
-        ? RegCreateKeyExW(HKEY_CURRENT_USER, RunKey, 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr)
-        : RegOpenKeyExW(HKEY_CURRENT_USER, RunKey, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key);
-    if (!install && result == ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
-    if (result != ERROR_SUCCESS) return static_cast<DWORD>(result);
-    const auto path = ExePath();
-    if (path.empty()) { RegCloseKey(key); return ERROR_BAD_PATHNAME; }
-    const auto command = L"\"" + path + L"\"";
-    if (install) {
-        result = RegSetValueExW(key, RunValue, 0, REG_SZ,
-            reinterpret_cast<const BYTE*>(command.c_str()), static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
-        if (!result) {
-            // Migration from the pre-jellyflower build: one login entry only.
-            wchar_t older[32768]{}; DWORD type = 0, size = sizeof(older);
-            if (RegQueryValueExW(key, L"AcrylicTaskbar", nullptr, &type, reinterpret_cast<BYTE*>(older), &size) == ERROR_SUCCESS
-                && type == REG_SZ && wcsstr(older, L"AcrylicTaskbar.exe")) RegDeleteValueW(key, L"AcrylicTaskbar");
-        }
-    } else {
-        DWORD type = 0, bytes = 0;
-        result = RegQueryValueExW(key, RunValue, nullptr, &type, nullptr, &bytes);
-        if (result == ERROR_FILE_NOT_FOUND) result = ERROR_SUCCESS;
-        else if (result == ERROR_SUCCESS) {
-            std::vector<wchar_t> existing(bytes / sizeof(wchar_t) + 1, L'\0');
-            result = RegQueryValueExW(key, RunValue, nullptr, &type,
-                reinterpret_cast<BYTE*>(existing.data()), &bytes);
-            if (result == ERROR_SUCCESS) {
-                // An older copy cannot remove a newer copy's startup registration.
-                result = type == REG_SZ && _wcsicmp(existing.data(), command.c_str()) == 0
-                    ? RegDeleteValueW(key, RunValue) : ERROR_ALREADY_EXISTS;
-            }
-        }
-    }
-    RegCloseKey(key);
-    return static_cast<DWORD>(result);
-}
+DWORD Startup(bool install) { return RegisterStartup(ExePath(), install); }
 DWORD Stop() {
     const HWND window = FindWindowW(WindowClass, nullptr);
     if (!window) return ERROR_SUCCESS;
@@ -152,7 +118,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[22]{};
+    LONG values[19]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -192,9 +158,6 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"taskbarXamlIslands\": " << values[16]
         << ",\n  \"bridgeRetained\": " << (values[17] ? "true" : "false")
         << ",\n  \"clockDate\": " << (values[18] ? "true" : "false")
-        << ",\n  \"replacedNetworkIcons\": " << values[19]
-        << ",\n  \"networkLastResult\": " << values[20]
-        << ",\n  \"networkGlyphCode\": " << values[21]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -210,22 +173,22 @@ public:
     AcrylicMode mode = AcrylicMode::System;
     TrayIcon tray;
     UpdateChecker updates;
-    AutoTheme autoTheme;
+    std::unique_ptr<AutoTheme> autoTheme;
     AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
     void RefreshAutoTheme() {
         bool light = false;
-        if (autoTheme.Tick(light) && (SystemLightTheme() != light || AppLightTheme() != light)) {
+        if (autoTheme->Tick(light) && (SystemLightTheme() != light || AppLightTheme() != light)) {
             const auto changed = SetWindowsLightTheme(light);
             if (changed.error) Log(L"Automatic theme error=" + std::to_wstring(changed.error));
         }
-        const auto state = autoTheme.Status();
+        const auto state = autoTheme->Status();
         if (state != lastAutoStatus) {
             lastAutoStatus = state;
-            Log(L"Auto theme status=" + std::to_wstring(static_cast<UINT>(state)) + L" error=" + std::to_wstring(autoTheme.Error()));
+            Log(L"Auto theme status=" + std::to_wstring(static_cast<UINT>(state)) + L" error=" + std::to_wstring(autoTheme->Error()));
             RefreshThemeMenu(window);
         }
     }
-    CursorManager cursors;
+    std::unique_ptr<CursorManager> cursors;
     ClockOptions clock = LoadClockOptions();
     DWORD build = BuildNumber();
     LONG backend = Waiting, applied = 0, lastResult = S_OK;
@@ -242,6 +205,21 @@ public:
     DWORD explorerPid = 0;
     LONG previousBridgeState = Idle, previousBridgeResult = S_OK;
     unsigned observedIslands = 0;
+    ULONGLONG attachStarted = GetTickCount64();
+    bool firstAppearanceLogged = false;
+    bool AppearanceReady() const {
+        return backend == Legacy ? applied > 0 : shared && Read(shared->bridgeState) == Attached
+            && Read(shared->appliedCount) > 0;
+    }
+    void FastAttach() {
+        RefreshTaskbar();
+        const bool ready = AppearanceReady();
+        if (ready && !firstAppearanceLogged) {
+            firstAppearanceLogged = true;
+            Log(L"First taskbar appearance request succeeded after ms=" + std::to_wstring(GetTickCount64() - attachStarted));
+        }
+        if (ShellRetryInterval(GetTickCount64() - attachStarted, ready) != 100) KillTimer(window, FastAttachTimer);
+    }
     bool bridgeRetained = false;
     std::vector<HWND> changedLegacyTaskbars;
 
@@ -327,22 +305,24 @@ public:
     }
     void Refresh() {
         RefreshAutoTheme();
+        RefreshTaskbar();
         tray.Refresh(window, mode);
-        const DWORD cursorBefore = cursors.Error();
-        cursors.Refresh();
+        const DWORD cursorBefore = cursors->Error();
+        cursors->Refresh();
         DWORD importError = 0;
-        if (cursors.TakeImportResult(importError)) {
+        if (cursors->TakeImportResult(importError)) {
             Log(L"Cursor ZIP import error=" + std::to_wstring(importError));
             if (importError) tray.UpdateNotice(L"cursor zip could not be imported",
                 L"Use the original, complete Cursor Concept 3 HDPi ZIP. Choose colors / unlock for instructions. Your current cursor is unchanged.", true);
             else tray.UpdateNotice(L"cursor colors unlocked", L"Your pack is ready. Open cursor to choose a color or follow Windows light/dark mode.");
             RefreshCursorMenu(window);
         }
-        if (cursors.Error() != cursorBefore && cursors.Error()) {
-            Log(L"Cursor error=" + std::to_wstring(cursors.Error()));
-            tray.CursorError(cursors.Error(), cursors.SaveFailed());
+        if (cursors->Error() != cursorBefore && cursors->Error()) {
+            Log(L"Cursor error=" + std::to_wstring(cursors->Error()));
+            tray.CursorError(cursors->Error(), cursors->SaveFailed());
         }
-        const auto bars = Taskbars();
+    }
+    void RefreshTaskbar() {
         HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
         if (primary && !IsExplorer(primary)) primary = nullptr;
         const auto probe = ProbeTaskbar(build, primary, shared ? explorerProcess.get() : nullptr, explorerPid);
@@ -384,7 +364,7 @@ public:
             AccentPolicy policy{4, 0, Recipe(mode, SystemLightTheme()).legacyColor, 0};
             const CompositionData data{19, &policy, sizeof(policy)};
             LONG result = S_OK;
-            for (const HWND taskbar : bars) {
+            for (const HWND taskbar : Taskbars()) {
                 SetLastError(ERROR_SUCCESS);
                 if (setComposition(taskbar, &data)) {
                     ++applied;
@@ -496,41 +476,38 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == ClockResultQuery) return self->shared ? Read(self->shared->clockResult) : S_OK;
         if (wParam == VolumeQuery) return self->shared ? Read(self->shared->volumeCount) : 0;
         if (wParam == VolumeResultQuery) return self->shared ? Read(self->shared->volumeResult) : S_OK;
-        if (wParam == NetworkQuery) return self->shared ? Read(self->shared->networkCount) : 0;
-        if (wParam == NetworkResultQuery) return self->shared ? Read(self->shared->networkResult) : S_OK;
-        if (wParam == NetworkGlyphQuery) return self->shared ? Read(self->shared->networkGlyph) : 0;
         if (wParam == IslandsQuery) return self->observedIslands;
         if (wParam == RetainedQuery) return self->bridgeRetained;
         if (wParam == ClockDateQuery) return self->clock.date;
         if (wParam == TrayQuery) return self->tray.Present();
-        if (wParam == CursorModeQuery) return self->cursors.Mode();
-        if (wParam == CursorAppliedQuery) return self->cursors.Applied();
-        if (wParam == CursorErrorQuery) return self->cursors.Error();
+        if (wParam == CursorModeQuery) return self->cursors->Mode();
+        if (wParam == CursorAppliedQuery) return self->cursors->Applied();
+        if (wParam == CursorErrorQuery) return self->cursors->Error();
         if (wParam == BorderQuery) return self->shared ? Read(self->shared->borderCount) : 0;
         if (wParam == LightQuery) return SystemLightTheme();
     } else if (message == TrayMessage) {
         const UINT event = LOWORD(lParam);
         if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) {
-            self->cursors.Refresh();
-            const UINT selected = self->tray.Menu(self->mode, self->cursors.Mode());
+            self->cursors->Refresh();
+            const UINT selected = self->tray.Menu(self->mode, self->cursors->Mode());
             if (selected == TrayExitCommand) PostMessageW(window, WM_CLOSE, 0, 0);
         }
         return 0;
     } else if (message == TrayThemeQueryMessage) {
-        return wParam ? static_cast<UINT>(self->autoTheme.Status()) : SystemLightTheme();
+        return wParam ? static_cast<UINT>(self->autoTheme->Status()) : SystemLightTheme();
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
     } else if (message == TrayCursorQueryMessage) {
-        return wParam == 1 ? self->cursors.Mode() : self->cursors.Available();
+        return wParam == 1 ? self->cursors->Mode() : self->cursors->Available();
     } else if (message == TrayCursorIconMessage) {
-        return reinterpret_cast<LRESULT>(self->cursors.MenuIcon(static_cast<int>(wParam)));
+        return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
         if (wParam == TrayCursorUnlockCommand) {
             const DWORD error = OpenCursorGuide();
             if (error) self->tray.UpdateNotice(L"cursor guide could not be opened", L"The cursor files folder could not be created or opened. Check your account's folder permissions.", true);
-            return self->cursors.Mode();
+            return self->cursors->Mode();
         }
         if (wParam == TrayUpdateCommand) {
             self->UpdateAction();
@@ -538,13 +515,13 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         if (wParam == TrayDateCommand) return self->ChangeDate();
         if (wParam == TrayThemeCommand) {
-            const auto state = self->autoTheme.Status();
+            const auto state = self->autoTheme->Status();
             if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {
-                self->autoTheme.Enable();
+                self->autoTheme->Enable();
                 self->Refresh();
                 return SystemLightTheme();
             }
-            const DWORD disabled = self->autoTheme.Disable();
+            const DWORD disabled = self->autoTheme->Disable();
             const auto change = disabled ? ThemeChangeResult{disabled} : SetWindowsLightTheme(state != AutoThemeStatus::Manual ? true : !SystemLightTheme());
             if (change.error) {
                 Log(L"Windows mode error=" + std::to_wstring(change.error) + L" rollback=" + std::to_wstring(change.rollbackError));
@@ -560,19 +537,26 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return static_cast<LONG>(self->mode);
         }
         if (wParam >= CursorCommandBase && wParam <= CursorCommandBase + CursorDisabled) {
-            const DWORD error = self->cursors.Select(static_cast<UINT>(wParam) - CursorCommandBase);
-            if (error) { Log(L"Cursor selection error=" + std::to_wstring(error)); self->tray.CursorError(error, self->cursors.SaveFailed()); }
+            const DWORD error = self->cursors->Select(static_cast<UINT>(wParam) - CursorCommandBase);
+            if (error) { Log(L"Cursor selection error=" + std::to_wstring(error)); self->tray.CursorError(error, self->cursors->SaveFailed()); }
         }
-        return self->cursors.Mode();
+        return self->cursors->Mode();
     } else if (message == WM_TIMER) {
         if (wParam == UpdateTimer) { self->PollUpdate(); return 0; }
+        if (wParam == FastAttachTimer) { self->FastAttach(); return 0; }
         if (wParam == DebounceTimer) KillTimer(window, DebounceTimer);
         self->Refresh();
         return 0;
     } else if (message == self->taskbarCreated || message == WM_DISPLAYCHANGE
         || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DWMCOMPOSITIONCHANGED
         || message == WM_DPICHANGED) {
-        if (message == self->taskbarCreated) self->tray.ShellRestarted();
+        if (message == self->taskbarCreated) {
+            self->tray.ShellRestarted();
+            self->attachStarted = GetTickCount64();
+            self->Refresh();
+            SetTimer(window, FastAttachTimer, 100, nullptr);
+            return 0;
+        }
         SetTimer(window, DebounceTimer, 300, nullptr);
         return 0;
     } else if (message == WM_POWERBROADCAST) {
@@ -631,6 +615,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
     Controller app;
+    // Apply before download housekeeping, tray artwork, or cursor refresh.
+    app.RefreshTaskbar();
+    app.autoTheme = std::make_unique<AutoTheme>();
+    app.cursors = std::make_unique<CursorManager>();
     CleanupUpdateDownloads();
     DWORD updateError = 0, updateBytes = sizeof(updateError);
     if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\jellyflower", L"UpdateError", RRF_RT_REG_DWORD,
@@ -655,6 +643,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     Log(L"Started pid=" + std::to_wstring(GetCurrentProcessId()));
     app.Refresh();
+    SetTimer(window, FastAttachTimer, 100, nullptr);
     MSG message{};
     BOOL result = 0;
     while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
