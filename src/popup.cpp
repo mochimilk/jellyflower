@@ -7,6 +7,7 @@
 #include "version.hpp"
 #include "menu_surface.hpp"
 #include "menu_style.hpp"
+#include "menu_material.hpp"
 #include "menu_text.hpp"
 #include "auto_theme.hpp"
 #include "cursor_icon.hpp"
@@ -51,7 +52,10 @@ std::vector<Row> RootRows(AcrylicMode mode, bool date, bool light, UINT mask) {
         {TrayToggleCommand, L"acrylic", false, false, AcrylicModeName(mode)},
         {TrayDateCommand, L"date", false, false, date ? L"on" : L"off"},
         HasCursorPack(mask) ? Row{TrayCursorCommand, L"cursor"} : Row{TrayCursorUnlockCommand, L"colors", false, false, L"unlock"},
-        {TrayUpdateCommand, std::wstring(L"v") + AppVersion, true}, {TrayExitCommand, L"exit"}};
+        {TrayGeneralCommand, L"general", true}};
+}
+std::vector<Row> GeneralRows() {
+    return {{TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit"}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -79,7 +83,7 @@ std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     result->UnlockBits(&target);
     return result;
 }
-bool HasSubmenu(UINT command) { return command == TrayCursorCommand; }
+bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayGeneralCommand; }
 struct Popup;
 Popup* activePopup = nullptr;
 LRESULT CALLBACK PopupProc(HWND, UINT, WPARAM, LPARAM);
@@ -97,7 +101,7 @@ struct Popup {
     UINT textFallbacks = 0;
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
-    HICON packageIcon = nullptr, packageOpenIcon = nullptr;
+    HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -134,6 +138,7 @@ struct Popup {
         if (updateIcon) DestroyIcon(updateIcon);
         if (packageIcon) DestroyIcon(packageIcon);
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
+        if (generalIcon) DestroyIcon(generalIcon);
         for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
@@ -170,6 +175,7 @@ struct Popup {
     void HideBranch() {
         CompleteEntrance();
         closing = true;
+        if (window) KillTimer(window, UpdateSpinnerTimer);
         if (child) child->HideBranch();
         if (window) ShowWindow(window, SW_HIDE);
     }
@@ -222,7 +228,7 @@ struct Popup {
         if (UpdateBusy(state) && updateStatus != state) updateStarted = GetTickCount64();
         updateStatus = state;
         if (window) {
-            if (UpdateBusy(state)) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+            if (kind == TrayGeneralCommand && IsWindowVisible(window) && UpdateBusy(state)) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
             else KillTimer(window, UpdateSpinnerTimer);
         }
         for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayUpdateCommand) {
@@ -230,6 +236,7 @@ struct Popup {
             if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
         }
         RepaintButtons();
+        if (child) child->RefreshUpdate();
     }
     void RefreshCursors() {
         auto* root = Root();
@@ -252,7 +259,7 @@ struct Popup {
                 if (hasCursorPack) KillTimer(window, ColorPreviewTimer);
                 else SetTimer(window, ColorPreviewTimer, 650, nullptr);
             }
-            if (!hasCursorPack && child) CloseChild(false);
+            if (!hasCursorPack && child && child->kind == TrayCursorCommand) CloseChild(false);
         }
         for (size_t i = 0; i < rows.size(); ++i) {
             auto& row = rows[i];
@@ -275,7 +282,7 @@ struct Popup {
         highContrast = high;
         const COLORREF bg = high ? GetSysColor(COLOR_MENU) : light ? RGB(249, 249, 249) : RGB(32, 32, 32);
         if (high) light = GetRValue(bg) + GetGValue(bg) + GetBValue(bg) > 384;
-        border = high ? GetSysColor(COLOR_MENUTEXT) : light ? RGB(210, 210, 210) : RGB(69, 69, 69);
+        border = high ? GetSysColor(COLOR_MENUTEXT) : MenuBorder(light);
         const HBRUSH nextBackground = CreateSolidBrush(bg);
         const HBRUSH nextHighlight = CreateSolidBrush(high ? GetSysColor(COLOR_HIGHLIGHT) : light ? RGB(234, 234, 234) : RGB(54, 54, 54));
         const HBRUSH nextSeparator = CreateSolidBrush(border);
@@ -299,16 +306,13 @@ struct Popup {
                 systemLight ? (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK) : (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK),
                 darkInk ? IDI_CALENDAR_OFF_LIGHT : IDI_CALENDAR_OFF_DARK,
                 darkInk ? IDI_CALENDAR_LIGHT : IDI_CALENDAR_DARK,
-                darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
-                darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
-                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK};
-            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &dateIcons[0], &dateIcons[1], &updateIcon, &packageIcon, &packageOpenIcon};
+                darkInk ? IDI_SETTINGS_LIGHT : IDI_SETTINGS_DARK};
+            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &dateIcons[0], &dateIcons[1], &generalIcon};
             for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
                 if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
             }
-            if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
             RefreshCursorIcon();
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayThemeCommand) {
                 const auto automatic = static_cast<AutoThemeStatus>(SendMessageW(controller, TrayThemeQueryMessage, 1, 0));
@@ -318,7 +322,20 @@ struct Popup {
                     : automatic == AutoThemeStatus::Error ? L"try again" : systemLight ? L"light" : L"dark";
                 if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
             }
-            if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1]) return false;
+            if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1] || !generalIcon) return false;
+        } else if (kind == TrayGeneralCommand) {
+            const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
+            const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
+                darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
+                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK};
+            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon};
+            for (size_t i = 0; i < std::size(resources); ++i) {
+                const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
+                    MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
+                if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
+            }
+            if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
+            if (!updateIcon || !packageIcon || !packageOpenIcon) return false;
         }
         if (window) {
             const BOOL dark = !light;
@@ -346,7 +363,7 @@ struct Popup {
         struct Data { int attribute; void* data; SIZE_T size; };
         using Set = BOOL(WINAPI*)(HWND, const Data*);
         const auto set = reinterpret_cast<Set>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
-        Policy policy{state, 0, light ? 0xB8F9F9F9u : 0xB8202020u, 0};
+        Policy policy{state, 0, MenuTint(light), 0};
         const Data data{19, &policy, sizeof(policy)};
         return set && set(window, &data);
     }
@@ -391,14 +408,17 @@ struct Popup {
             child = std::make_unique<Popup>();
             childIndex = index;
             child->parent = this;
+            child->controller = controller;
             child->kind = command;
             child->dpi = dpi;
             child->light = light;
             child->systemLight = systemLight;
             child->hoverDelay = hoverDelay;
             auto* root = Root();
-            const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
-            child->rows = CursorRows(mask, root->cursorMode);
+            if (command == TrayCursorCommand) {
+                const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
+                child->rows = CursorRows(mask, root->cursorMode);
+            } else child->rows = GeneralRows();
             RECT bounds{}, row{};
             GetWindowRect(window, &bounds);
             GetWindowRect(buttons[static_cast<size_t>(index)], &row);
@@ -409,7 +429,8 @@ struct Popup {
         child->closing = false;
         ShowWindow(child->window, SW_SHOWNORMAL);
         SetForegroundWindow(child->window);
-        const UINT selected = std::min(Root()->cursorMode, CursorDisabled);
+        child->RefreshUpdate();
+        const UINT selected = command == TrayCursorCommand ? std::min(Root()->cursorMode, CursorDisabled) : 0;
         child->Focus(static_cast<int>(selected));
         child->keyboard = fromKeyboard;
         child->RepaintButtons();
@@ -499,6 +520,13 @@ struct Popup {
             MenuSurface::Text(dc,bounds,label,font,ink,flags);
         }
     }
+    COLORREF LabelInk(const Row& row, bool highlighted) const {
+        if (!row.enabled) return GetSysColor(COLOR_GRAYTEXT);
+        // Preserve Windows contrast-theme colors, including the focus highlight.
+        if (row.command == TrayExitCommand && !highContrast)
+            return light ? RGB(164, 38, 44) : RGB(255, 153, 164);
+        return highlighted ? highlightedText : text;
+    }
     void DrawButtonContent(const DRAWITEMSTRUCT& item, ULONGLONG frameTime) {
         const auto found = std::find(buttons.begin(), buttons.end(), item.hwndItem);
         if (found == buttons.end()) return;
@@ -514,7 +542,7 @@ struct Popup {
             SelectObject(item.hDC, oldBrush);
         }
         const auto oldFont = SelectObject(item.hDC, font);
-        const COLORREF ink = !row.enabled ? GetSysColor(COLOR_GRAYTEXT) : highlighted ? highlightedText : text;
+        const COLORREF ink = LabelInk(row, highlighted);
         SetBkMode(item.hDC, TRANSPARENT);
         SetTextColor(item.hDC, ink);
         RECT bounds = item.rcItem;
@@ -540,7 +568,7 @@ struct Popup {
         const int cy = menuText.InkCenter(row.label,bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
-            : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayUpdateCommand
+            : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayGeneralCommand ? generalIcon : row.command == TrayUpdateCommand
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon) : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
@@ -634,7 +662,7 @@ struct Popup {
         const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(MenuEdgeGap), area.top,
             std::max(area.top, area.bottom - height));
         restingBounds = {x, y, x + width, y + height};
-        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : L"jellyflower",
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : kind == TrayGeneralCommand ? L"general" : L"jellyflower",
             WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;
@@ -657,7 +685,7 @@ struct Popup {
             if (!SetWindowSubclass(button, ButtonProc, i, reinterpret_cast<DWORD_PTR>(this))) return false;
             top += rowHeight;
         }
-        if (!parent && UpdateBusy(updateStatus)) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+        RefreshUpdate();
         if (!parent) {
             constexpr COLORREF fills[]{RGB(250,250,250), RGB(40,40,40), RGB(145,170,240), RGB(148,182,104), RGB(129,216,184), RGB(244,143,167), RGB(230,170,100), RGB(245,229,179), RGB(231,194,218)};
             for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));

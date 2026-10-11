@@ -1,0 +1,4 @@
+LIBRARY "jellyflower-start-v1"
+EXPORTS
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -78,3 +78,13 @@ The native fixtures validate the adapter on a shell-shaped XAML tree and actual 
 1. Update from 0.16.3 through the version row. On automatic relaunch, confirm v0.16.4 and the earlier menu text appearance. No sign-out, Explorer restart or reboot is needed for this controller-only change.
 2. In both themes at 100/125/150/175/200% scaling, check the root menu and cursor submenu for crisp text, complete labels, right-aligned secondary text and centered icons. Font family, size and weight must come from the Windows menu settings; the app no longer defines Fluent Body/Segoe UI Variable/14 DIP/20-DIP line height. Check the native Windows GUI-font fallback if metrics cannot be queried in a controlled test.
 3. Confirm acrylic, date, system and update states still render, settings keep the menu open, outside clicks close it, and translucency/hover/entrance animation are retained. The clock, fast login startup, cursor choices and native network icons should behave as in 0.16.3.
+
+## 27. General submenu (0.16.5)
+
+1. The main menu ends with general and its settings gear; update and exit appear only inside it. Test mouse hover/click, Right/Left/Escape, branch switching with cursor, outside clicks and toggling the flower. General must stay open across cursor-pack refreshes even when no pack is installed.
+2. The update row shows v0.16.5. Check current/error/checking states and an available newer test release: download is the secondary label; the package opens and the busy icon rotates during checking/downloading/installing. Results update inside general without reopening. A failed check retains the menu.
+3. Exit is red in light/dark modes, including hover and keyboard focus; contrast themes use Windows colors. Exit must close both menus and stop the controller through its normal restoration path. Compare both themes at 100/125/150/175/200% DPI. Font metrics are still inherited from Windows.
+
+## 28. Start menu acrylic (0.16.5)
+
+Follow START_MENU.md's acceptance checks for matching colors/stroke, native Start behavior, both themes, scaling, disabled transparency/high contrast, exit/controller-loss restoration, relaunch/update/uninstall, Start host recovery and battery policy. API success is not a visual blur guarantee. No Explorer/Start restart is required when updating from 0.16.4.

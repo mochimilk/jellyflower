@@ -112,7 +112,7 @@ def app_icon(svg, size, light):
 
 
 if __name__ == '__main__':
-    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'calendar', 'calendar-off', 'flower', 'update', 'package', 'package-open'):
+    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'calendar', 'calendar-off', 'flower', 'update', 'package', 'package-open', 'settings'):
         svg = ET.parse(assets / f'{name}.svg')
         elements = list(shapes(svg))
         if name == 'flower':

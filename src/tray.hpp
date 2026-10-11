@@ -17,6 +17,7 @@ inline constexpr UINT TrayDateCommand = 6;
 inline constexpr UINT TrayDateQueryMessage = WM_APP + 47;
 inline constexpr UINT TrayUpdateQueryMessage = WM_APP + 48;
 inline constexpr UINT TrayUpdateCommand = 8;
+inline constexpr UINT TrayGeneralCommand = 10;
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
 
 class TrayIcon {

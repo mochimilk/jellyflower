@@ -15,3 +15,5 @@ Write-Host 'hiddenVolumeIcons counts hidden speaker glyphs. Battery and the Quic
 Write-Host 'bridgeRetained means a live Explorer connection is being kept across transient layout changes. taskbarXamlIslands is a discovery count, not a blur measurement.'
 
 Write-Host 'clockDate reports the saved date toggle. The single-line clock uses the native Windows system font.'
+
+Write-Host 'startSurfaces/startAttached count accepted Start background layers/connection. Inspect Start visually; startLastResult reports an HRESULT.'

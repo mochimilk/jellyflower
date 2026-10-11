@@ -1,12 +1,12 @@
 # jellyflower
 
-A small native Windows utility for an acrylic taskbar, a single-line clock, and cursor colors. Open the flower under **show hidden icons** to use its lowercase acrylic menu. Click the flower again or click outside to close it. Setting changes keep the menu open.
+A small native Windows utility for an acrylic taskbar, a single-line clock, cursor colors, and matching Start menu acrylic. Open the flower under **show hidden icons** to use its lowercase acrylic menu. Click the flower again or click outside to close it. Setting changes keep the menu open.
 
 ## Download and install
 
 Download [jellyflower-setup-x64.exe](https://github.com/mochimilk/jellyflower/releases/latest/download/jellyflower-setup-x64.exe) from [GitHub Releases](https://github.com/mochimilk/jellyflower/releases), then double-click it. No compiler, PowerShell commands, administrator rights, or runtime download is required.
 
-Setup installs into `%LOCALAPPDATA%\Programs\jellyflower`, adds a Start menu shortcut, enables login startup for your Windows account, and launches the app. Quit TranslucentTB first. Windows Settings > Apps > Installed apps > jellyflower removes startup and restores the taskbar. Exit in the tray menu stops it for this session and restores the clock, speaker, taskbar material, and configured Windows cursor scheme.
+Setup installs into `%LOCALAPPDATA%\Programs\jellyflower`, adds a Start menu shortcut, enables login startup for your Windows account, and launches the app. Quit TranslucentTB first. Windows Settings > Apps > Installed apps > jellyflower removes startup and restores the taskbar. General > exit stops it for this session and restores Start styling, the clock, speaker, taskbar material, and configured Windows cursor scheme.
 
 Startup uses a normal-user Task Scheduler logon task named `jellyflower-<your SID>`, with no added trigger delay, password, elevation, network/idle requirement, or battery restriction. It has no execution time limit. A matching Run entry remains as a delayed fallback and protects upgrades from obsolete uninstallers; duplicate launches immediately exit through the session mutex. To disable automatic launch manually, disable this task in Task Scheduler and the fallback in Startup apps. Uninstall removes both. Jellyflower applies the taskbar before cursor-pack validation and download housekeeping, retries shell discovery every 100 ms for up to 30 seconds, then returns to five-second maintenance. Windows can still display its normal taskbar before this user app attaches; zero visible default frames cannot be guaranteed.
 
@@ -20,8 +20,9 @@ The installer and EXE are currently unsigned. The first downloadable build is x6
 | acrylic | Cycles the right-side status through `system`, `pure`, and `off`. Startup uses `system`: white tint in light mode, neutral dark tint in dark mode. Pure has no tint. |
 | date | Toggles the date in the single-line clock, with `on` or `off` at the right and the matching calendar icon. |
 | colors / cursor | Before import: `colors` with `unlock` at the right opens a text guide and your import folder; its preview cycles through colors. After import: `cursor` opens the color choices, default (system), and disable. There is no redundant unlock row. |
-| v0.16.4 | Shows your installed version. Select it to check GitHub. When it says `available`, select it again to download, verify, install, and relaunch inside jellyflower. |
-| exit | Stops jellyflower and restores the shell appearance. Login startup remains enabled. |
+| general | Opens the version/update row and exit, with the supplied settings gear. |
+
+Inside **general**, `v0.16.5` shows the installed version. Select it to check GitHub; when the secondary label says `download`, select it again to verify, install, and relaunch inside jellyflower. **exit** uses red text in light/dark modes, respects Windows contrast colors, restores the shell appearance and leaves login startup enabled.
 
 The clock reads `Mon Jun 22  9:41 am`, with lowercase am/pm, retaining Windows' calendar button and tooltip. The clock follows the native Windows system font. Custom fonts and the clock/font submenus have been removed; old font selections are ignored. On supported Windows 11 layouts the speaker glyph is hidden while battery and Quick Settings remain. Wi-Fi/Ethernet and offline icons use Windows' normal artwork; the former Element 2 replacement has been removed. Win+A still provides the volume slider. The show-hidden-icons chevron uses 60% opacity. An active acrylic mode hides the taskbar's top border.
 
@@ -30,6 +31,12 @@ The tray uses the supplied filled flower silhouette with a transparent center an
 Menus use native accent acrylic with an explicit translucent theme tint; Windows' default transient material was almost opaque on some builds. One foreground surface preserves text/icon alpha. Primary and secondary labels inherit Windows' menu font family, size and weight, with no app-defined typeface or text style. DirectWrite/Direct2D preserves those Windows metrics and draws native grayscale text on the translucent surface; the Windows GUI font is the fallback if the menu-metrics query fails. Root menus reserve 12 DIP at the work-area edges and rise 32 DIP over 250 ms with Microsoft's documented Direct Entrance cubic-bezier(0,0,0,1). Motion is skipped when Windows disables menu/client animations or in high contrast. This follows Fluent guidance; Microsoft does not publicly specify the exact taskbar flyout timing. Submenus keep their existing immediate/delayed hover behavior. High contrast, disabled transparency, unsupported systems, and compositor/power policy can produce a solid fallback. This accent API is undocumented and may change with Windows.
 
 System taskbar acrylic exposes more wallpaper with light tint 0.58, dark tint 0.34, and brightness-layer opacity 0.72; legacy alpha is 184/255. The brightness layer still protects text contrast.
+
+## Start menu acrylic
+
+On supported Windows 11 Start layouts, jellyflower also applies desktop acrylic to Start's outer background and removes its opaque overlay. It shares the menu's light/dark tint colors, 184/255 tint opacity, border colors, and rounded styling. Start retains its native contents, layout, search, keyboard navigation and animations. This runs independently of the taskbar-only acrylic selector. Exiting restores the original background, overlay, border values and bindings; controller loss is checked about once a second while Start's UI thread runs. Disabled Windows transparency and high contrast restore the stock surface.
+
+A separate small XAML diagnostics helper connects to StartMenuExperienceHost without replacing Start, requiring Windhawk, or restarting it. The connection runs in the background after taskbar attachment. Windows updates can change private element names; unknown surfaces are left alone. DWM menu acrylic and XAML Start acrylic use different blur pipelines, so matching inputs are not a promise of identical pixels. Windows compositor/battery policy can still select a solid fallback. See [START_MENU.md](docs/START_MENU.md) for research, test steps and limitations.
 
 ## Automatic system theme
 
@@ -79,7 +86,7 @@ Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CM
 
 Double-click `dist\x64\jellyflower-setup-x64.exe` to install. To build ARM64, install its C++ tools and run `Build.ps1 -Architecture ARM64`. Checked-in ICO files and native cursor geometry mean Python and SVG libraries are optional, only needed for regenerating artwork. The C++ runtime is linked statically; Windows supplies the remaining libraries.
 
-To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second recovery timer complements system and shell events. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
+To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge.dll`, `jellyflower-start-v1.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second recovery timer complements system and shell events. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
 
 The GitHub workflow builds x64 and ARM64 and publishes tagged releases. `Publish.ps1` publishes the first local x64 build using the maintainer's normal GitHub CLI login. [UPDATES.md](docs/UPDATES.md) documents the release process.
 

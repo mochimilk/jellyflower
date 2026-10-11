@@ -126,7 +126,7 @@ const wchar_t* UpdateStatusLabel(UpdateStatus status) noexcept {
     case UpdateStatus::Downloading: return L"downloading...";
     case UpdateStatus::Ready: case UpdateStatus::Installing: return L"installing...";
     case UpdateStatus::Current: return L"up to date";
-    case UpdateStatus::Available: return L"available";
+    case UpdateStatus::Available: return L"download";
     case UpdateStatus::NoRelease: return L"no release yet";
     case UpdateStatus::Error: return L"try again";
     default: return L"";

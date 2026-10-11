@@ -13,6 +13,7 @@
 #include "update_download.hpp"
 #include "version.hpp"
 #include "startup.hpp"
+#include "start_session.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <algorithm>
@@ -118,7 +119,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[19]{};
+    LONG values[22]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -158,6 +159,9 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"taskbarXamlIslands\": " << values[16]
         << ",\n  \"bridgeRetained\": " << (values[17] ? "true" : "false")
         << ",\n  \"clockDate\": " << (values[18] ? "true" : "false")
+        << ",\n  \"startSurfaces\": " << values[19]
+        << ",\n  \"startAttached\": " << values[20]
+        << ",\n  \"startLastResult\": " << values[21]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -172,6 +176,7 @@ public:
     HWND window = nullptr;
     AcrylicMode mode = AcrylicMode::System;
     TrayIcon tray;
+    StartSession start;
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
     AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
@@ -306,6 +311,7 @@ public:
     void Refresh() {
         RefreshAutoTheme();
         RefreshTaskbar();
+        start.Refresh(SystemLightTheme());
         tray.Refresh(window, mode);
         const DWORD cursorBefore = cursors->Error();
         cursors->Refresh();
@@ -465,6 +471,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     }
     if (!self) return DefWindowProcW(window, message, wParam, lParam);
     if (message == QueryMessage) {
+        if (wParam == StartCountQuery) return self->start.Count();
+        if (wParam == StartAttachedQuery) return self->start.Attached();
+        if (wParam == StartResultQuery) return self->start.Result();
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult

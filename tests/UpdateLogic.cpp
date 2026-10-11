@@ -15,6 +15,7 @@ int wmain(int argc, wchar_t** argv) {
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
+        Check(std::wstring(UpdateStatusLabel(UpdateStatus::Available))==L"download", "available update uses download label");
         Check(NewerVersion(L"v0.14.0", L"0.13.0"), "minor update");
         Check(NewerVersion(L"v0.13.10", L"0.13.9"), "numeric ordering");
         Check(!NewerVersion(L"v0.13.0", L"0.13.0"), "equal version");

@@ -57,6 +57,37 @@ void NativeTextChecks(Popup& popup) {
         Check(std::abs(center-pixelCenter)<=1,"icon alignment follows the native glyph ink rather than GDI metrics");
     }
 }
+double Contrast(COLORREF a,COLORREF b) {
+    auto luminance=[](COLORREF color){
+        auto channel=[](BYTE value){const double c=value/255.0;return c<=.04045?c/12.92:std::pow((c+.055)/1.055,2.4);};
+        return .2126*channel(GetRValue(color))+.7152*channel(GetGValue(color))+.0722*channel(GetBValue(color));
+    };
+    const auto first=luminance(a),second=luminance(b);return (std::max(first,second)+.05)/(std::min(first,second)+.05);
+}
+void ExitTextChecks(Popup& popup) {
+    const auto& row=popup.rows[1];
+    const COLORREF ink=popup.LabelInk(row,false);
+    Check(GetRValue(ink)>GetGValue(ink)+25 && GetRValue(ink)>GetBValue(ink)+25,"exit uses a distinct red in each theme");
+    LOGBRUSH base{},hover{};GetObjectW(popup.background,sizeof(base),&base);GetObjectW(popup.highlight,sizeof(hover),&hover);
+    Check(Contrast(ink,base.lbColor)>=4.5 && Contrast(ink,hover.lbColor)>=4.5,"exit red has readable contrast on base and hover surfaces");
+    RECT bounds{};GetClientRect(popup.window,&bounds);
+    for(int interaction=0;interaction<3;++interaction) {
+        popup.hovered=interaction==1?1:-1;popup.keyboard=interaction==2;
+        if(interaction==2) SetFocus(popup.buttons[1]);
+        MenuSurface surface(nullptr,bounds,false);popup.Paint(surface.Dc());GdiFlush();
+        RECT exit{};GetWindowRect(popup.buttons[1],&exit);MapWindowPoints(nullptr,popup.window,reinterpret_cast<POINT*>(&exit),2);
+        size_t red=0;
+        for(LONG y=exit.top;y<exit.bottom;++y) for(LONG x=exit.left+popup.Px(34);x<exit.right-popup.Px(24);++x) {
+            const DWORD pixel=surface.pixels[static_cast<size_t>(y)*bounds.right+x];
+            const auto r=(pixel>>16)&255,g=(pixel>>8)&255,b=pixel&255;
+            if((pixel>>24)>=240 && r>g+25 && r>b+25) ++red;
+        }
+        Check(red>5,"production exit label paints red when idle, hovered and keyboard focused");
+    }
+    popup.highContrast=true;popup.highlightedText=RGB(25,235,70);
+    Check(popup.LabelInk(row,false)==popup.text && popup.LabelInk(row,true)==popup.highlightedText,"contrast themes retain Windows normal and highlight text colors");
+    popup.highContrast=false;popup.UpdateTheme(light);popup.hovered=-1;popup.keyboard=false;
+}
 LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other) {
     if (message == TrayThemeQueryMessage) return parameter ? static_cast<UINT>(AutoThemeStatus::Manual) : light;
     if (message == TrayDateQueryMessage) return dateEnabled;
@@ -94,7 +125,10 @@ void Capture(Popup& popup, const std::filesystem::path& path) {
             for(int shift : {0,8,16}) composed |= std::min<DWORD>(255,((pixel>>shift)&255)+base*(255-alpha)/255)<<shift;
             rgba[i]=composed;
         }
-        Check(empty>count/2 && solid>100 && edges>100,"background reveals acrylic while text/icons retain solid and antialiased coverage");
+        // In a two-row general menu the focus pill makes one label opaque;
+        // its remaining exit text supplies fewer translucent edge pixels.
+        Check(empty>count/2 && solid>100 && edges>(popup.kind==TrayGeneralCommand?20u:100u),
+            "background reveals acrylic while text/icons retain solid and antialiased coverage");
     }
     BITMAPFILEHEADER header{};header.bfType=0x4d42;header.bfOffBits=sizeof(header)+sizeof(info.bmiHeader);
     const DWORD bytes=bounds.right*bounds.bottom*4;header.bfSize=header.bfOffBits+bytes;
@@ -164,6 +198,7 @@ int wmain(int argc,wchar_t** argv) {
             cursorMask=1u<<CursorDisabled;
             popup.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
             Check(popup.Create(controller,{100,100},false),"native popup created");
+            ShowWindow(popup.window,SW_SHOWNORMAL);SetForegroundWindow(popup.window);
             Check(popup.acrylic,"Windows accepts explicit acrylic on root menu");
             LOGFONTW font{};GetObjectW(popup.font,sizeof(font),&font);
             Check(font.lfQuality==ANTIALIASED_QUALITY,"Windows font uses grayscale smoothing for glass");
@@ -184,30 +219,52 @@ int wmain(int argc,wchar_t** argv) {
             Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"date-off-light-":L"date-off-dark-")+std::to_wstring(dpi)+L".bmp"));
             popup.Activate(2,false);
             Check(dateEnabled && popup.clockDate && popup.rows[2].secondary==L"on" && popup.window==same && !popup.done,"date on updates in place");
-            popup.Activate(4,false);
-            Check(state==UpdateStatus::Checking && popup.window==same && !popup.done,"check starts while keeping menu alive");
+            Check(popup.rows.size()==5 && popup.rows[4].command==TrayGeneralCommand && popup.rows[4].label==L"general"
+                && HasSubmenu(popup.rows[4].command) && popup.generalIcon,"general replaces root update/exit and has the supplied gear icon");
+            Check(std::none_of(popup.rows.begin(),popup.rows.end(),[](const Row& row){return row.command==TrayUpdateCommand || row.command==TrayExitCommand;}),"update and exit only appear inside general");
+            Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"root-light-":L"root-dark-")+std::to_wstring(dpi)+L".bmp"));
+            popup.Activate(4,true);
+            Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows.size()==2,"general submenu opens with exactly two actions");
+            auto& general=*popup.child;
+            const HWND generalWindow=general.window;
+            Check(general.rows[0].command==TrayUpdateCommand && general.rows[1].command==TrayExitCommand
+                && GetFocus()==general.buttons[0],"general opens at version row, independent of cursor selection");
+            Check(general.packageIcon && general.packageOpenIcon && general.updateIcon,"general owns themed update artwork");
+            popup.RefreshCursors();Check(IsWindowVisible(generalWindow),"no-pack cursor refresh does not close general");
+            general.Activate(0,false);
+            Check(state==UpdateStatus::Checking && popup.window==same && general.window==generalWindow && !popup.done,"check starts inside general while keeping both menus alive");
             for (const auto result : {UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing}) {
                 state=result;popup.RefreshUpdate();
-                Check(popup.rows[4].label == std::wstring(L"v") + AppVersion,"installed version remains primary label for every update state");
-                const int label=popup.menuText.Width(popup.rows[4].label),secondary=popup.menuText.Width(popup.rows[4].secondary);
-                RECT bounds{};GetClientRect(popup.buttons[4],&bounds);
-                Check(label+secondary+popup.Px(34+12+12)<bounds.right,"native text measurements fit without overlap");
-                wchar_t accessible[256]{};GetWindowTextW(popup.buttons[4],accessible,256);
-                Check(std::wstring(accessible).find(UpdateStatusLabel(result))!=std::wstring::npos,"accessible update state reflects result");
-                const auto name=std::wstring(light?L"light-":L"dark-")+std::to_wstring(dpi)+L"-"+std::to_wstring(static_cast<UINT>(result))+L".bmp";
-                Capture(popup,std::filesystem::path(argv[1])/name);
-                if (result == UpdateStatus::Checking) {
-                    Check(popup.spinnerBitmap && popup.spinnerBitmap->GetLastStatus()==Gdiplus::Ok,"spinner bitmap loaded");
-                    Gdiplus::Color corner;popup.spinnerBitmap->GetPixel(0,0,&corner);
-                    Check(corner.GetAlpha()==0,"spinner retains transparent corners");
-                    popup.updateStarted -= 125;
-                    Capture(popup,std::filesystem::path(argv[1])/(L"spin-"+name));
+                Check(general.updateStatus==result && general.rows[0].label==std::wstring(L"v")+AppVersion,"root refresh reaches general and preserves installed version label");
+                if(result==UpdateStatus::Available) Check(general.rows[0].secondary==L"download","available update presents download action");
+                const int label=general.menuText.Width(general.rows[0].label),secondary=general.menuText.Width(general.rows[0].secondary);
+                RECT bounds{};GetClientRect(general.buttons[0],&bounds);
+                Check(label+secondary+general.Px(34+12+12)<bounds.right,"native text measurements fit without overlap");
+                wchar_t accessible[256]{};GetWindowTextW(general.buttons[0],accessible,256);
+                Check(std::wstring(accessible).find(UpdateStatusLabel(result))!=std::wstring::npos,"accessible general update state reflects result");
+                const auto name=std::wstring(light?L"general-light-":L"general-dark-")+std::to_wstring(dpi)+L"-"+std::to_wstring(static_cast<UINT>(result))+L".bmp";
+                Capture(general,std::filesystem::path(argv[1])/name);
+                if(result==UpdateStatus::Checking) {
+                    Check(general.spinnerBitmap && general.spinnerBitmap->GetLastStatus()==Gdiplus::Ok,"nested spinner bitmap loaded");
+                    Gdiplus::Color corner;general.spinnerBitmap->GetPixel(0,0,&corner);
+                    Check(corner.GetAlpha()==0,"nested spinner retains transparent corners");
+                    general.updateStarted-=125;
+                    Capture(general,std::filesystem::path(argv[1])/(L"spin-"+name));
                 }
             }
-            Popup cursors;cursors.controller=controller;cursors.parent=&popup;cursors.kind=TrayCursorCommand;cursors.dpi=dpi;cursors.light=light;cursors.systemLight=light;
+            ExitTextChecks(general);
+            general.Key(VK_LEFT);Check(!IsWindowVisible(generalWindow) && !popup.done,"left arrow closes general without dismissing root");
+            state=UpdateStatus::Available;popup.RefreshUpdate();popup.Activate(4,true);
+            Check(popup.child->window==generalWindow && popup.child->rows[0].secondary==L"download","reopening general preserves latest update state");
+            popup.child->Key(VK_ESCAPE);Check(!IsWindowVisible(generalWindow) && !popup.done,"escape closes nested general only");
+            popup.child->HideBranch();popup.child.reset();
+            popup.child=std::make_unique<Popup>();popup.childIndex=3;
+            auto& cursors=*popup.child;
+            cursors.controller=controller;cursors.parent=&popup;cursors.kind=TrayCursorCommand;cursors.dpi=dpi;cursors.light=light;cursors.systemLight=light;
             cursorMask=1u<<CursorDisabled;cursors.rows=CursorRows(cursorMask,CursorDisabled);
             Check(cursors.Create(popup.window,{100,100},true),"cursor submenu created");
             Check(cursors.acrylic,"nested menu also requests acrylic");
+            ShowWindow(cursors.window,SW_SHOWNORMAL);SetForegroundWindow(cursors.window);
             const HWND submenu=cursors.window;
             const UINT before=settings;cursors.Activate(1,false);
             Check(settings==before,"disabled cursor cannot invoke selection");
@@ -220,9 +277,14 @@ int wmain(int argc,wchar_t** argv) {
             for(size_t i=0;i<10;++i) Check(IsWindowEnabled(cursors.buttons[i]),"import enables custom choices");
             Check(cursors.window==submenu && !cursors.done && cursors.rows[10].checked,"import keeps submenu and Windows selection");
             Capture(cursors,std::filesystem::path(argv[1])/(std::wstring(light?L"unlocked-light-":L"unlocked-dark-")+std::to_wstring(dpi)+L".bmp"));
+            Check(!popup.done,"menu still live after cursor fixture interaction");
             popup.highContrast=true;popup.ConfigureBackdrop();
             Check(!popup.acrylic,"high contrast uses a solid fallback");
             popup.highContrast=false;popup.ConfigureBackdrop();Check(popup.acrylic,"acrylic recovers after fallback");
+            popup.OpenChild(3,true);Check(popup.child && popup.child->kind==TrayCursorCommand && !popup.done,"cursor replaces the previous general branch");
+            popup.OpenChild(4,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[0].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
+            popup.child->Activate(1,true);
+            Check(popup.done && popup.result==TrayExitCommand && !IsWindowVisible(popup.child->window),"nested exit returns the existing controller shutdown command and dismisses every menu");
         }
         Check(MenuEntranceProgress(0)==0 && MenuEntranceProgress(1)==1,"entrance curve endpoints");
         Check(std::abs(MenuEntranceProgress(.125)-.5)<.000001,"bezier x inversion matches analytic control point curve");
@@ -243,7 +305,7 @@ int wmain(int argc,wchar_t** argv) {
         }
         if(argc==3 && wcscmp(argv[2],L"--compositor")==0) Compositor(controller,argv[1]);
         DestroyWindow(controller);
-        std::cout<<"PASS: Windows menu typography at 96/120/144/168/192 DPI in both themes; native DirectWrite alpha/ink alignment, root date/icon toggles, acrylic/fallback, version/update states/spinner frames, cursor actions and keyboard selection.\n";
+        std::cout<<"PASS: Windows menu typography at 96/120/144/168/192 DPI in both themes; native DirectWrite alpha/ink alignment, root date/icon toggles, general submenu/update propagation/spinner frames/red exit, branch switching, acrylic/fallback, cursor actions and keyboard selection.\n";
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
