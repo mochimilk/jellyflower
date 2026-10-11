@@ -3,7 +3,6 @@
 #include "bridge_notify.hpp"
 #include "taskbar_probe.hpp"
 #include "clock_options.hpp"
-#include "clock_font.hpp"
 #include "tray.hpp"
 #include "cursors.hpp"
 #include "theme.hpp"
@@ -150,7 +149,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[20]{};
+    LONG values[19]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -190,10 +189,6 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"taskbarXamlIslands\": " << values[16]
         << ",\n  \"bridgeRetained\": " << (values[17] ? "true" : "false")
         << ",\n  \"clockDate\": " << (values[18] ? "true" : "false")
-        << ",\n  \"clockFont\": \"";
-    const wchar_t* fontName = ClockFontLabel(static_cast<ClockFont>(values[19]));
-    while (*fontName) json << static_cast<char>(*fontName++);
-    json << "\""
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -247,11 +242,7 @@ public:
         if (newOwner) ReleaseBridge();
         // An older pinned helper must be removed by restarting Explorer before
         // a different brush implementation attaches to the same rectangles.
-        for (const UINT version : {1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
-            Handle older(OpenFileMappingW(FILE_MAP_READ, FALSE,
-                (L"Local\\AcrylicTaskbar.Bridge.v" + std::to_wstring(version) + L"." + std::to_wstring(pid)).c_str()));
-            if (older) { lastResult = HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH); return; }
-        }
+        if (OlderBridgePresent(pid)) { lastResult = HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH); return; }
         if (newOwner) {
             explorerPid = pid;
             explorerProcess.reset(OpenProcess(SYNCHRONIZE, FALSE, pid));
@@ -367,7 +358,7 @@ public:
         else if (backend == Legacy) {
             if (!setComposition) { lastResult = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND); return; }
             // Undocumented WCA_ACCENT_POLICY (19), ACCENT_ENABLE_ACRYLICBLURBEHIND (4).
-            // Tint is ABGR: approximately 65% white or 40% dark gray.
+            // Legacy tint uses an ABGR alpha overlay for theme contrast.
             AccentPolicy policy{4, 0, Recipe(mode, SystemLightTheme()).legacyColor, 0};
             const CompositionData data{19, &policy, sizeof(policy)};
             LONG result = S_OK;
@@ -408,24 +399,12 @@ public:
         RefreshUpdateMenu(window);
         Log(L"Update check status=" + std::to_wstring(static_cast<UINT>(result.status)) + L" error=" + std::to_wstring(result.error));
     }
-    UINT ChangeClock(UINT command) {
-        DWORD error = ERROR_SUCCESS;
-        if (command == TrayDateCommand) {
-            error = SaveClockOption(L"ClockDate", clock.date ? 0 : 1);
-            if (!error) clock.date = !clock.date;
-        } else {
-            const auto font = static_cast<ClockFont>(command - ClockFontCommandBase);
-            if (font != ClockFont::System) {
-                try { ClockFontRenderer check(ClockFontPath(font)); check.Render(L"9:41 am", 12, 1, 0xFFFFFFFF); }
-                catch (HRESULT hr) { error = HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : ERROR_INVALID_DATA; }
-                catch (...) { error = ERROR_INVALID_DATA; }
-            }
-            if (!error) error = SaveClockOption(L"ClockFont", static_cast<DWORD>(font));
-            if (!error) clock.font = font;
-        }
-        if (error) { Log(L"Clock setting error=" + std::to_wstring(error)); tray.ClockError(error); }
+    UINT ChangeDate() {
+        const DWORD error = SaveClockDate(!clock.date);
+        if (error) { Log(L"Date setting error=" + std::to_wstring(error)); tray.DateError(error); }
         else {
-            Log(std::wstring(L"Clock date=") + (clock.date ? L"on" : L"off") + L" font=" + ClockFontLabel(clock.font));
+            clock.date = !clock.date;
+            Log(std::wstring(L"Clock date=") + (clock.date ? L"on" : L"off"));
             Refresh();
             SetBridgeMode(shared, explorerPid, mode, true);
         }
@@ -467,7 +446,6 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == IslandsQuery) return self->observedIslands;
         if (wParam == RetainedQuery) return self->bridgeRetained;
         if (wParam == ClockDateQuery) return self->clock.date;
-        if (wParam == ClockFontQuery) return static_cast<LONG>(self->clock.font);
         if (wParam == TrayQuery) return self->tray.Present();
         if (wParam == CursorModeQuery) return self->cursors.Mode();
         if (wParam == CursorAppliedQuery) return self->cursors.Applied();
@@ -484,7 +462,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return 0;
     } else if (message == TrayThemeQueryMessage) {
         return SystemLightTheme();
-    } else if (message == TrayClockQueryMessage) {
+    } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
@@ -502,8 +480,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             self->UpdateAction();
             return static_cast<UINT>(self->updates.Status());
         }
-        if (wParam == TrayDateCommand || (wParam >= ClockFontCommandBase && wParam <= ClockFontCommandBase + 2))
-            return self->ChangeClock(static_cast<UINT>(wParam));
+        if (wParam == TrayDateCommand) return self->ChangeDate();
         if (wParam == TrayThemeCommand) {
             const auto change = SetWindowsLightTheme(!SystemLightTheme());
             if (change.error) {

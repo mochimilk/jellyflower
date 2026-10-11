@@ -63,8 +63,8 @@ def shapes(svg):
         yield paths, fill, opacity, stroke, evenodd
 
 
-def render(elements, size, color):
-    scale = size * 8 / 24
+def render(elements, size, color, viewbox=24):
+    scale = size * 8 / viewbox
     image = Image.new('RGBA', (size * 8, size * 8))
     radius = scale
     for paths, fill, opacity, stroke, evenodd in elements:
@@ -93,42 +93,6 @@ def render(elements, size, color):
     return image.resize((size, size), sampling)
 
 
-def inverted_tray_icon(svg, size, light):
-    """Render the supplied 28x28 icon's luminance mask and outside stroke.
-
-    Its mask is white minus a compound black flower, not an alpha-only mask.
-    Keep the 5-unit outside stroke clipped to the supplied 4,4,20,20 region.
-    """
-    root = svg.getroot()
-    path = root.findall('{*}path')[0]
-    paths = list(polylines(path.attrib['d']))
-    scale = size * 8 / 28
-    canvas = (size * 8, size * 8)
-    paper, ink = ((0, 0, 0, 255), (255, 255, 255, 255)) if light else ((255, 255, 255, 255), (0, 0, 0, 255))
-    image = Image.new('RGBA', canvas)
-    draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((0, 0, canvas[0]-1, canvas[1]-1), radius=8*scale, fill=paper)
-    flower, stroke = Image.new('L', canvas), Image.new('L', canvas)
-    for contour in paths:
-        points = [(x*scale, y*scale) for x,y in contour]
-        part = Image.new('L', canvas)
-        ImageDraw.Draw(part).polygon(points, fill=255)
-        flower = ImageChops.difference(flower, part)
-        stroke_draw = ImageDraw.Draw(stroke)
-        stroke_draw.line(points, fill=255, width=round(5*scale), joint='curve')
-        # Pillow's wide curve joins leave wedges on tightly sampled cubics.
-        # Round coverage at each sample makes their continuous SVG stroke.
-        radius = 2.5*scale
-        for x,y in points:
-            stroke_draw.ellipse((x-radius,y-radius,x+radius,y+radius), fill=255)
-    mask = ImageChops.multiply(stroke, ImageChops.invert(flower))
-    clip = Image.new('L', canvas)
-    ImageDraw.Draw(clip).rectangle((4*scale,4*scale,24*scale-1,24*scale-1), fill=255)
-    mask = ImageChops.multiply(mask, clip)
-    image.paste(ink, (0,0,*canvas), mask)
-    return image.resize((size,size), Image.Resampling.BOX)
-
-
 def app_icon(svg, size, light):
     """Keep the supplied rounded tile, filled flower, and compound-path hole."""
     root = svg.getroot()
@@ -148,7 +112,7 @@ def app_icon(svg, size, light):
 
 
 if __name__ == '__main__':
-    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'clock', 'flower', 'update', 'package', 'package-open'):
+    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'calendar', 'calendar-off', 'flower', 'update', 'package', 'package-open'):
         svg = ET.parse(assets / f'{name}.svg')
         elements = list(shapes(svg))
         if name == 'flower':
@@ -168,9 +132,12 @@ if __name__ == '__main__':
         destination = assets / f'app-{theme}.ico'
         frames[-1].save(destination, sizes=[(size,size) for size in app_sizes], append_images=frames[:-1])
         print(f'Generated {destination.name}: {len(app_sizes)} sizes')
-    svg = ET.parse(assets / 'tray-inverted.svg')
-    for theme in ('dark','light'):
-        frames = [inverted_tray_icon(svg, size, theme == 'light') for size in sizes]
-        destination = assets / f'tray-inverted-{theme}.ico'
+    svg = ET.parse(assets / 'tray.svg')
+    # Its two opposing contours form the transparent center of the exact
+    # supplied 18x18 silhouette. Render on a transparent square, with no tile.
+    elements = [(item[0], *item[1:4], True) for item in shapes(svg)]
+    for theme, color in (('light', (0,0,0,255)), ('dark', (255,255,255,255))):
+        frames = [render(elements, size, color, viewbox=18) for size in sizes]
+        destination = assets / f'tray-{theme}.ico'
         frames[-1].save(destination, sizes=[(size,size) for size in sizes], append_images=frames[:-1])
         print(f'Generated {destination.name}: {len(sizes)} sizes')

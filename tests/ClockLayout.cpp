@@ -10,11 +10,9 @@
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Automation.Provider.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
-#include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <cstdio>
 #include <stdexcept>
 #include <cmath>
-#include "../src/clock_font.hpp"
 
 namespace xaml = winrt::Windows::UI::Xaml;
 namespace controls = xaml::Controls;
@@ -32,14 +30,6 @@ controls::TextBlock Line(const controls::StackPanel& panel) {
     for (const auto& child : panel.Children()) {
         auto block = child.try_as<controls::TextBlock>();
         if (block && block.Name() == L"AcrylicTaskbarClockLine") return block;
-    }
-    return nullptr;
-}
-controls::Image Image(const controls::StackPanel& panel) {
-    for (const auto& child : panel.Children()) {
-        const auto slot = child.try_as<controls::Canvas>();
-        if (slot && slot.Name() == L"AcrylicTaskbarClockFontSlot" && slot.Children().Size())
-            return slot.Children().GetAt(0).try_as<controls::Image>();
     }
     return nullptr;
 }
@@ -96,7 +86,6 @@ void Run() {
         const auto unset = xaml::DependencyProperty::UnsetValue();
         Check(panel.ReadLocalValue(xaml::FrameworkElement::VerticalAlignmentProperty()) == unset, "initial alignment unset");
         const auto oldHeight = panel.ActualHeight();
-        controls::Image lastImage{nullptr};
         {
             ClockView view(panel); view.Refresh(true); button.UpdateLayout();
             Check(view.Applied() && panel.Children().Size() == 3, "one added line");
@@ -115,50 +104,13 @@ void Run() {
             for (int i = 0; i < 50; ++i) view.Refresh(true);
             Check(panel.Children().Size() == 3, "refresh never duplicates line");
             const double withDate = line.ActualWidth();
-            view.Refresh(true, {false, acrylic::ClockFont::System}); button.UpdateLayout();
+            view.Refresh(true, {false}); button.UpdateLayout();
             Check(std::wstring_view(line.Text()).find(L" ") == line.Text().size() - 3 && line.ActualWidth() < withDate, "date off shrinks native clock line");
-            for (const auto choice : {acrylic::ClockFont::Playground, acrylic::ClockFont::Pangaia}) {
-                view.Refresh(true, {true, choice}); button.UpdateLayout();
-                const auto image = Image(panel);
-                Check(image && image.IsHitTestVisible() && panel.Children().Size() == 3, "custom font keeps stock button ancestry and one added visual");
-                const auto bitmap = image.Source().try_as<xaml::Media::Imaging::WriteableBitmap>();
-                Check(SUCCEEDED(view.FontResult()) && bitmap && bitmap.PixelWidth() > 20 && bitmap.PixelHeight() > 5, "actual external font reaches XAML clock image");
-                const double fullWidth = image.Width();
-                const auto slot = image.Parent().as<controls::Canvas>();
-                line.Measure({4096, 512});
-                Check(std::abs(slot.Height() - line.DesiredSize().Height) < 0.01, "custom font uses native line height despite decorative strokes");
-                acrylic::ClockFontRenderer geometry(acrylic::ClockFontPath(choice));
-                const auto expected = geometry.Render(std::wstring(line.Text()), 12, 1, 0xFFFFFFFF, std::wstring(line.FontFamily().Source()), line.FontWeight().Weight);
-                const double scale = panel.XamlRoot().RasterizationScale();
-                const double opticalOffset = choice == acrylic::ClockFont::Playground ? 1.0 : 0;
-                Check(std::abs(controls::Canvas::GetTop(image) + expected.baseline - line.BaselineOffset() - opticalOffset) <= 0.5 / scale + 0.01,
-                    "font-specific optical baseline is preserved within nearest-pixel rounding");
-                Check(std::abs(image.ActualWidth() * scale - bitmap.PixelWidth()) < 0.001
-                    && std::abs(image.ActualHeight() * scale - bitmap.PixelHeight()) < 0.001,
-                    "native XAML image maps exactly one source pixel to one screen pixel");
-                const auto origin = image.TransformToVisual(nullptr).TransformPoint({0, 0});
-                Check(std::abs(origin.X * scale - std::round(origin.X * scale)) < 0.001
-                    && std::abs(origin.Y * scale - std::round(origin.Y * scale)) < 0.001,
-                    "native XAML image starts on whole screen pixels");
-                xaml::Media::TranslateTransform fractional; fractional.X(0.25); fractional.Y(0.25);
-                button.RenderTransform(fractional); view.Refresh(true, {true, choice}); button.UpdateLayout();
-                const auto moved = image.TransformToVisual(nullptr).TransformPoint({0, 0});
-                Check(std::abs(moved.X * scale - std::round(moved.X * scale)) < 0.001
-                    && std::abs(moved.Y * scale - std::round(moved.Y * scale)) < 0.001,
-                    "fractional ancestor position does not resample the glyph image");
-                button.RenderTransform(nullptr); view.Refresh(true, {true, choice}); button.UpdateLayout();
-                for (int repeat = 0; repeat < 10; ++repeat) view.Refresh(true, {true, choice});
-                Check(Image(panel) == image && SUCCEEDED(view.FontResult()), "repeated font refresh retains custom presentation");
-                view.Refresh(true, {false, choice}); button.UpdateLayout();
-                Check(image.Width() < fullWidth && panel.Children().Size() == 3, "custom font date off shrinks without duplicate visuals");
-                Check(std::abs(slot.Height() - line.DesiredSize().Height) < 0.01, "date toggle preserves native baseline slot");
-                Check(controls::ToolTipService::GetToolTip(button) == tooltip, "font switch preserves stock tooltip");
-                peer.GetPattern(xaml::Automation::Peers::PatternInterface::Invoke).as<xaml::Automation::Provider::IInvokeProvider>().Invoke();
-                Pump();
-            }
-            Check(clicks == 3, "both custom fonts preserve stock button click handler");
-            view.Refresh(true); button.UpdateLayout();
-            Check(Line(panel) == line && !Image(panel) && panel.Children().Size() == 3, "segoe restores native text presentation");
+            view.Refresh(true, acrylic::DecodeClockOptions(0x201)); button.UpdateLayout();
+            Check(Line(panel) == line && panel.Children().Size() == 3 && line.ActualWidth() > withDate / 2,
+                "retired font bits keep native system text and date");
+            Check(acrylic::DecodeClockOptions(0x200).Packed() == 0 && acrylic::DecodeClockOptions(0x201).Packed() == 1,
+                "old font preferences cannot reenable custom rendering");
             time.Text(L"21:42");
             const xaml::Media::SolidColorBrush nextInk(winrt::Windows::UI::Color{255, 0, 0, 0});
             date.Foreground(nextInk); panel.Spacing(7); view.Refresh(true);
@@ -171,11 +123,9 @@ void Run() {
             Check(panel.ReadLocalValue(xaml::FrameworkElement::VerticalAlignmentProperty()) == unset, "restore unset alignment");
             Check(panel.Spacing() == 7, "restore latest shell spacing");
             Check(panel.ActualHeight() > oldHeight, "stock two-row layout restored");
-            view.Refresh(true, {true, acrylic::ClockFont::Playground});
-            lastImage = Image(panel);
+            view.Refresh(true, {true});
         }
         Check(panel.Children().Size() == 2 && date.Visibility() == xaml::Visibility::Visible, "destructor restoration");
-        Check(lastImage && !lastImage.Source(), "exit releases custom font bitmap");
         xaml::Data::Binding binding; binding.Source(winrt::box_value(xaml::Visibility::Visible));
         date.SetBinding(xaml::UIElement::VisibilityProperty(), binding);
         Check(date.GetBindingExpression(xaml::UIElement::VisibilityProperty()) != nullptr, "test binding established");
@@ -185,7 +135,7 @@ void Run() {
         button.Click(click); source.Content(nullptr);
     }
     source.Close(); DestroyWindow(host); Pump();
-    std::puts("PASS: native XAML single-line/date-off measurement, both external font images, stock click/tooltip identity, font switching, lowercase am/pm, theme updates, repeated refresh, latest-value/unset/binding restoration.");
+    std::puts("PASS: native XAML single-line/date-off measurement, stock system font and click/tooltip identity, retired font preference migration, lowercase am/pm, theme updates, repeated refresh, latest-value/unset/binding restoration.");
 }
 int main() {
     try {

@@ -30,12 +30,19 @@ int main() {
         && acrylic::NextAcrylicMode(AcrylicMode::Off) == AcrylicMode::System, "system/pure/off cycle order");
     for (bool light : {false, true}) {
         const auto pure = acrylic::Recipe(AcrylicMode::Pure, light);
-        Check(pure.tint == 0.0 && pure.luminosity == 0.0 && !pure.automaticLuminosity, "pure has no color or luminosity tint in either theme");
+        Check(pure.tint == 0.0 && pure.luminosity == 0.0, "pure has no color or luminosity tint in either theme");
         Check(pure.legacyColor == 0x01000000u, "legacy pure keeps required one-step alpha");
     }
-    const auto light = acrylic::Recipe(AcrylicMode::System, true), dark = acrylic::Recipe(AcrylicMode::System, false);
-    Check(light.tint == .65 && !light.automaticLuminosity && light.legacyColor == 0xa6ffffffu
-        && dark.tint == .40 && dark.automaticLuminosity && dark.legacyColor == 0x66202020u, "system recipes preserve existing tints");
+    const DWORD pid = GetCurrentProcessId();
+    Check(!acrylic::OlderBridgePresent(pid), "clean Explorer needs no reload");
+    {
+        acrylic::Handle current(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, acrylic::MappingName(pid).c_str()));
+        Check(current && !acrylic::OlderBridgePresent(pid), "current helper remains compatible");
+        const auto name = L"Local\\AcrylicTaskbar.Bridge.v8." + std::to_wstring(pid);
+        acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, name.c_str()));
+        Check(old && acrylic::OlderBridgePresent(pid), "old pinned material requires Explorer reload");
+    }
+    Check(!acrylic::OlderBridgePresent(pid), "reload clears incompatible helper");
     HANDLE ready[2]{CreateEventW(nullptr, TRUE, FALSE, nullptr), CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     std::atomic<bool> created[2]{};
     std::thread workers[2];
@@ -54,7 +61,6 @@ int main() {
     Check(WaitForMultipleObjects(2, ready, TRUE, 5000) == WAIT_OBJECT_0 && created[0] && created[1],
         "one invisible receiver per UI thread, reused on repeated calls");
     if (created[0] && created[1]) {
-        const DWORD pid = GetCurrentProcessId();
         const auto start = GetTickCount64();
         acrylic::SetBridgeMode(&state, pid, acrylic::AcrylicMode::System);
         Check(WaitForCount(1) && observed[0] == 1 && observed[1] == 1, "on published before both UI-thread notifications");

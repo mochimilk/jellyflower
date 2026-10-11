@@ -1,5 +1,17 @@
 # Validation results
 
+## jellyflower 0.14.1, 2026-10-10
+
+The x64 Release app/helper/setup and native checks compile with MSVC 19.44 / SDK 26100. The clock now uses only Windows' native TextBlock presentation: external-font discovery, DirectWrite bitmap rendering, font previews, selectors and their source files were removed. Date is the second root row, directly below acrylic; its on/off status and supplied calendar/calendar-off glyph update without replacing or closing the menu. Existing date preferences persist; obsolete font selections/bits are ignored.
+
+ClockLayout passed native XAML measurements, date width changes, stock system font, retired-font snapshot decoding, lowercase am/pm, calendar invoke/tooltip identity, theme updates, repeat refresh and latest-value/unset/binding restoration. AcrylicMaterial passed production configuration on real XAML AcrylicBrush objects, theme/pure transitions, explicit luminosity, opaque fallback and modeled black/white contrast. The contrast calculation is an achromatic blend model, not a measurement of final compositor output. Both system themes now request luminosity 0.85; pure still requests zero. Legacy neutral overlays use alpha 217/255.
+
+MenuPresentation passed production rendering in both themes at 96/144/192 DPI. Windows accepted the desktop acrylic attribute on root and child menus. Transparent pixels leave the backdrop visible; foreground pixels passed premultiplied-alpha bounds and retained solid and antialiased coverage. High-contrast fallback/recovery requests passed. The tests also passed date row position and live toggling, both calendar glyphs, regular font weight, installed version stability across every update result, accessible states/text fit, cursor locking/keyboard skipping, and live unlocking without changing selection or closing the menu. Six animated refresh-frame pairs differed only inside the icon region. Offscreen captures composite against a plain themed preview for layout inspection; they do not capture DWM's final blur.
+
+The exact supplied 18x18 tray path renders with a transparent exterior and center, inverse theme colors and unchanged geometry at all included sizes. The rounded app/Start icon is unchanged. BridgeNotify passed v8 incompatibility detection, v9 reuse, clearing of the reload condition, immediate UI-thread notifications and lifetime dispatch. UpdateLogic passed stable numeric version, origin/architecture and malformed-response checks. Setup now checks for old loaded mappings and reminds upgraders to sign out/in once; no automatic Explorer restart is performed.
+
+Normal-desktop installation/upgrade, the final black/white-wallpaper taskbar appearance on the affected computer, live menu blur, power/transparency fallback and actual shell clicks still require [INSTALLATION_TESTS.md](INSTALLATION_TESTS.md) steps 13–17. API success and the native models do not prove visible GPU blur. Earlier sections below record older behavior, including the now-removed font feature. ARM64 is validated by the repository workflow; this record describes local x64 checks.
+
 ## jellyflower 0.14.0, 2026-10-10
 
 The x64 Release build with MSVC 19.44 / SDK 26100 passed without warnings. The native installer is approximately 1.35 MB. Both EXEs have version 0.14.0.0, normal-user execution, and PerMonitorV2 manifests. Its non-installing extract path passed exact byte comparisons for the controller, helper, README, licenses/notices, and new app icon files. No cursor/font files are bundled.

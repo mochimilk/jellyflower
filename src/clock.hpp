@@ -23,7 +23,6 @@ public:
     ClockView(const ClockView&) = delete;
     ClockView& operator=(const ClockView&) = delete;
     void Refresh(bool enabled, ClockOptions options = {});
-    HRESULT FontResult() const noexcept;
     void Restore();
     bool Applied() const noexcept;
 private:

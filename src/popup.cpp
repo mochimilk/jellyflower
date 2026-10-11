@@ -3,9 +3,9 @@
 #include "tray.hpp"
 #include "cursors.hpp"
 #include "resource.h"
-#include "clock_font.hpp"
-#include "clock_options.hpp"
 #include "updates.hpp"
+#include "version.hpp"
+#include "menu_surface.hpp"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <algorithm>
@@ -66,7 +66,7 @@ std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     result->UnlockBits(&target);
     return result;
 }
-bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayClockCommand || command == TrayFontCommand; }
+bool HasSubmenu(UINT command) { return command == TrayCursorCommand; }
 struct Popup;
 Popup* activePopup = nullptr;
 LRESULT CALLBACK PopupProc(HWND, UINT, WPARAM, LPARAM);
@@ -96,65 +96,6 @@ int LabelCenter(HDC dc, const std::wstring& label, const RECT& bounds) {
     return MulDiv(2 * baseline + top + bottom, 1, 2);
 }
 
-// Render from the supplied files, so previews work without globally installing
-// fonts. Keep one alpha mask/surface per row; hover and theme changes only tint it.
-struct FontPreview {
-    ClockPixels pixels;
-    HDC dc = nullptr;
-    HBITMAP bitmap = nullptr;
-    HGDIOBJ previous = nullptr;
-    uint32_t* surface = nullptr;
-    COLORREF color = CLR_INVALID;
-    double scale = 1;
-    ~FontPreview() {
-        if (dc && previous) SelectObject(dc, previous);
-        if (bitmap) DeleteObject(bitmap);
-        if (dc) DeleteDC(dc);
-    }
-    bool Load(ClockFont choice, const std::wstring& label, double size, UINT dpi) {
-        try {
-            scale = dpi / 96.0;
-            ClockFontRenderer renderer(ClockFontPath(choice));
-            pixels = renderer.Render(label, size, scale, 0xFFFFFFFF);
-            BITMAPINFO info{};
-            info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-            info.bmiHeader.biWidth = pixels.width;
-            info.bmiHeader.biHeight = -static_cast<LONG>(pixels.height);
-            info.bmiHeader.biPlanes = 1; info.bmiHeader.biBitCount = 32;
-            dc = CreateCompatibleDC(nullptr);
-            if (!dc) return false;
-            bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, reinterpret_cast<void**>(&surface), nullptr, 0);
-            if (!bitmap) return false;
-            previous = SelectObject(dc, bitmap);
-            return previous && previous != HGDI_ERROR;
-        } catch (...) { return false; }
-    }
-    bool Draw(HDC target, const RECT& bounds, COLORREF ink) {
-        if (!bitmap || !surface) return false;
-        if (color != ink) {
-            GdiFlush();
-            for (size_t i = 0; i < pixels.pixels.size(); ++i) {
-                const UINT alpha = pixels.pixels[i] >> 24;
-                surface[i] = (alpha << 24) | ((GetRValue(ink) * alpha / 255) << 16)
-                    | ((GetGValue(ink) * alpha / 255) << 8) | (GetBValue(ink) * alpha / 255);
-            }
-            color = ink;
-        }
-        TEXTMETRICW metrics{}; RECT layout{};
-        const int height = DrawTextW(target, L"segoe", -1, &layout, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-        if (!height || !GetTextMetricsW(target, &metrics)) return false;
-        const int baseline = bounds.top + (bounds.bottom - bounds.top - height) / 2 + metrics.tmAscent;
-        const int top = baseline - static_cast<int>(std::lround(pixels.baseline * scale));
-        const BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
-        const int saved = SaveDC(target);
-        IntersectClipRect(target, bounds.left, bounds.top, bounds.right, bounds.bottom);
-        const bool drawn = AlphaBlend(target, bounds.left, top, pixels.width, pixels.height,
-            dc, 0, 0, pixels.width, pixels.height, blend) != FALSE;
-        if (saved) RestoreDC(target, saved);
-        return drawn;
-    }
-};
-
 struct Popup {
     HWND window = nullptr, controller = nullptr;
     std::vector<HWND> buttons;
@@ -163,8 +104,7 @@ struct Popup {
     Popup* parent = nullptr;
     HFONT font = nullptr;
     HHOOK mouseHook = nullptr;
-    std::unique_ptr<FontPreview> fontPreviews[2];
-    HICON acrylicIcons[3]{}, cursorIcon = nullptr, themeIcon = nullptr, clockIcon = nullptr, updateIcon = nullptr;
+    HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr;
     ULONG_PTR graphicsToken = 0;
     std::unique_ptr<Gdiplus::Bitmap> spinnerBitmap;
@@ -175,10 +115,11 @@ struct Popup {
     UINT dpi = 96, result = 0, cursorMode = 0, hoverDelay = 400;
     RECT trayBounds{};
     int hovered = -1, childIndex = -1, rowHeight = 40;
-    UINT kind = 0, clockFont = 0;
+    UINT kind = 0;
     bool clockDate = true;
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
+    bool acrylic = false, highContrast = false;
     Popup() {
         Gdiplus::GdiplusStartupInput input;
         if (Gdiplus::GdiplusStartup(&graphicsToken, &input, nullptr) != Gdiplus::Ok) graphicsToken = 0;
@@ -191,7 +132,7 @@ struct Popup {
         for (const auto icon : acrylicIcons) if (icon) DestroyIcon(icon);
         if (cursorIcon) DestroyIcon(cursorIcon);
         if (themeIcon) DestroyIcon(themeIcon);
-        if (clockIcon) DestroyIcon(clockIcon);
+        for (const auto icon : dateIcons) if (icon) DestroyIcon(icon);
         if (updateIcon) DestroyIcon(updateIcon);
         if (packageIcon) DestroyIcon(packageIcon);
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
@@ -217,19 +158,16 @@ struct Popup {
         if (window && IsWindowVisible(window) && GetWindowRect(window, &bounds) && PtInRect(&bounds, point)) return true;
         return child && child->ContainsPoint(point);
     }
-    void UpdateClockRows(bool date, UINT selectedFont) {
-        clockDate = date; clockFont = selectedFont;
+    void UpdateDate(bool date) {
+        clockDate = date;
         for (size_t i = 0; i < rows.size(); ++i) {
             auto& row = rows[i];
             if (row.command == TrayDateCommand) {
                 row.secondary = date ? L"on" : L"off";
                 if (i < buttons.size()) SetWindowTextW(buttons[i], (row.label + L", " + row.secondary).c_str());
             }
-            if (row.command >= ClockFontCommandBase && row.command <= ClockFontCommandBase + 2)
-                row.checked = row.command == ClockFontCommandBase + selectedFont;
         }
         RepaintButtons();
-        if (child) child->UpdateClockRows(date, selectedFont);
     }
     int Focused() const {
         for (size_t i = 0; i < buttons.size(); ++i) if (GetFocus() == buttons[i]) return static_cast<int>(i);
@@ -294,6 +232,7 @@ struct Popup {
         HIGHCONTRASTW contrast{sizeof(contrast)};
         const bool high = SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0)
             && (contrast.dwFlags & HCF_HIGHCONTRASTON);
+        highContrast = high;
         const COLORREF bg = high ? GetSysColor(COLOR_MENU) : light ? RGB(249, 249, 249) : RGB(32, 32, 32);
         if (high) light = GetRValue(bg) + GetGValue(bg) + GetBValue(bg) > 384;
         border = high ? GetSysColor(COLOR_MENUTEXT) : light ? RGB(210, 210, 210) : RGB(69, 69, 69);
@@ -318,11 +257,12 @@ struct Popup {
                 darkInk ? IDI_ACRYLIC_SYSTEM_LIGHT : IDI_ACRYLIC_SYSTEM_DARK,
                 darkInk ? IDI_ACRYLIC_PURE_LIGHT : IDI_ACRYLIC_PURE_DARK,
                 systemLight ? (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK) : (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK),
-                darkInk ? IDI_CLOCK_LIGHT : IDI_CLOCK_DARK,
+                darkInk ? IDI_CALENDAR_OFF_LIGHT : IDI_CALENDAR_OFF_DARK,
+                darkInk ? IDI_CALENDAR_LIGHT : IDI_CALENDAR_DARK,
                 darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
                 darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
                 darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK};
-            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &clockIcon, &updateIcon, &packageIcon, &packageOpenIcon};
+            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &dateIcons[0], &dateIcons[1], &updateIcon, &packageIcon, &packageOpenIcon};
             for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
@@ -334,16 +274,33 @@ struct Popup {
                 rows[i].label = systemLight ? L"dark mode" : L"light mode";
                 if (i < buttons.size()) SetWindowTextW(buttons[i], rows[i].label.c_str());
             }
-            if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !clockIcon) return false;
+            if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1]) return false;
         }
         if (window) {
             const BOOL dark = !light;
             DwmSetWindowAttribute(window, ImmersiveDarkMode, &dark, sizeof(dark));
             DwmSetWindowAttribute(window, BorderColor, &border, sizeof(border));
+            ConfigureBackdrop();
             RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
         }
         if (child) child->UpdateTheme(systemMode);
         return true;
+    }
+    void DisableBackdrop() {
+        acrylic = false;
+        const int none = 1;
+        DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &none, sizeof(none));
+        const MARGINS margins{1, 1, 1, 1};
+        DwmExtendFrameIntoClientArea(window, &margins);
+    }
+    void ConfigureBackdrop() {
+        // DWMSBT_TRANSIENTWINDOW is the documented Windows 11 desktop acrylic
+        // backdrop. Unsupported systems and high contrast keep a solid menu.
+        const int transient = 3;
+        const MARGINS full{-1, -1, -1, -1};
+        acrylic = !highContrast && SUCCEEDED(DwmExtendFrameIntoClientArea(window, &full))
+            && SUCCEEDED(DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &transient, sizeof(transient)));
+        if (!acrylic) DisableBackdrop();
     }
     void Focus(int index, int direction = 1) {
         if (buttons.empty()) return;
@@ -381,16 +338,8 @@ struct Popup {
             child->systemLight = systemLight;
             child->hoverDelay = hoverDelay;
             auto* root = Root();
-            if (command == TrayCursorCommand) {
-                const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
-                child->rows = CursorRows(mask, root->cursorMode);
-            } else if (command == TrayClockCommand) {
-                child->rows = {{TrayDateCommand, L"date", false, false, root->clockDate ? L"on" : L"off"}, {TrayFontCommand, L"font"}};
-            } else {
-                child->rows = {{ClockFontCommandBase, L"segoe (system)", false, root->clockFont == 0},
-                    {ClockFontCommandBase + 1, L"playground", false, root->clockFont == 1},
-                    {ClockFontCommandBase + 2, L"pangia", false, root->clockFont == 2}};
-            }
+            const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
+            child->rows = CursorRows(mask, root->cursorMode);
             RECT bounds{}, row{};
             GetWindowRect(window, &bounds);
             GetWindowRect(buttons[static_cast<size_t>(index)], &row);
@@ -401,8 +350,7 @@ struct Popup {
         child->closing = false;
         ShowWindow(child->window, SW_SHOWNORMAL);
         SetForegroundWindow(child->window);
-        const UINT selected = command == TrayCursorCommand ? std::min(Root()->cursorMode, CursorDisabled)
-            : command == TrayFontCommand ? std::min(Root()->clockFont, 2u) : 0;
+        const UINT selected = std::min(Root()->cursorMode, CursorDisabled);
         child->Focus(static_cast<int>(selected));
         child->keyboard = fromKeyboard;
         child->RepaintButtons();
@@ -454,8 +402,8 @@ struct Popup {
                 root->RefreshUpdate();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
-            } else if (command == TrayDateCommand || (command >= ClockFontCommandBase && command <= ClockFontCommandBase + 2)) {
-                root->UpdateClockRows((state & 1) != 0, (state >> 8) & 3);
+            } else if (command == TrayDateCommand) {
+                root->UpdateDate((state & 1) != 0);
             } else if (parent && command >= CursorCommandBase && command <= CursorCommandBase + CursorDisabled) {
                 root->cursorMode = state;
                 root->RefreshCursorIcon();
@@ -484,11 +432,21 @@ struct Popup {
         return false;
     }
     void DrawButton(const DRAWITEMSTRUCT& item) {
+        const auto frameTime = GetTickCount64();
+        if (acrylic) {
+            if (MenuSurface::Paint(item.hDC, item.rcItem, [&](HDC dc) {
+                auto layer = item; layer.hDC = dc; DrawButtonContent(layer, false, frameTime);
+            })) return;
+            DisableBackdrop();
+        }
+        DrawButtonContent(item, true, frameTime);
+    }
+    void DrawButtonContent(const DRAWITEMSTRUCT& item, bool opaque, ULONGLONG frameTime) {
         const auto found = std::find(buttons.begin(), buttons.end(), item.hwndItem);
         if (found == buttons.end()) return;
         const int index = static_cast<int>(found - buttons.begin());
         const auto& row = rows[static_cast<size_t>(index)];
-        FillRect(item.hDC, &item.rcItem, background);
+        if (opaque) FillRect(item.hDC, &item.rcItem, background);
         const bool focused = keyboard && (item.itemState & ODS_FOCUS);
         const bool highlighted = row.enabled && (hovered == index || focused || (item.itemState & ODS_SELECTED));
         if (highlighted) {
@@ -503,7 +461,7 @@ struct Popup {
         SetBkMode(item.hDC, TRANSPARENT);
         SetTextColor(item.hDC, ink);
         RECT bounds = item.rcItem;
-        bounds.left += Px(kind == TrayClockCommand ? 12 : 34);
+        bounds.left += Px(34);
         bounds.right -= Px(24);
         if (!row.secondary.empty()) {
             RECT status = item.rcItem; status.right -= Px(12);
@@ -517,10 +475,7 @@ struct Popup {
             SetTextColor(item.hDC, ink);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
-        const auto preview = row.command > ClockFontCommandBase && row.command <= ClockFontCommandBase + 2
-            ? fontPreviews[row.command - ClockFontCommandBase - 1].get() : nullptr;
-        if (!preview || !preview->Draw(item.hDC, bounds, ink))
-            DrawTextW(item.hDC, row.label.c_str(), -1, &bounds, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        DrawTextW(item.hDC, row.label.c_str(), -1, &bounds, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         const auto pen = CreatePen(PS_SOLID, std::max(1, Px(1)), ink);
         const auto oldPen = SelectObject(item.hDC, pen);
         // Font line boxes include unused space. Align every glyph to the
@@ -528,7 +483,7 @@ struct Popup {
         const int cy = LabelCenter(item.hDC, row.label, bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayThemeCommand ? themeIcon
-            : row.command == TrayClockCommand ? clockIcon : row.command == TrayUpdateCommand
+            : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayUpdateCommand
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : updateStatus == UpdateStatus::Checking ? updateIcon : packageIcon) : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
@@ -542,7 +497,7 @@ struct Popup {
             graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
             graphics.TranslateTransform(static_cast<Gdiplus::REAL>(iconLeft) + iconSize / 2.0f, static_cast<Gdiplus::REAL>(iconTop) + iconSize / 2.0f);
-            graphics.RotateTransform(static_cast<Gdiplus::REAL>((GetTickCount64() - updateStarted) % 1000) * .36f);
+            graphics.RotateTransform(static_cast<Gdiplus::REAL>((frameTime - updateStarted) % 1000) * .36f);
             graphics.DrawImage(spinnerBitmap.get(), -iconSize / 2.0f, -iconSize / 2.0f, static_cast<Gdiplus::REAL>(iconSize), static_cast<Gdiplus::REAL>(iconSize));
         } else if (icon) DrawIconEx(item.hDC, iconLeft, iconTop, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
         if (row.checked) {
@@ -563,10 +518,17 @@ struct Popup {
         }
         SelectObject(item.hDC, oldFont);
     }
-    void Paint(HDC dc) const {
+    void Paint(HDC dc) {
         RECT bounds{};
         GetClientRect(window, &bounds);
-        FillRect(dc, &bounds, background);
+        if (acrylic) {
+            if (MenuSurface::Paint(dc, bounds, [&](HDC layer) { PaintContent(layer, bounds, false); })) return;
+            DisableBackdrop();
+        }
+        PaintContent(dc, bounds, true);
+    }
+    void PaintContent(HDC dc, const RECT& bounds, bool opaque) const {
+        if (opaque) FillRect(dc, &bounds, background);
         int y = Px(Padding);
         for (const auto& row : rows) {
             if (row.divider) {
@@ -582,17 +544,8 @@ struct Popup {
         if (!UpdateTheme(systemLight)) return false;
         font = CreateFontW(-MulDiv(10, static_cast<int>(dpi), 72), 0, 0, 0, FW_NORMAL,
             FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
         if (!background || !highlight || !separator || !font) return false;
-        if (kind == TrayFontCommand) {
-            LOGFONTW metrics{}; GetObjectW(font, sizeof(metrics), &metrics);
-            const double size = std::abs(metrics.lfHeight) * 96.0 / dpi;
-            for (UINT i = 0; i < 2; ++i) {
-                auto preview = std::make_unique<FontPreview>();
-                if (preview->Load(static_cast<ClockFont>(i + 1), rows[i + 1].label, size, dpi))
-                    fontPreviews[i] = std::move(preview);
-            }
-        }
         MONITORINFO monitor{sizeof(monitor)};
         if (!GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
         const int width = Px(parent ? 228 : 296);
@@ -608,7 +561,7 @@ struct Popup {
         x = std::clamp<LONG>(x, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
         const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(6), monitor.rcWork.top,
             std::max(monitor.rcWork.top, monitor.rcWork.bottom - height));
-        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : kind == TrayClockCommand ? L"clock" : kind == TrayFontCommand ? L"font" : L"jellyflower",
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : L"jellyflower",
             WS_POPUP | WS_CLIPCHILDREN, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;
@@ -616,8 +569,7 @@ struct Popup {
         DwmSetWindowAttribute(window, CornerPreference, &RoundCorners, sizeof(RoundCorners));
         DwmSetWindowAttribute(window, ImmersiveDarkMode, &dark, sizeof(dark));
         DwmSetWindowAttribute(window, BorderColor, &border, sizeof(border));
-        const MARGINS margins{1, 1, 1, 1};
-        DwmExtendFrameIntoClientArea(window, &margins);
+        ConfigureBackdrop();
         int top = Px(Padding);
         for (size_t i = 0; i < rows.size(); ++i) {
             if (rows[i].divider) top += Px(SeparatorHeight);
@@ -673,6 +625,10 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     switch (message) {
     case WM_NCCALCSIZE: return 0;
     case WM_NCHITTEST: return HTCLIENT;
+    case WM_DWMCOMPOSITIONCHANGED:
+        popup->ConfigureBackdrop();
+        RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+        return 0;
     case WM_ERASEBKGND: return 1;
     case WM_PRINTCLIENT: popup->Paint(reinterpret_cast<HDC>(wParam)); return 0;
     case WM_PAINT: {
@@ -765,13 +721,12 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     popup.controller = owner;
     popup.cursorMode = cursorMode;
     popup.trayBounds = trayBounds;
-    const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayClockQueryMessage, 0, 0));
+    const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayDateQueryMessage, 0, 0));
     popup.clockDate = (clockState & 1) != 0;
-    popup.clockFont = (clockState >> 8) & 3;
     SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &popup.hoverDelay, 0);
     popup.rows = {{TrayToggleCommand, L"acrylic", false, false, AcrylicModeName(mode)},
-        {TrayCursorCommand, L"cursor"}, {TrayClockCommand, L"clock"}, {TrayThemeCommand, popup.systemLight ? L"dark mode" : L"light mode"},
-        {TrayUpdateCommand, L"check for updates", true}, {TrayExitCommand, L"exit"}};
+        {TrayDateCommand, L"date", false, false, popup.clockDate ? L"on" : L"off"}, {TrayCursorCommand, L"cursor"}, {TrayThemeCommand, popup.systemLight ? L"dark mode" : L"light mode"},
+        {TrayUpdateCommand, std::wstring(L"v") + AppVersion, true}, {TrayExitCommand, L"exit"}};
     popup.RefreshUpdate();
     if (!popup.Create(owner, anchor, false)) return 0;
     activePopup = &popup;

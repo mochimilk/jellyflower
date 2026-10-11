@@ -16,10 +16,13 @@ constexpr const wchar_t* AcrylicLabel(AcrylicMode mode) noexcept {
 constexpr const wchar_t* AcrylicModeName(AcrylicMode mode) noexcept {
     return mode == AcrylicMode::System ? L"system" : mode == AcrylicMode::Pure ? L"pure" : L"off";
 }
-struct AcrylicRecipe { double tint, luminosity; bool automaticLuminosity; DWORD legacyColor; };
+struct AcrylicRecipe { double tint, luminosity; DWORD legacyColor; };
 constexpr AcrylicRecipe Recipe(AcrylicMode mode, bool light) noexcept {
-    // Legacy acrylic requires a nonzero alpha, as in upstream TranslucentTB.
-    return mode == AcrylicMode::Pure ? AcrylicRecipe{0.0, 0.0, false, 0x01000000u}
-        : light ? AcrylicRecipe{0.65, 0.0, false, 0xa6ffffffu} : AcrylicRecipe{0.40, 0.0, true, 0x66202020u};
+    // Color tint alone preserves backdrop brightness: white with zero
+    // luminosity still looks black over black wallpaper. Set the brightness
+    // layer explicitly in both themes. Legacy accents use ABGR alpha instead.
+    // Pure keeps the required nonzero legacy alpha without adding XAML tint.
+    return mode == AcrylicMode::Pure ? AcrylicRecipe{0.0, 0.0, 0x01000000u}
+        : light ? AcrylicRecipe{0.65, 0.85, 0xd9ffffffu} : AcrylicRecipe{0.40, 0.85, 0xd9202020u};
 }
 } // namespace acrylic

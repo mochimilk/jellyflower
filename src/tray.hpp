@@ -13,8 +13,8 @@ inline constexpr UINT TrayThemeQueryMessage = WM_APP + 46;
 inline constexpr UINT TrayToggleCommand = 1, TrayExitCommand = 2;
 inline constexpr UINT TrayCursorCommand = 3, CursorCommandBase = 100;
 inline constexpr UINT TrayThemeCommand = 4;
-inline constexpr UINT TrayClockCommand = 5, TrayDateCommand = 6, TrayFontCommand = 7, ClockFontCommandBase = 200;
-inline constexpr UINT TrayClockQueryMessage = WM_APP + 47;
+inline constexpr UINT TrayDateCommand = 6;
+inline constexpr UINT TrayDateQueryMessage = WM_APP + 47;
 inline constexpr UINT TrayUpdateQueryMessage = WM_APP + 48;
 inline constexpr UINT TrayUpdateCommand = 8;
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
@@ -28,7 +28,7 @@ public:
     UINT Menu(AcrylicMode mode, UINT cursorMode) const;
     void CursorError(DWORD error, bool saveFailure = false) const;
     void ThemeError(DWORD error, bool partial = false, bool notification = false) const;
-    void ClockError(DWORD error) const;
+    void DateError(DWORD error) const;
     void UpdateNotice(const wchar_t* title, const wchar_t* body, bool error = false) const;
     bool Present() const noexcept { return present_; }
 private:

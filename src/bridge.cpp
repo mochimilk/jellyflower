@@ -7,6 +7,7 @@
 #include "clock.hpp"
 #include "volume.hpp"
 #include "chevron.hpp"
+#include "acrylic_material.hpp"
 #include <unknwn.h>
 #include <shobjidl.h>
 #include <xamlOM.h>
@@ -97,12 +98,7 @@ public:
     void UpdateTheme() {
         light = SystemLightTheme();
         mode = state ? DecodeAcrylicMode(Read(state->active)) : AcrylicMode::System;
-        const auto recipe = Recipe(mode, light);
-        acrylic.TintColor(light ? winrt::Windows::UI::Color{255, 255, 255, 255} : winrt::Windows::UI::Color{255, 32, 32, 32});
-        acrylic.TintOpacity(recipe.tint);
-        if (recipe.automaticLuminosity) acrylic.TintLuminosityOpacity(nullptr);
-        else acrylic.TintLuminosityOpacity(winrt::box_value(recipe.luminosity).as<winrt::Windows::Foundation::IReference<double>>());
-        acrylic.FallbackColor(light ? winrt::Windows::UI::Color{255, 243, 243, 243} : winrt::Windows::UI::Color{255, 32, 32, 32});
+        ConfigureAcrylic(acrylic, mode, light);
     }
     void Start() {
         const std::weak_ptr<Background> weak = shared_from_this();
@@ -217,7 +213,7 @@ public:
     void Refresh() noexcept {
         try {
             view.Refresh(owner.Alive(), DecodeClockOptions(state ? static_cast<UINT>(Read(state->clockOptions)) : 1));
-            if (state) InterlockedExchange(&state->clockResult, view.FontResult());
+            if (state) InterlockedExchange(&state->clockResult, S_OK);
             Count();
         } catch (...) {
             if (state) InterlockedExchange(&state->clockResult, winrt::to_hresult());

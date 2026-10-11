@@ -14,4 +14,4 @@ Write-Host 'singleLineClocks counts accepted clock layouts. If zero, the helper 
 Write-Host 'hiddenVolumeIcons counts hidden speaker glyphs. If zero, the helper has not found the supported Quick Settings layout; network and battery are left alone.'
 Write-Host 'bridgeRetained means a live Explorer connection is being kept across transient layout changes. taskbarXamlIslands is a discovery count, not a blur measurement.'
 
-Write-Host 'clockDate and clockFont report the saved clock choices. clockLastResult also reports missing/custom-font rendering errors; the readable Segoe line remains as fallback.'
+Write-Host 'clockDate reports the saved date toggle. The single-line clock uses the native Windows system font.'

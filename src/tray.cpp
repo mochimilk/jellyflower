@@ -49,7 +49,7 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode mode) {
         RefreshAppBranding(owner, light);
         brandTheme_ = static_cast<int>(light);
     }
-    const int resource = light ? IDI_TRAY_INVERTED_LIGHT : IDI_TRAY_INVERTED_DARK;
+    const int resource = light ? IDI_TRAY_LIGHT : IDI_TRAY_DARK;
     const HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
     const UINT dpi = GetDpiForWindow(taskbar ? taskbar : owner);
     const int pixels = GetSystemMetricsForDpi(SM_CXSMICON, dpi ? dpi : 96);
@@ -97,11 +97,11 @@ void TrayIcon::ThemeError(DWORD error, bool partial, bool notification) const {
         : L"Windows could not save the preference. Check Windows Settings > Personalization > Colors. Windows error: %lu.", error);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
-void TrayIcon::ClockError(DWORD error) const {
+void TrayIcon::DateError(DWORD error) const {
     auto data = Data(window_);
     data.uFlags |= NIF_INFO; data.dwInfoFlags = NIIF_WARNING;
-    wcscpy_s(data.szInfoTitle, L"clock setting could not be changed");
-    swprintf_s(data.szInfo, L"Keep the supplied Playground/Pangaia font files in Downloads. Windows may also deny saving preferences. Windows error: %lu.", error);
+    wcscpy_s(data.szInfoTitle, L"date setting could not be saved");
+    swprintf_s(data.szInfo, L"Windows denied saving the date preference. Your previous choice is unchanged. Windows error: %lu.", error);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 void TrayIcon::UpdateNotice(const wchar_t* title, const wchar_t* body, bool error) const {

@@ -146,9 +146,15 @@ void Install() {
     result = Run(folder / L"jellyflower.exe", L"--install");
     if (result) { RemoveKnownFiles(folder); throw result; }
     Register(folder); Link(folder);
+    DWORD explorer = 0;
+    GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &explorer);
+    const bool reload = explorer && OlderBridgePresent(explorer);
     result = Run(folder / L"jellyflower.exe", L"", false);
     if (result) throw result;
-    MessageBoxW(nullptr, L"jellyflower is installed and will start when you sign in.\n\nOpen its flower icon under show hidden icons to use the menu.\n\nQuit TranslucentTB if it is still running.", L"jellyflower", MB_OK | MB_ICONINFORMATION);
+    std::wstring message = L"jellyflower is installed and will start when you sign in.";
+    if (reload) message += L"\n\nSign out and back in once to finish this update.";
+    message += L"\n\nOpen its flower icon under show hidden icons to use the menu.\n\nQuit TranslucentTB if it is still running.";
+    MessageBoxW(nullptr, message.c_str(), L"jellyflower", MB_OK | MB_ICONINFORMATION);
 }
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
