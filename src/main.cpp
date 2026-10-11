@@ -152,7 +152,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[21]{};
+    LONG values[22]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -194,6 +194,7 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"clockDate\": " << (values[18] ? "true" : "false")
         << ",\n  \"replacedNetworkIcons\": " << values[19]
         << ",\n  \"networkLastResult\": " << values[20]
+        << ",\n  \"networkGlyphCode\": " << values[21]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -497,6 +498,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == VolumeResultQuery) return self->shared ? Read(self->shared->volumeResult) : S_OK;
         if (wParam == NetworkQuery) return self->shared ? Read(self->shared->networkCount) : 0;
         if (wParam == NetworkResultQuery) return self->shared ? Read(self->shared->networkResult) : S_OK;
+        if (wParam == NetworkGlyphQuery) return self->shared ? Read(self->shared->networkGlyph) : 0;
         if (wParam == IslandsQuery) return self->observedIslands;
         if (wParam == RetainedQuery) return self->bridgeRetained;
         if (wParam == ClockDateQuery) return self->clock.date;

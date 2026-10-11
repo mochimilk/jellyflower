@@ -27,12 +27,17 @@ void Alias(const xaml::DependencyObject& object, const wchar_t* value) { names[w
 void Check(bool ok, const char* message) { if (!ok) throw std::runtime_error(message); }
 void Pump() { MSG msg{}; while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { TranslateMessage(&msg); DispatchMessageW(&msg); } }
 struct Slot {
-    controls::Grid presenter, icon, outer, inner;
+    controls::Grid presenter, icon, outer, contentPresenter, contentGrid, textIcon, textContainer, inner;
     controls::TextBlock glyph;
     explicit Slot(wchar_t symbol) {
         Alias(presenter, L"Windows.UI.Xaml.Controls.ContentPresenter"); Alias(icon, L"SystemTray.IconView");
+        Alias(contentPresenter,L"Windows.UI.Xaml.Controls.ContentPresenter");Alias(textIcon,L"SystemTray.TextIconContent");
+        outer.Name(L"ContainerGrid");contentPresenter.Name(L"ContentPresenter");contentGrid.Name(L"ContentGrid");
+        textContainer.Name(L"ContainerGrid");inner.Name(L"Base");glyph.Name(L"InnerTextBlock");
         glyph.Text(winrt::hstring(&symbol, 1)); glyph.FontSize(16);
-        inner.MinWidth(24); inner.Children().Append(glyph); outer.Children().Append(inner);
+        inner.MinWidth(24);inner.Children().Append(glyph);textContainer.Children().Append(inner);
+        textIcon.Children().Append(textContainer);contentGrid.Children().Append(textIcon);
+        contentPresenter.Children().Append(contentGrid);outer.Children().Append(contentPresenter);
         icon.Children().Append(outer); presenter.Children().Append(icon);
     }
 };
@@ -51,7 +56,7 @@ void Run() {
         root.Name(L"ControlCenterButton"); Alias(root, L"SystemTray.OmniButton");
         Alias(content, L"Windows.UI.Xaml.Controls.ContentPresenter"); Alias(items, L"Windows.UI.Xaml.Controls.ItemsPresenter");
         controls::StackPanel stack; stack.Orientation(controls::Orientation::Horizontal);
-        Slot network(0xE701), volume(0xE995), battery(0xE83F);
+        Slot network(0xF8C3), volume(0xE995), battery(0xE83F);
         stack.Children().Append(network.presenter); stack.Children().Append(volume.presenter); stack.Children().Append(battery.presenter);
         items.Children().Append(stack); content.Children().Append(items); frame.Children().Append(content); root.Children().Append(frame);
         button.Content(root); source.Content(button); Pump(); button.UpdateLayout();
@@ -76,12 +81,12 @@ void Run() {
             Check(path.Fill()==white,"native light/dark foreground binding follows shell");
             auto black=xaml::Media::SolidColorBrush(winrt::Windows::UI::Colors::Black());network.glyph.Foreground(black);Pump();
             Check(path.Fill()==black,"foreground switches back without replacing vector");
-            for(wchar_t offline:{wchar_t(0xE774),wchar_t(0xF384),wchar_t(0xEB55),wchar_t(0xEB56),wchar_t(0xF473),wchar_t(0xE871),wchar_t(0xFFFF)}) {
+            for(wchar_t offline:{wchar_t(0xE709),wchar_t(0xE774),wchar_t(0xF384),wchar_t(0xF8CC),wchar_t(0xEB55),wchar_t(0xEB56),wchar_t(0xF473),wchar_t(0xE871),wchar_t(0xEAA1),wchar_t(0xEAA8),wchar_t(0xFFFF)}) {
                 network.glyph.Text(winrt::hstring(&offline,1));
                 Check(!view.Applied() && network.glyph.Opacity()==1 && network.inner.Children().Size()==count,"offline/warning/unknown shell glyph immediately restored");
                 network.glyph.Text(original);Check(view.Applied(),"reconnect reapplies immediately");
             }
-            for(wchar_t connected:{wchar_t(0xE701),wchar_t(0xE872),wchar_t(0xE873),wchar_t(0xE874),wchar_t(0xE839),wchar_t(0xE968),wchar_t(0xF385),wchar_t(0xF386)}) {
+            for(wchar_t connected:{wchar_t(0xE701),wchar_t(0xE872),wchar_t(0xE873),wchar_t(0xE874),wchar_t(0xEC3C),wchar_t(0xEC3D),wchar_t(0xEC3E),wchar_t(0xEC3F),wchar_t(0xF8C3),wchar_t(0xF8C4),wchar_t(0xF8C5),wchar_t(0xF8C6),wchar_t(0xE7F4),wchar_t(0xE839),wchar_t(0xE968),wchar_t(0xF385),wchar_t(0xF386)}) {
                 network.glyph.Text(winrt::hstring(&connected,1));Check(view.Applied(),"Wi-Fi signal and Ethernet variants supported");
             }
             network.glyph.Opacity(.7);Check(network.glyph.Opacity()==0 && std::abs(art.Opacity()-.7)<.000001,"shell opacity changes preserved behind overlay");
@@ -103,11 +108,16 @@ void Run() {
         opacitySource.Opacity(.8);Pump();Check(std::abs(network.glyph.Opacity()-.8)<.000001,"restored binding remains live");
         root.Name(L"NotificationCenterButton");Check(!acrylic::FindNetworkTarget(root,Name),"wrong root rejected");
         root.Name(L"ControlCenterButton");stack.Children().RemoveAt(0);stack.Children().InsertAt(1,network.presenter);
-        Check(!acrylic::FindNetworkTarget(root,Name),"reordered unsupported slots rejected");
+        Check(acrylic::FindNetworkTarget(root,Name).glyph==network.glyph,"network identified after slot reorder without affecting speaker/battery");
+        const wchar_t offline=0xF8CC;network.glyph.Text(winrt::hstring(&offline,1));
+        Check(acrylic::FindNetworkTarget(network.glyph,Name).glyph==network.glyph,"initially offline network still watched for reconnect");
+        network.contentPresenter.Name(L"UnexpectedPresenter");Check(!acrylic::FindNetworkTarget(root,Name),"unsupported template rejected");
+        network.contentPresenter.Name(L"ContentPresenter");network.inner.Name(L"UnexpectedBase");
+        Check(!acrylic::FindNetworkTarget(root,Name),"unrecognized glyph parent rejected");
         button.Click(token); source.Content(nullptr); names.clear();
     }
     source.Close(); DestroyWindow(host); Pump();
-    std::puts("PASS: connected Wi-Fi/Ethernet vector; offline/warning/unknown restoration; theme binding, native size/click/tooltip, overlay recovery, opacity/binding/exit restoration, unsupported tree rejection.");
+    std::puts("PASS: real IconView template, MobWifi/SysWifi/Ethernet vector, reordered slots, initially offline reconnect; offline/warning/unknown restoration; theme binding, native size/click/tooltip, overlay recovery, opacity/binding/exit restoration, unsupported tree rejection.");
 }
 int main() {
     try {

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(jellyflower VERSION 0.16.0 LANGUAGES C CXX RC)
+project(jellyflower VERSION 0.16.1 LANGUAGES C CXX RC)
 
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "Build on Windows with Visual Studio 2022 C++ tools and a Windows SDK (19041 or newer).")

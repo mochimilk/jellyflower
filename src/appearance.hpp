@@ -23,6 +23,6 @@ constexpr AcrylicRecipe Recipe(AcrylicMode mode, bool light) noexcept {
     // layer explicitly in both themes. Legacy accents use ABGR alpha instead.
     // Pure keeps the required nonzero legacy alpha without adding XAML tint.
     return mode == AcrylicMode::Pure ? AcrylicRecipe{0.0, 0.0, 0x01000000u}
-        : light ? AcrylicRecipe{0.70, 0.88, 0xe0ffffffu} : AcrylicRecipe{0.46, 0.88, 0xe0202020u};
+        : light ? AcrylicRecipe{0.58, 0.72, 0xb8ffffffu} : AcrylicRecipe{0.34, 0.72, 0xb8202020u};
 }
 } // namespace acrylic

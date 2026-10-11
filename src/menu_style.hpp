@@ -6,25 +6,11 @@
 #include <cwchar>
 
 namespace acrylic {
-// Windows 11's body/control text is 14 effective pixels, regular Segoe UI
-// Variable. GDI exposes its optical text face under this installed family name.
+// Explicit Segoe UI Regular at 14 effective pixels, scaled for the display.
 inline HFONT CreateSystemMenuFont(UINT dpi) {
-    NONCLIENTMETRICSW metrics{sizeof(metrics)};
     LOGFONTW font{};
-    if (SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS, sizeof(metrics), &metrics, 0, dpi))
-        font = metrics.lfMenuFont;
-    else wcscpy_s(font.lfFaceName, L"Segoe UI");
-    const HDC dc = GetDC(nullptr);
-    if (dc) {
-        LOGFONTW query{}; query.lfCharSet = DEFAULT_CHARSET;
-        wcscpy_s(query.lfFaceName, L"Segoe UI Variable Text");
-        bool installed = false;
-        EnumFontFamiliesExW(dc, &query, [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM value)->int {
-            *reinterpret_cast<bool*>(value) = true; return 0;
-        }, reinterpret_cast<LPARAM>(&installed), 0);
-        if (installed) wcscpy_s(font.lfFaceName, query.lfFaceName);
-        ReleaseDC(nullptr, dc);
-    }
+    wcscpy_s(font.lfFaceName, L"Segoe UI");
+    font.lfCharSet = DEFAULT_CHARSET;
     font.lfHeight = -MulDiv(14, static_cast<int>(dpi), 96);
     font.lfWidth = font.lfEscapement = font.lfOrientation = 0;
     font.lfWeight = FW_NORMAL;

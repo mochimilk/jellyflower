@@ -1,5 +1,17 @@
 # Validation results
 
+## jellyflower 0.16.1, 2026-10-10
+
+The full native x64 Release app/helper/setup/test build passed with MSVC 19.44 and SDK 10.0.26100. Explorer helper v11 isolates the corrected template selector and lighter taskbar recipe from pinned v10 code. No account install, Explorer restart, system theme change, or network disconnect was performed during validation.
+
+NetworkLayout passed with the actual IconView/ContentPresenter/ContentGrid/TextIconContent/ContainerGrid/Base/InnerTextBlock template structure on native XAML objects using shell class metadata. It covered all MobWifi/SysWifi strengths, TVMonitor/Ethernet, both offline code sets, airplane/warning/connecting/unknown restoration, reordered slots, initial offline selection, foreground binding, unchanged measured width, native click/tooltip, untouched neighbors, overlay recovery, and latest opacity/binding/destructor restoration. This corrects the incomplete template and glyph coverage in the 0.16.0 fixture. Actual Explorer matching and physical Wi-Fi/Ethernet transitions remain desktop acceptance checks.
+
+MenuPresentation resolved GDI's selected face to Segoe UI, regular weight 400, at heights 14/21/28 pixels for 96/144/192 DPI. Both themes, text fit, alpha, icons, update/spinner states, cursor import/keyboard states, date toggles, accessibility/fallback, five-DPI placement and entrance checks passed. Actual compositor samples over the fixture's red/blue backgrounds changed in both themes: dark 0x1e1e4b/0x5f1e1e and light 0xc8c8e7/0xe5c7c7. The light 96-DPI root menu and both cursor submenus were visually inspected. These measurements confirm menu translucency on this desktop; they do not measure taskbar acrylic.
+
+AcrylicMaterial passed real brush system/pure transitions and explicit luminosity, retained black/white contrast modeling, legacy contrast and solid fallback. New recipe: light tint 0.58, dark tint 0.34, luminosity 0.72, legacy alpha 184/255. The model confirms at least 25% backdrop contribution through the brightness layer. This is not a measurement of the compositor's final GPU pixels; wallpaper readability and apparent transparency need the visual checks in INSTALLATION_TESTS step 22.
+
+BridgeNotify (including pinned v10 rejection), TaskbarLifetime, SetupLockLogic, SetupRecovery and UpdateLogic passed. Notification dispatch across two native UI threads took 16 ms. Setup recovery used an in-memory registry and made no account writes. Payload QA passed normal-user/DPI manifests, both app icons, exact embedded EXE/DLL/docs/icon bytes, and native setup extraction. ARM64 was not compiled locally for this release. Packages include complete corresponding source and SHA256SUMS; final distribution consistency is checked during packaging.
+
 ## jellyflower 0.16.0, 2026-10-10
 
 The complete native x64 Release app/helper/setup/test build passed with MSVC 19.44 and Windows SDK 10.0.26100 without warnings. The helper protocol is v10 because this release changes the taskbar tint and adds a connected-network adapter. Earlier pinned helpers require one sign-out/sign-in; no Explorer restart or account install was performed during validation.

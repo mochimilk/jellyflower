@@ -26,6 +26,7 @@ int main() {
                 acrylic::ConfigureAcrylic(brush, acrylic::AcrylicMode::System, light);
                 const auto luminosity = brush.TintLuminosityOpacity();
                 Check(luminosity && luminosity.Value() > 0 && luminosity.Value() <= 1, "system has explicit brightness layer");
+                Check(1-luminosity.Value() >= .25, "system brightness layer leaves at least one quarter of the backdrop contribution");
                 const auto color = brush.TintColor(), fallback = brush.FallbackColor();
                 Check(color.R == color.G && color.G == color.B && fallback.A == 255, "neutral theme and opaque fallback");
                 const auto recipe = acrylic::Recipe(acrylic::AcrylicMode::System, light);

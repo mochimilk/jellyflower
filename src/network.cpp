@@ -18,33 +18,51 @@ namespace controls = xaml::Controls;
 namespace media = xaml::Media;
 namespace {
 winrt::hstring ClassName(const xaml::DependencyObject& object) { return winrt::get_class_name(object); }
-bool NetworkSlot(const controls::Grid& grid, XamlClassName name) {
-    struct Part { const wchar_t* type; };
-    constexpr Part path[]{{L"Windows.UI.Xaml.Controls.Grid"}, {L"SystemTray.IconView"},
-        {L"Windows.UI.Xaml.Controls.ContentPresenter"}, {L"Windows.UI.Xaml.Controls.StackPanel"},
-        {L"Windows.UI.Xaml.Controls.ItemsPresenter"}, {L"Windows.UI.Xaml.Controls.ContentPresenter"},
-        {L"Windows.UI.Xaml.Controls.Grid"}, {L"SystemTray.OmniButton"}};
-    xaml::DependencyObject current = grid, presenter{nullptr};
-    for (size_t i=0; i<std::size(path); ++i) {
+bool ControlCenterIcon(const xaml::DependencyObject& icon, XamlClassName name) {
+    if(name(icon)!=L"SystemTray.IconView") return false;
+    constexpr const wchar_t* path[]{L"Windows.UI.Xaml.Controls.ContentPresenter", L"Windows.UI.Xaml.Controls.StackPanel",
+        L"Windows.UI.Xaml.Controls.ItemsPresenter", L"Windows.UI.Xaml.Controls.ContentPresenter",
+        L"Windows.UI.Xaml.Controls.Grid", L"SystemTray.OmniButton"};
+    xaml::DependencyObject current = icon;
+    for (const auto type : path) {
         current = media::VisualTreeHelper::GetParent(current);
-        if (!current || name(current) != path[i].type) return false;
-        if (i==2) presenter=current;
-        if (i==3 && (media::VisualTreeHelper::GetChildrenCount(current)<2
-            || media::VisualTreeHelper::GetChild(current,0)!=presenter)) return false;
+        if (!current || name(current) != type) return false;
     }
     const auto root=current.try_as<xaml::FrameworkElement>();
     return root && root.Name()==L"ControlCenterButton";
 }
-controls::TextBlock FindGlyph(const xaml::DependencyObject& root) {
-    std::vector<xaml::DependencyObject> pending{root};
-    for(unsigned visited=0; !pending.empty() && visited<64; ++visited) {
-        auto item=pending.back(); pending.pop_back();
-        if(const auto glyph=item.try_as<controls::TextBlock>(); glyph && glyph.Name()==L"InnerTextBlock") return glyph;
-        const int count=media::VisualTreeHelper::GetChildrenCount(item);
-        if(count>64) return nullptr;
-        for(int i=0;i<count;++i) pending.push_back(media::VisualTreeHelper::GetChild(item,i));
+xaml::FrameworkElement Child(const xaml::DependencyObject& parent, const wchar_t* wanted, XamlClassName name, bool byName=true) {
+    if(!parent) return nullptr;
+    const int count=media::VisualTreeHelper::GetChildrenCount(parent);
+    if(count>64) return nullptr;
+    for(int i=0;i<count;++i) {
+        const auto child=media::VisualTreeHelper::GetChild(parent,i).try_as<xaml::FrameworkElement>();
+        if(child && (byName?child.Name():name(child))==wanted) return child;
     }
     return nullptr;
+}
+bool NetworkGlyph(const winrt::hstring& value) noexcept {
+    if(ConnectedNetworkGlyph(value)) return true;
+    if(value.size()!=1) return false;
+    switch(value[0]) {
+    case 0xE709: case 0xE774: case 0xF384: case 0xF8CC: // airplane / offline
+    case 0xEB55: case 0xEB56: case 0xF473: case 0xE871: // warnings / unknown Wi-Fi
+    case 0xEAA1: case 0xEAA2: case 0xEAA3: case 0xEAA4: case 0xEAA5: case 0xEAA8: return true; // shell connecting animation
+    default:return false;
+    }
+}
+NetworkTarget IconTarget(const xaml::DependencyObject& icon, XamlClassName name) {
+    // The real IconView template has a ContentPresenter and TextIconContent
+    // between its outer grid and glyph. Never infer network from slot order.
+    auto child=Child(icon,L"ContainerGrid",name);
+    child=Child(child,L"ContentPresenter",name);
+    child=Child(child,L"ContentGrid",name);
+    child=Child(child,L"SystemTray.TextIconContent",name,false);
+    child=Child(child,L"ContainerGrid",name);
+    const auto base=Child(child,L"Base",name).try_as<controls::Grid>();
+    const auto glyph=Child(base,L"InnerTextBlock",name).try_as<controls::TextBlock>();
+    if(base && glyph && NetworkGlyph(glyph.Text())) return {base,glyph};
+    return {};
 }
 }
 bool ConnectedNetworkGlyph(const winrt::hstring& value) noexcept {
@@ -53,7 +71,9 @@ bool ConnectedNetworkGlyph(const winrt::hstring& value) noexcept {
     // glyphs. The shell's status remains authoritative; no connectivity polling.
     switch(value[0]) {
     case 0xE701: case 0xE872: case 0xE873: case 0xE874: // Wi-Fi / signal levels
-    case 0xE839: case 0xE968: // Ethernet / network
+    case 0xEC3C: case 0xEC3D: case 0xEC3E: case 0xEC3F: // taskbar MobWifi1..4
+    case 0xF8C3: case 0xF8C4: case 0xF8C5: case 0xF8C6: // taskbar SysWifi4..1
+    case 0xE7F4: case 0xE839: case 0xE968: // TVMonitor / Ethernet / network
     case 0xF385: case 0xF386: return true; // newer connected variants
     default: return false;
     }
@@ -65,9 +85,7 @@ NetworkTarget FindNetworkTarget(const xaml::DependencyObject& object, XamlClassN
     std::vector<xaml::DependencyObject> pending{root};
     for(unsigned visited=0; !pending.empty() && visited<256; ++visited) {
         auto item=pending.back(); pending.pop_back();
-        if(const auto grid=item.try_as<controls::Grid>(); grid && NetworkSlot(grid,className)) {
-            if(const auto glyph=FindGlyph(grid)) return {grid,glyph};
-        }
+        if(ControlCenterIcon(item,className)) if(const auto target=IconTarget(item,className)) return target;
         const int count=media::VisualTreeHelper::GetChildrenCount(item);
         if(count>64) return {};
         for(int i=0;i<count;++i) pending.push_back(media::VisualTreeHelper::GetChild(item,i));

@@ -121,7 +121,7 @@ int wmain(int argc,wchar_t** argv) {
             Check(font.lfWeight==FW_NORMAL && font.lfQuality==ANTIALIASED_QUALITY && font.lfHeight==-MulDiv(14,dpi,96),"regular Windows 11 body size with grayscale smoothing for glass");
             const HDC fontDc=CreateCompatibleDC(nullptr);const auto previous=SelectObject(fontDc,popup.font);wchar_t face[LF_FACESIZE]{};GetTextFaceW(fontDc,LF_FACESIZE,face);TEXTMETRICW resolved{};GetTextMetricsW(fontDc,&resolved);SelectObject(fontDc,previous);DeleteDC(fontDc);
             Check(resolved.tmWeight==FW_NORMAL,"resolved glyph face uses normal weight, not a synthesized light/bold request");
-            Check(wcscmp(face,L"Segoe UI Variable Text")==0,"GDI resolves the actual installed Windows 11 variable text face");
+            Check(wcscmp(face,L"Segoe UI")==0,"GDI resolves Segoe UI rather than a substituted family");
             if(theme==0) std::wcout<<L"Menu font at "<<dpi<<L" DPI: "<<face<<L", height="<<font.lfHeight<<L", weight="<<font.lfWeight<<L'\n';
             Check(popup.rows[0].label==L"system" && popup.rows[0].secondary==(light?L"light":L"dark"),"system first with current theme secondary");
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");

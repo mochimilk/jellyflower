@@ -282,6 +282,11 @@ public:
         try {
             if (enabled) {
                 const auto found = FindNetworkTarget(root);
+                if(state) {
+                    const auto text=found?found.glyph.Text():winrt::hstring{};
+                    InterlockedExchange(&state->networkGlyph,text.size()==1?static_cast<LONG>(text[0]):0);
+                    InterlockedExchange(&state->networkResult,S_OK);
+                }
                 if (found.glyph != networkTarget.glyph || found.slot != networkTarget.slot || (found && !network)) {
                     network.reset(); networkTarget = found;
                     if (found) network = std::make_unique<NetworkView>(found);
