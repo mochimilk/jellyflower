@@ -1,0 +1,5 @@
+LIBRARY "jellyflower-bridge"
+EXPORTS
+    AcrylicHookProc
+    DllGetClassObject PRIVATE
+    DllCanUnloadNow PRIVATE

@@ -1,0 +1,4 @@
+#include "resource.h"
+IDI_APP_DARK ICON "app-dark.ico"
+IDI_APP_LIGHT ICON "app-light.ico"
+#include "version.rc"

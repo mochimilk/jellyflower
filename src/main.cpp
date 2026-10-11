@@ -1,0 +1,607 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "shared.hpp"
+#include "bridge_notify.hpp"
+#include "taskbar_probe.hpp"
+#include "clock_options.hpp"
+#include "clock_font.hpp"
+#include "tray.hpp"
+#include "cursors.hpp"
+#include "theme.hpp"
+#include "popup.hpp"
+#include "updates.hpp"
+#include "version.hpp"
+#include <shellapi.h>
+#include <shlobj.h>
+#include <algorithm>
+#include <iterator>
+#include <sstream>
+#include <vector>
+#include <cwchar>
+
+using namespace acrylic;
+namespace {
+constexpr UINT_PTR RefreshTimer = 1;
+constexpr UINT_PTR DebounceTimer = 2;
+constexpr UINT_PTR UpdateTimer = 3;
+constexpr UINT RefreshMs = 5000;
+struct AccentPolicy { int state; UINT flags; DWORD color; DWORD animation; };
+struct CompositionData { int attribute; void* data; SIZE_T size; };
+static_assert(sizeof(AccentPolicy) == 16);
+using SetComposition = BOOL(WINAPI*)(HWND, const CompositionData*);
+
+std::wstring ExePath() {
+    std::vector<wchar_t> path(32768);
+    const DWORD length = GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size()));
+    if (!length || length >= path.size()) return {};
+    return {path.data(), length};
+}
+DWORD BuildNumber() {
+    // RtlGetVersion avoids version-lie compatibility shims.
+    using GetVersion = LONG(WINAPI*)(OSVERSIONINFOW*);
+    const auto fn = reinterpret_cast<GetVersion>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlGetVersion"));
+    OSVERSIONINFOW version{};
+    version.dwOSVersionInfoSize = sizeof(version);
+    return fn && fn(&version) >= 0 ? version.dwBuildNumber : 0;
+}
+bool IsExplorer(HWND window) {
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
+    wchar_t path[32768]{};
+    DWORD length = static_cast<DWORD>(std::size(path));
+    if (!process || !QueryFullProcessImageNameW(process.get(), 0, path, &length)) return false;
+    const wchar_t* filename = wcsrchr(path, L'\\');
+    return _wcsicmp(filename ? filename + 1 : path, L"explorer.exe") == 0;
+}
+std::vector<HWND> Taskbars() {
+    std::vector<HWND> result;
+    EnumWindows([](HWND window, LPARAM data) -> BOOL {
+        wchar_t name[64]{};
+        GetClassNameW(window, name, static_cast<int>(std::size(name)));
+        if ((wcscmp(name, L"Shell_TrayWnd") == 0 || wcscmp(name, L"Shell_SecondaryTrayWnd") == 0)
+            && IsExplorer(window)) {
+            reinterpret_cast<std::vector<HWND>*>(data)->push_back(window);
+        }
+        return TRUE;
+    }, reinterpret_cast<LPARAM>(&result));
+    return result;
+}
+std::wstring LogPath() {
+    PWSTR local = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) return {};
+    std::wstring folder = std::wstring(local) + L"\\jellyflower";
+    CoTaskMemFree(local);
+    CreateDirectoryW(folder.c_str(), nullptr);
+    return folder + L"\\diagnostics.log";
+}
+void Log(const std::wstring& message) {
+    const auto path = LogPath();
+    if (path.empty()) return;
+    Handle file(CreateFileW(path.c_str(), FILE_APPEND_DATA | GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!file) return;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(file.get(), &size) && size.QuadPart > 65536) {
+        file.reset(CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+            nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+        if (!file) return;
+    }
+    SYSTEMTIME time{};
+    GetLocalTime(&time);
+    wchar_t stamp[64]{};
+    swprintf_s(stamp, L"%04u-%02u-%02u %02u:%02u:%02u ", time.wYear, time.wMonth,
+        time.wDay, time.wHour, time.wMinute, time.wSecond);
+    const auto text = std::wstring(stamp) + message + L"\r\n";
+    const int sizeUtf8 = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+        nullptr, 0, nullptr, nullptr);
+    std::string bytes(static_cast<size_t>(sizeUtf8), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), bytes.data(), sizeUtf8, nullptr, nullptr);
+    DWORD written = 0;
+    WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr);
+}
+DWORD Startup(bool install) {
+    HKEY key = nullptr;
+    LONG result = install
+        ? RegCreateKeyExW(HKEY_CURRENT_USER, RunKey, 0, nullptr, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, nullptr, &key, nullptr)
+        : RegOpenKeyExW(HKEY_CURRENT_USER, RunKey, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key);
+    if (!install && result == ERROR_FILE_NOT_FOUND) return ERROR_SUCCESS;
+    if (result != ERROR_SUCCESS) return static_cast<DWORD>(result);
+    const auto path = ExePath();
+    if (path.empty()) { RegCloseKey(key); return ERROR_BAD_PATHNAME; }
+    const auto command = L"\"" + path + L"\"";
+    if (install) {
+        result = RegSetValueExW(key, RunValue, 0, REG_SZ,
+            reinterpret_cast<const BYTE*>(command.c_str()), static_cast<DWORD>((command.size() + 1) * sizeof(wchar_t)));
+        if (!result) {
+            // Migration from the pre-jellyflower build: one login entry only.
+            wchar_t older[32768]{}; DWORD type = 0, size = sizeof(older);
+            if (RegQueryValueExW(key, L"AcrylicTaskbar", nullptr, &type, reinterpret_cast<BYTE*>(older), &size) == ERROR_SUCCESS
+                && type == REG_SZ && wcsstr(older, L"AcrylicTaskbar.exe")) RegDeleteValueW(key, L"AcrylicTaskbar");
+        }
+    } else {
+        DWORD type = 0, bytes = 0;
+        result = RegQueryValueExW(key, RunValue, nullptr, &type, nullptr, &bytes);
+        if (result == ERROR_FILE_NOT_FOUND) result = ERROR_SUCCESS;
+        else if (result == ERROR_SUCCESS) {
+            std::vector<wchar_t> existing(bytes / sizeof(wchar_t) + 1, L'\0');
+            result = RegQueryValueExW(key, RunValue, nullptr, &type,
+                reinterpret_cast<BYTE*>(existing.data()), &bytes);
+            if (result == ERROR_SUCCESS) {
+                // An older copy cannot remove a newer copy's startup registration.
+                result = type == REG_SZ && _wcsicmp(existing.data(), command.c_str()) == 0
+                    ? RegDeleteValueW(key, RunValue) : ERROR_ALREADY_EXISTS;
+            }
+        }
+    }
+    RegCloseKey(key);
+    return static_cast<DWORD>(result);
+}
+DWORD Stop() {
+    const HWND window = FindWindowW(WindowClass, nullptr);
+    if (!window) return ERROR_SUCCESS;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(window, &pid);
+    Handle process(OpenProcess(SYNCHRONIZE, FALSE, pid));
+    if (!PostMessageW(window, WM_CLOSE, 0, 0)) return GetLastError();
+    if (!process) return ERROR_ACCESS_DENIED;
+    return WaitForSingleObject(process.get(), 5000) == WAIT_OBJECT_0 ? ERROR_SUCCESS : WAIT_TIMEOUT;
+}
+DWORD Diagnose(const wchar_t* output) {
+    const HWND window = FindWindowW(WindowClass, nullptr);
+    DWORD pid = 0;
+    if (window) GetWindowThreadProcessId(window, &pid);
+    LONG values[20]{};
+    bool responsive = window != nullptr;
+    for (WPARAM query = 0; query < std::size(values) && window; ++query) {
+        DWORD_PTR result = 0;
+        if (!SendMessageTimeoutW(window, QueryMessage, query, 0, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &result)) {
+            responsive = false;
+            break;
+        }
+        values[query] = static_cast<LONG>(result);
+    }
+    SYSTEM_POWER_STATUS power{};
+    const bool powerKnown = GetSystemPowerStatus(&power) != FALSE && power.SystemStatusFlag != 255;
+    std::ostringstream json;
+    json << "{\n  \"running\": " << (window ? "true" : "false")
+        << ",\n  \"responsive\": " << (responsive ? "true" : "false")
+        << ",\n  \"pid\": " << pid << ",\n  \"windowsBuild\": " << BuildNumber()
+        << ",\n  \"batterySaver\": " << (powerKnown ? (power.SystemStatusFlag ? "true" : "false") : "null")
+        << ",\n  \"backend\": \"" << (values[0] == Modern ? "xaml" : values[0] == Legacy ? "accent" :
+            values[0] == Unsupported ? "unsupported" : "waiting") << "\""
+        << ",\n  \"appliedBackgrounds\": " << values[1]
+        << ",\n  \"lastResult\": " << values[2]
+        << ",\n  \"bridgeState\": " << values[3]
+        << ",\n  \"acrylicEnabled\": " << (values[4] ? "true" : "false")
+        << ",\n  \"trayIconPresent\": " << (values[5] ? "true" : "false")
+        << ",\n  \"cursorMode\": \"";
+    const wchar_t* cursorName = CursorManager::Name(static_cast<UINT>(values[6]));
+    while (*cursorName) json << static_cast<char>(*cursorName++);
+    json << "\""
+        << ",\n  \"cursorApplied\": " << (values[7] ? "true" : "false")
+        << ",\n  \"cursorLastError\": " << values[8]
+        << ",\n  \"taskbarBordersHidden\": " << values[9]
+        << ",\n  \"lightMode\": " << (values[10] ? "true" : "false")
+        << ",\n  \"acrylicMode\": \"" << (values[11] == 2 ? "pure" : values[11] == 1 ? "system" : "off") << "\""
+        << ",\n  \"singleLineClocks\": " << values[12]
+        << ",\n  \"clockLastResult\": " << values[13]
+        << ",\n  \"hiddenVolumeIcons\": " << values[14]
+        << ",\n  \"volumeLastResult\": " << values[15]
+        << ",\n  \"taskbarXamlIslands\": " << values[16]
+        << ",\n  \"bridgeRetained\": " << (values[17] ? "true" : "false")
+        << ",\n  \"clockDate\": " << (values[18] ? "true" : "false")
+        << ",\n  \"clockFont\": \"";
+    const wchar_t* fontName = ClockFontLabel(static_cast<ClockFont>(values[19]));
+    while (*fontName) json << static_cast<char>(*fontName++);
+    json << "\""
+        << ",\n  \"visualBlurVerified\": false\n}\n";
+    Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!file) return GetLastError();
+    const auto bytes = json.str();
+    DWORD written = 0;
+    if (!WriteFile(file.get(), bytes.data(), static_cast<DWORD>(bytes.size()), &written, nullptr)) return GetLastError();
+    return written == bytes.size() ? ERROR_SUCCESS : ERROR_WRITE_FAULT;
+}
+
+class Controller {
+public:
+    HWND window = nullptr;
+    AcrylicMode mode = AcrylicMode::System;
+    TrayIcon tray;
+    UpdateChecker updates;
+    CursorManager cursors;
+    ClockOptions clock = LoadClockOptions();
+    DWORD build = BuildNumber();
+    LONG backend = Waiting, applied = 0, lastResult = S_OK;
+    UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
+    HPOWERNOTIFY powerNotification = nullptr;
+    SetComposition setComposition = reinterpret_cast<SetComposition>(
+        GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
+    HMODULE bridgeDll = nullptr;
+    HHOOK bridgeHook = nullptr;
+    HWINEVENTHOOK foregroundHook = nullptr;
+    Handle mapping;
+    Handle explorerProcess;
+    SharedState* shared = nullptr;
+    DWORD explorerPid = 0;
+    LONG previousBridgeState = Idle, previousBridgeResult = S_OK;
+    unsigned observedIslands = 0;
+    bool bridgeRetained = false;
+    std::vector<HWND> changedLegacyTaskbars;
+
+    void ReleaseBridge() {
+        if (shared) InterlockedExchange(&shared->running, 0);
+        SetBridgeMode(shared, explorerPid, AcrylicMode::Off, true);
+        if (bridgeHook) { UnhookWindowsHookEx(bridgeHook); bridgeHook = nullptr; }
+        if (shared) { UnmapViewOfFile(shared); shared = nullptr; }
+        mapping.reset();
+        explorerProcess.reset();
+        explorerPid = 0;
+    }
+    void StartBridge(HWND primary) {
+        DWORD pid = 0;
+        const DWORD tid = GetWindowThreadProcessId(primary, &pid);
+        if (!tid || !pid) return; // A disappearing HWND must not end a live session.
+        const bool newOwner = pid != explorerPid || !shared || !explorerProcess
+            || WaitForSingleObject(explorerProcess.get(), 0) != WAIT_TIMEOUT;
+        if (newOwner) ReleaseBridge();
+        // An older pinned helper must be removed by restarting Explorer before
+        // a different brush implementation attaches to the same rectangles.
+        for (const UINT version : {1u, 2u, 3u, 4u, 5u, 6u, 7u}) {
+            Handle older(OpenFileMappingW(FILE_MAP_READ, FALSE,
+                (L"Local\\AcrylicTaskbar.Bridge.v" + std::to_wstring(version) + L"." + std::to_wstring(pid)).c_str()));
+            if (older) { lastResult = HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH); return; }
+        }
+        if (newOwner) {
+            explorerPid = pid;
+            explorerProcess.reset(OpenProcess(SYNCHRONIZE, FALSE, pid));
+            if (!explorerProcess) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
+            mapping.reset(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0,
+                sizeof(SharedState), MappingName(pid).c_str()));
+            if (!mapping) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
+            shared = static_cast<SharedState*>(MapViewOfFile(mapping.get(), FILE_MAP_ALL_ACCESS, 0, 0, sizeof(SharedState)));
+            if (!shared) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
+            InterlockedExchange(&shared->magic, Magic);
+            InterlockedExchange(&shared->controllerPid, static_cast<LONG>(GetCurrentProcessId()));
+            InterlockedIncrement(&shared->epoch);
+            InterlockedExchange(&shared->running, 1);
+            previousBridgeState = Idle;
+        }
+        InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
+        SetBridgeMode(shared, explorerPid, mode, newOwner);
+        if (!bridgeDll) {
+            auto path = ExePath();
+            const auto slash = path.find_last_of(L'\\');
+            if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
+            path.resize(slash + 1);
+            path += L"jellyflower-bridge.dll";
+            bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+            if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
+        }
+        if (Read(shared->bridgeState) == Attached) {
+            if (bridgeHook) { UnhookWindowsHookEx(bridgeHook); bridgeHook = nullptr; }
+        } else if (!bridgeHook) {
+            const auto hookProc = reinterpret_cast<HOOKPROC>(GetProcAddress(bridgeDll, "AcrylicHookProc"));
+            if (!hookProc) { lastResult = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND); return; }
+            bridgeHook = SetWindowsHookExW(WH_CALLWNDPROC, hookProc, bridgeDll, tid);
+            if (!bridgeHook) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
+        }
+        if (bridgeHook) {
+            DWORD_PTR ignored = 0;
+            // Forces a hook callback even when Explorer's taskbar thread is idle.
+            SendMessageTimeoutW(primary, WM_NULL, 0, 0, SMTO_ABORTIFHUNG, 200, &ignored);
+        }
+        const LONG state = Read(shared->bridgeState);
+        lastResult = Read(shared->lastResult);
+        applied = Read(shared->appliedCount);
+        if (state != previousBridgeState || lastResult != previousBridgeResult) {
+            Log(L"XAML bridge state=" + std::to_wstring(state) + L" result=" + std::to_wstring(lastResult));
+            previousBridgeState = state;
+            previousBridgeResult = lastResult;
+        }
+    }
+    void RestoreLegacy() {
+        for (const HWND taskbar : changedLegacyTaskbars) {
+            wchar_t name[64]{};
+            GetClassNameW(taskbar, name, static_cast<int>(std::size(name)));
+            if ((wcscmp(name, L"Shell_TrayWnd") == 0 || wcscmp(name, L"Shell_SecondaryTrayWnd") == 0)
+                && IsWindow(taskbar) && IsExplorer(taskbar)) {
+                DWORD_PTR ignored = 0;
+                SendMessageTimeoutW(taskbar, WM_DWMCOMPOSITIONCHANGED, 1, 0,
+                    SMTO_ABORTIFHUNG, 200, &ignored);
+            }
+        }
+        changedLegacyTaskbars.clear();
+    }
+    void Refresh() {
+        tray.Refresh(window, mode);
+        const DWORD cursorBefore = cursors.Error();
+        cursors.Refresh();
+        if (cursors.Error() != cursorBefore && cursors.Error()) {
+            Log(L"Cursor error=" + std::to_wstring(cursors.Error()));
+            tray.CursorError(cursors.Error(), cursors.SaveFailed());
+        }
+        const auto bars = Taskbars();
+        HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
+        if (primary && !IsExplorer(primary)) primary = nullptr;
+        const auto probe = ProbeTaskbar(build, primary, shared ? explorerProcess.get() : nullptr, explorerPid);
+        const LONG selected = probe.backend;
+        if (observedIslands != probe.islands && probe.retained)
+            Log(L"Retained live XAML bridge; taskbar islands=" + std::to_wstring(probe.islands));
+        observedIslands = probe.islands;
+        bridgeRetained = probe.retained;
+        if (backend != selected) {
+            if (backend == Legacy) RestoreLegacy();
+            if (selected != Modern) ReleaseBridge();
+            backend = selected;
+            Log(L"Backend=" + std::to_wstring(backend) + L" Windows build=" + std::to_wstring(build)
+                + L" taskbar islands=" + std::to_wstring(observedIslands));
+        }
+        applied = 0;
+        if (mode == AcrylicMode::Off && backend != Modern) {
+            RestoreLegacy();
+            return;
+        }
+        if (backend == Modern) {
+            const LONG previous = lastResult;
+            if (primary) StartBridge(primary);
+            else if (shared) {
+                // The shell is rebuilding its HWNDs; publish settings without
+                // ending ownership or restoring the surviving XAML elements.
+                InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
+                SetBridgeMode(shared, explorerPid, mode);
+                applied = Read(shared->appliedCount);
+                lastResult = Read(shared->lastResult);
+            }
+            if (lastResult != previous && FAILED(lastResult))
+                Log(L"XAML controller result=" + std::to_wstring(lastResult));
+        }
+        else if (backend == Legacy) {
+            if (!setComposition) { lastResult = HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND); return; }
+            // Undocumented WCA_ACCENT_POLICY (19), ACCENT_ENABLE_ACRYLICBLURBEHIND (4).
+            // Tint is ABGR: approximately 65% white or 40% dark gray.
+            AccentPolicy policy{4, 0, Recipe(mode, SystemLightTheme()).legacyColor, 0};
+            const CompositionData data{19, &policy, sizeof(policy)};
+            LONG result = S_OK;
+            for (const HWND taskbar : bars) {
+                SetLastError(ERROR_SUCCESS);
+                if (setComposition(taskbar, &data)) {
+                    ++applied;
+                    if (std::find(changedLegacyTaskbars.begin(), changedLegacyTaskbars.end(), taskbar) == changedLegacyTaskbars.end())
+                        changedLegacyTaskbars.push_back(taskbar);
+                } else {
+                    const auto error = GetLastError();
+                    result = error ? HRESULT_FROM_WIN32(error) : E_FAIL;
+                }
+            }
+            if (result != lastResult) Log(L"Accent result=" + std::to_wstring(result));
+            lastResult = result;
+        }
+    }
+    void CycleAppearance() {
+        mode = NextAcrylicMode(mode);
+        Log(AcrylicLabel(mode));
+        Refresh();
+    }
+    void UpdateAction() {
+        const auto available = updates.Result();
+        if (available.status == UpdateStatus::Available) {
+            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", available.download.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+            if (result <= 32) tray.UpdateNotice(L"download could not be opened", L"Open github.com/mochimilk/jellyflower/releases in your browser.", true);
+            return;
+        }
+        updates.Start();
+        SetTimer(window, UpdateTimer, 150, nullptr);
+    }
+    void PollUpdate() {
+        UpdateResult result;
+        if (!updates.Poll(result)) return;
+        KillTimer(window, UpdateTimer);
+        RefreshUpdateMenu(window);
+        Log(L"Update check status=" + std::to_wstring(static_cast<UINT>(result.status)) + L" error=" + std::to_wstring(result.error));
+        if (result.status == UpdateStatus::Available) {
+            const auto text = L"jellyflower " + result.version + L" is available. Choose check for updates again to download its installer.";
+            tray.UpdateNotice(L"update available", text.c_str());
+        } else if (result.status == UpdateStatus::Current) tray.UpdateNotice(L"you're up to date", (std::wstring(L"jellyflower ") + AppVersion + L" is the latest stable release.").c_str());
+        else if (result.status == UpdateStatus::NoRelease) tray.UpdateNotice(L"no release yet", L"No public stable release has been published. Try again later.");
+        else tray.UpdateNotice(L"could not check for updates", L"Check your connection and try again. GitHub may be temporarily unavailable or rate limited.", true);
+    }
+    UINT ChangeClock(UINT command) {
+        DWORD error = ERROR_SUCCESS;
+        if (command == TrayDateCommand) {
+            error = SaveClockOption(L"ClockDate", clock.date ? 0 : 1);
+            if (!error) clock.date = !clock.date;
+        } else {
+            const auto font = static_cast<ClockFont>(command - ClockFontCommandBase);
+            if (font != ClockFont::System) {
+                try { ClockFontRenderer check(ClockFontPath(font)); check.Render(L"9:41 am", 12, 1, 0xFFFFFFFF); }
+                catch (HRESULT hr) { error = HRESULT_FACILITY(hr) == FACILITY_WIN32 ? HRESULT_CODE(hr) : ERROR_INVALID_DATA; }
+                catch (...) { error = ERROR_INVALID_DATA; }
+            }
+            if (!error) error = SaveClockOption(L"ClockFont", static_cast<DWORD>(font));
+            if (!error) clock.font = font;
+        }
+        if (error) { Log(L"Clock setting error=" + std::to_wstring(error)); tray.ClockError(error); }
+        else {
+            Log(std::wstring(L"Clock date=") + (clock.date ? L"on" : L"off") + L" font=" + ClockFontLabel(clock.font));
+            Refresh();
+            SetBridgeMode(shared, explorerPid, mode, true);
+        }
+        return clock.Packed();
+    }
+    ~Controller() {
+        ReleaseBridge();
+        RestoreLegacy();
+        if (foregroundHook) UnhookWinEvent(foregroundHook);
+        if (powerNotification) UnregisterPowerSettingNotification(powerNotification);
+        if (bridgeDll) FreeLibrary(bridgeDll);
+    }
+};
+Controller* controller = nullptr;
+void CALLBACK ForegroundChanged(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
+    if (controller && controller->window && controller->backend == Legacy)
+        SetTimer(controller->window, DebounceTimer, 200, nullptr);
+}
+LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    auto* self = reinterpret_cast<Controller*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        self = static_cast<Controller*>(reinterpret_cast<CREATESTRUCTW*>(lParam)->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        self->window = window;
+    }
+    if (!self) return DefWindowProcW(window, message, wParam, lParam);
+    if (message == QueryMessage) {
+        if (wParam == BackendQuery) return self->backend;
+        if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
+        if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult
+            : self->shared ? Read(self->shared->lastResult) : S_OK;
+        if (wParam == BridgeQuery) return self->shared ? Read(self->shared->bridgeState) : Idle;
+        if (wParam == EnabledQuery) return self->mode != AcrylicMode::Off;
+        if (wParam == AcrylicModeQuery) return static_cast<LONG>(self->mode);
+        if (wParam == ClockQuery) return self->shared ? Read(self->shared->clockCount) : 0;
+        if (wParam == ClockResultQuery) return self->shared ? Read(self->shared->clockResult) : S_OK;
+        if (wParam == VolumeQuery) return self->shared ? Read(self->shared->volumeCount) : 0;
+        if (wParam == VolumeResultQuery) return self->shared ? Read(self->shared->volumeResult) : S_OK;
+        if (wParam == IslandsQuery) return self->observedIslands;
+        if (wParam == RetainedQuery) return self->bridgeRetained;
+        if (wParam == ClockDateQuery) return self->clock.date;
+        if (wParam == ClockFontQuery) return static_cast<LONG>(self->clock.font);
+        if (wParam == TrayQuery) return self->tray.Present();
+        if (wParam == CursorModeQuery) return self->cursors.Mode();
+        if (wParam == CursorAppliedQuery) return self->cursors.Applied();
+        if (wParam == CursorErrorQuery) return self->cursors.Error();
+        if (wParam == BorderQuery) return self->shared ? Read(self->shared->borderCount) : 0;
+        if (wParam == LightQuery) return SystemLightTheme();
+    } else if (message == TrayMessage) {
+        const UINT event = LOWORD(lParam);
+        if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) {
+            const UINT selected = self->tray.Menu(self->mode, self->cursors.Mode());
+            if (selected == TrayExitCommand) PostMessageW(window, WM_CLOSE, 0, 0);
+        }
+        return 0;
+    } else if (message == TrayThemeQueryMessage) {
+        return SystemLightTheme();
+    } else if (message == TrayClockQueryMessage) {
+        return self->clock.Packed();
+    } else if (message == TrayUpdateQueryMessage) {
+        return static_cast<UINT>(self->updates.Status());
+    } else if (message == TrayCursorIconMessage) {
+        return reinterpret_cast<LRESULT>(self->cursors.MenuIcon(static_cast<int>(wParam)));
+    } else if (message == TraySettingMessage) {
+        if (wParam == TrayUpdateCommand) {
+            self->UpdateAction();
+            return static_cast<UINT>(self->updates.Status());
+        }
+        if (wParam == TrayDateCommand || (wParam >= ClockFontCommandBase && wParam <= ClockFontCommandBase + 2))
+            return self->ChangeClock(static_cast<UINT>(wParam));
+        if (wParam == TrayThemeCommand) {
+            const auto change = SetWindowsLightTheme(!SystemLightTheme());
+            if (change.error) {
+                Log(L"Windows mode error=" + std::to_wstring(change.error) + L" rollback=" + std::to_wstring(change.rollbackError));
+                self->tray.ThemeError(change.error, change.rollbackError != 0);
+            } else Log(SystemLightTheme() ? L"Windows light mode selected" : L"Windows dark mode selected");
+            if (change.notificationError) self->tray.ThemeError(change.notificationError, false, true);
+            self->Refresh();
+            SetBridgeMode(self->shared, self->explorerPid, self->mode, true);
+            return SystemLightTheme();
+        }
+        if (wParam == TrayToggleCommand) {
+            self->CycleAppearance();
+            return static_cast<LONG>(self->mode);
+        }
+        if (wParam >= CursorCommandBase && wParam <= CursorCommandBase + CursorDisabled) {
+            const DWORD error = self->cursors.Select(static_cast<UINT>(wParam) - CursorCommandBase);
+            if (error) { Log(L"Cursor selection error=" + std::to_wstring(error)); self->tray.CursorError(error, self->cursors.SaveFailed()); }
+        }
+        return self->cursors.Mode();
+    } else if (message == WM_TIMER) {
+        if (wParam == UpdateTimer) { self->PollUpdate(); return 0; }
+        if (wParam == DebounceTimer) KillTimer(window, DebounceTimer);
+        self->Refresh();
+        return 0;
+    } else if (message == self->taskbarCreated || message == WM_DISPLAYCHANGE
+        || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DWMCOMPOSITIONCHANGED
+        || message == WM_DPICHANGED) {
+        if (message == self->taskbarCreated) self->tray.ShellRestarted();
+        SetTimer(window, DebounceTimer, 300, nullptr);
+        return 0;
+    } else if (message == WM_POWERBROADCAST) {
+        if (wParam == PBT_POWERSETTINGCHANGE && lParam) {
+            const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(lParam);
+            if (IsEqualGUID(setting->PowerSetting, PowerSavingGuid) && setting->DataLength == sizeof(DWORD)) {
+                DWORD status = 0;
+                CopyMemory(&status, setting->Data, sizeof(status));
+                Log(L"Battery saver=" + std::to_wstring(status) + L"; selected appearance remains unchanged");
+            }
+        }
+        SetTimer(window, DebounceTimer, 500, nullptr);
+        return TRUE; // Neither quitting nor selecting a different appearance on battery saver.
+    } else if (message == WM_QUERYENDSESSION) return TRUE;
+    else if (message == WM_CLOSE || (message == WM_ENDSESSION && wParam)) {
+        DestroyWindow(window);
+        return 0;
+    } else if (message == WM_DESTROY) {
+        self->tray.Remove();
+        self->window = nullptr;
+        PostQuitMessage(0);
+        return 0;
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+}
+} // namespace
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    int argc = 0;
+    PWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return static_cast<int>(GetLastError());
+    DWORD commandResult = ERROR_SUCCESS;
+    if (argc > 1) {
+        if (argc == 2 && wcscmp(argv[1], L"--install") == 0) commandResult = Startup(true);
+        else if (argc == 2 && wcscmp(argv[1], L"--uninstall") == 0) {
+            commandResult = Startup(false);
+            if (commandResult == ERROR_SUCCESS) commandResult = Stop();
+        } else if (argc == 2 && wcscmp(argv[1], L"--stop") == 0) commandResult = Stop();
+        else if (argc == 3 && wcscmp(argv[1], L"--cursor-pack") == 0) commandResult = CursorManager::ConfigurePack(argv[2]);
+        else if (argc == 3 && wcscmp(argv[1], L"--verify-cursors") == 0) commandResult = CursorManager::VerifyPack(argv[2]);
+        else if (argc == 2 && wcscmp(argv[1], L"--restore-cursors") == 0)
+            commandResult = SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0) ? ERROR_SUCCESS : GetLastError();
+        else if (argc == 3 && wcscmp(argv[1], L"--diagnose") == 0) commandResult = Diagnose(argv[2]);
+        else commandResult = ERROR_INVALID_PARAMETER;
+        LocalFree(argv);
+        return static_cast<int>(commandResult);
+    }
+    LocalFree(argv);
+    Handle singleton(CreateMutexW(nullptr, FALSE, L"Local\\AcrylicTaskbar.Controller.v1"));
+    if (!singleton) return static_cast<int>(GetLastError());
+    if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+    Controller app;
+    controller = &app;
+    WNDCLASSW wc{};
+    wc.hInstance = instance;
+    wc.lpfnWndProc = WindowProc;
+    wc.lpszClassName = WindowClass;
+    if (!RegisterClassW(&wc)) return static_cast<int>(GetLastError());
+    // A hidden top-level window receives shell/system broadcasts; HWND_MESSAGE would not.
+    const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WindowClass, L"jellyflower",
+        WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, &app);
+    if (!window) return static_cast<int>(GetLastError());
+    app.powerNotification = RegisterPowerSettingNotification(window, &PowerSavingGuid, DEVICE_NOTIFY_WINDOW_HANDLE);
+    app.foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
+        ForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+    if (!SetTimer(window, RefreshTimer, RefreshMs, nullptr)) {
+        const auto error = GetLastError();
+        DestroyWindow(window);
+        return static_cast<int>(error ? error : ERROR_NOT_ENOUGH_MEMORY);
+    }
+    Log(L"Started pid=" + std::to_wstring(GetCurrentProcessId()));
+    app.Refresh();
+    MSG message{};
+    BOOL result = 0;
+    while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+        TranslateMessage(&message);
+        DispatchMessageW(&message);
+    }
+    controller = nullptr;
+    Log(L"Stopped");
+    return result == -1 ? static_cast<int>(GetLastError()) : 0;
+}

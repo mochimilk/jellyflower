@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+namespace acrylic {
+inline constexpr wchar_t AppVersion[] = L"@PROJECT_VERSION@";
+inline constexpr char AppVersionUtf8[] = "@PROJECT_VERSION@";
+inline constexpr wchar_t Repository[] = L"mochimilk/jellyflower";
+inline constexpr wchar_t ReleasesUrl[] = L"https://github.com/mochimilk/jellyflower/releases";
+#ifdef _M_ARM64
+inline constexpr wchar_t Architecture[] = L"ARM64";
+#else
+inline constexpr wchar_t Architecture[] = L"x64";
+#endif
+}

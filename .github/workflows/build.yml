@@ -1,0 +1,65 @@
+name: build jellyflower
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    strategy:
+      matrix:
+        architecture: [x64, ARM64]
+    steps:
+      - uses: actions/checkout@v4
+      - name: validate release version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = ([regex]::Match((Get-Content CMakeLists.txt -Raw), 'project\(jellyflower VERSION (\d+\.\d+\.\d+)')).Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "v$version") { throw 'Tag must match the CMake version.' }
+          if ((Get-Content src/app.manifest -Raw) -notmatch "version=`"$([regex]::Escape($version)).0`"") { throw 'Manifest must match the release version.' }
+      - name: configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.architecture }} -DACRYLIC_BUILD_TESTS=${{ matrix.architecture == 'x64' && 'ON' || 'OFF' }}
+      - name: build
+        run: cmake --build build --config Release --parallel 1
+      - name: check update logic
+        if: matrix.architecture == 'x64'
+        run: .\build\Release\UpdateLogic.exe
+      - name: package
+        run: cmake --install build --config Release --prefix dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jellyflower-${{ matrix.architecture }}
+          path: dist/jellyflower-setup-*.exe
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+    runs-on: windows-2022
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: jellyflower-*
+          path: release
+          merge-multiple: true
+      - name: publish installers
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $files = Get-ChildItem release/jellyflower-setup-*.exe
+          if ($files.Count -ne 2) { throw 'Both native installers are required.' }
+          $hashes = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          [IO.File]::WriteAllLines((Join-Path $PWD 'release/SHA256SUMS.txt'), $hashes)
+          gh release create $env:GITHUB_REF_NAME --verify-tag --title "jellyflower $env:GITHUB_REF_NAME" --notes-file docs/RELEASE.md --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the release.' }
+          gh release upload $env:GITHUB_REF_NAME @($files.FullName) release/SHA256SUMS.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload release files; release remains a draft.' }
+          gh release edit $env:GITHUB_REF_NAME --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish release.' }

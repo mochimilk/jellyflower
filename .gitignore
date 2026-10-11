@@ -1,0 +1,8 @@
+/build*/
+/dist/
+/.vs/
+*.user
+*.log
+__pycache__/
+*.pyc
+/release/

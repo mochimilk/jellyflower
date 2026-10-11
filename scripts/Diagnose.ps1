@@ -1,0 +1,17 @@
+[CmdletBinding()]
+param([string]$OutputPath = (Join-Path $PSScriptRoot 'diagnostic.json'))
+$ErrorActionPreference = 'Stop'
+$executable = Join-Path $PSScriptRoot 'jellyflower.exe'
+if (-not (Test-Path -LiteralPath $executable)) { throw 'Run this script from the built distribution folder.' }
+$OutputPath = [System.IO.Path]::GetFullPath($OutputPath)
+if ($OutputPath.Contains('"')) { throw 'The output path cannot contain a quotation mark.' }
+$diagnostic = Start-Process -FilePath $executable -ArgumentList @('--diagnose', ('"' + $OutputPath + '"')) -WindowStyle Hidden -Wait -PassThru
+if ($diagnostic.ExitCode -ne 0) { throw "Diagnostics failed (Windows error $($diagnostic.ExitCode))." }
+Get-Content -LiteralPath $OutputPath -Raw | ConvertFrom-Json | Format-List
+Write-Host "Saved $OutputPath"
+Write-Host 'Applied backgrounds means the API/brush request succeeded. Inspect the taskbar visually to verify blur.'
+Write-Host 'singleLineClocks counts accepted clock layouts. If zero, the helper has not found a supported clock; check bridgeState and clockLastResult.'
+Write-Host 'hiddenVolumeIcons counts hidden speaker glyphs. If zero, the helper has not found the supported Quick Settings layout; network and battery are left alone.'
+Write-Host 'bridgeRetained means a live Explorer connection is being kept across transient layout changes. taskbarXamlIslands is a discovery count, not a blur measurement.'
+
+Write-Host 'clockDate and clockFont report the saved clock choices. clockLastResult also reports missing/custom-font rendering errors; the readable Segoe line remains as fallback.'

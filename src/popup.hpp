@@ -1,0 +1,9 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+#include <windows.h>
+#include "appearance.hpp"
+
+namespace acrylic {
+void RefreshUpdateMenu(HWND owner);
+UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode = 0, const RECT& trayBounds = {});
+} // namespace acrylic

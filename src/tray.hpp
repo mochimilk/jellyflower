@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#pragma once
+#include <windows.h>
+#include "appearance.hpp"
+
+namespace acrylic {
+inline constexpr UINT TrayMessage = WM_APP + 43;
+// Apply a menu setting immediately; return its resulting state.
+inline constexpr UINT TraySettingMessage = WM_APP + 44;
+// Return a private cursor-outline HICON; the menu owns and destroys it.
+inline constexpr UINT TrayCursorIconMessage = WM_APP + 45;
+inline constexpr UINT TrayThemeQueryMessage = WM_APP + 46;
+inline constexpr UINT TrayToggleCommand = 1, TrayExitCommand = 2;
+inline constexpr UINT TrayCursorCommand = 3, CursorCommandBase = 100;
+inline constexpr UINT TrayThemeCommand = 4;
+inline constexpr UINT TrayClockCommand = 5, TrayDateCommand = 6, TrayFontCommand = 7, ClockFontCommandBase = 200;
+inline constexpr UINT TrayClockQueryMessage = WM_APP + 47;
+inline constexpr UINT TrayUpdateQueryMessage = WM_APP + 48;
+inline constexpr UINT TrayUpdateCommand = 8;
+
+class TrayIcon {
+public:
+    ~TrayIcon();
+    void Refresh(HWND owner, AcrylicMode mode);
+    void ShellRestarted() noexcept { present_ = false; }
+    void Remove() noexcept;
+    UINT Menu(AcrylicMode mode, UINT cursorMode) const;
+    void CursorError(DWORD error, bool saveFailure = false) const;
+    void ThemeError(DWORD error, bool partial = false, bool notification = false) const;
+    void ClockError(DWORD error) const;
+    void UpdateNotice(const wchar_t* title, const wchar_t* body, bool error = false) const;
+    bool Present() const noexcept { return present_; }
+private:
+    HWND window_ = nullptr;
+    HICON icon_ = nullptr;
+    bool present_ = false;
+    int resource_ = 0, pixels_ = 0;
+    int brandTheme_ = -1;
+};
+} // namespace acrylic
