@@ -14,6 +14,7 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
+std::vector<UINT> cursorPreviews;
 COLORREF behind = RGB(220,30,30);
 void Check(bool condition, const char* text) { if (!condition) throw std::runtime_error(text); }
 BOOL WINAPI AlternateMenuMetrics(UINT action, UINT size, PVOID output, UINT, UINT) {
@@ -193,12 +194,17 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
     if (message == TraySettingMessage && parameter == TrayDateCommand) { dateEnabled = !dateEnabled; return dateEnabled; }
     if (message == TrayUpdateQueryMessage) return static_cast<UINT>(state);
     if (message == TrayCursorQueryMessage) return parameter ? cursorChoice : cursorMask;
+    if (message == TrayCursorPreviewMessage) { cursorPreviews.push_back(static_cast<UINT>(parameter)); return 0; }
     if (message == TrayCursorIconMessage) {
         wchar_t windows[MAX_PATH]{};GetWindowsDirectoryW(windows,MAX_PATH);
         return reinterpret_cast<LRESULT>(CreateCursorMenuIcon((std::wstring(windows)+L"\\Cursors\\aero_arrow.cur").c_str(),static_cast<int>(parameter)));
     }
     if (message == TraySettingMessage && parameter == TrayUpdateCommand) { state = UpdateStatus::Checking; return static_cast<UINT>(state); }
-    if (message == TraySettingMessage) { ++settings; return cursorChoice; }
+    if (message == TraySettingMessage) {
+        ++settings;
+        if (parameter >= CursorCommandBase && parameter <= CursorCommandBase + CursorDisabled) cursorChoice = static_cast<UINT>(parameter) - CursorCommandBase;
+        return cursorChoice;
+    }
     return DefWindowProcW(window,message,parameter,other);
 }
 void Capture(Popup& popup, const std::filesystem::path& path) {
@@ -378,6 +384,7 @@ int wmain(int argc,wchar_t** argv) {
             const HWND submenu=cursors.window;
             const UINT before=settings;cursors.Activate(1,false);
             Check(settings==before,"disabled cursor cannot invoke selection");
+            cursorPreviews.clear(); cursors.Hover(1);Check(cursorPreviews.empty(),"disabled cursor cannot start a hover preview");
             for(size_t i=0;i<10;++i) Check(!IsWindowEnabled(cursors.buttons[i]),"custom cursor choice disabled");
             Check(IsWindowEnabled(cursors.buttons[10]) && cursors.buttons.size()==11,"disable enabled and redundant unlock row removed");
             cursors.Focus(0);Check(GetFocus()==cursors.buttons[10],"keyboard skips locked cursor choices");
@@ -386,6 +393,18 @@ int wmain(int argc,wchar_t** argv) {
             popup.RefreshCursors();Check(popup.rows[3].label==L"cursor" && popup.rows[3].secondary.empty() && HasSubmenu(popup.rows[3].command),"import replaces unlock action with cursor submenu in place");
             for(size_t i=0;i<10;++i) Check(IsWindowEnabled(cursors.buttons[i]),"import enables custom choices");
             Check(cursors.window==submenu && !cursors.done && cursors.rows[10].checked,"import keeps submenu and Windows selection");
+            const UINT beforeHover = settings;
+            cursors.Hover(2);cursors.Hover(2);
+            Check(cursorPreviews.size()==1 && cursorPreviews.back()==2 && settings==beforeHover && cursorChoice==CursorDisabled && cursors.rows[10].checked,
+                "hover sends one transient color preview and keeps selected checkmark");
+            cursors.Hover(4);Check(cursorPreviews.size()==2 && cursorPreviews.back()==4,"moving directly to another row previews that color");
+            cursors.Hover(-1);Check(cursorPreviews.back()==CursorPreviewNone && cursorChoice==CursorDisabled,"leaving restores committed choice");
+            cursors.Hover(5);cursors.Activate(5,false);cursors.Hover(-1);
+            Check(cursorChoice==5 && popup.cursorMode==5 && cursors.rows[5].checked && !popup.done && IsWindowVisible(submenu),"click commits preview in place and leave retains new selection");
+            cursors.Hover(6);cursors.Focus(5);Check(cursorPreviews.back()==CursorPreviewNone,"keyboard navigation ends mouse preview");
+            cursors.Hover(7);cursors.HideBranch();Check(cursorPreviews.back()==CursorPreviewNone,"hiding a nested branch ends preview immediately");
+            ShowWindow(submenu,SW_SHOWNORMAL);cursors.closing=false;
+            cursorChoice=CursorDisabled;cursors.RefreshCursors();
             Capture(cursors,std::filesystem::path(argv[1])/(std::wstring(light?L"unlocked-light-":L"unlocked-dark-")+std::to_wstring(dpi)+L".bmp"));
             Check(!popup.done,"menu still live after cursor fixture interaction");
             popup.highContrast=true;popup.ConfigureBackdrop();
@@ -396,6 +415,14 @@ int wmain(int argc,wchar_t** argv) {
             popup.OpenChild(4,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[1].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
             popup.child->Activate(2,true);
             Check(popup.done && popup.result==TrayExitCommand && !IsWindowVisible(popup.child->window),"nested exit returns the existing controller shutdown command and dismisses every menu");
+        }
+        {
+            Popup preview;preview.controller=controller;preview.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
+            Check(preview.Create(controller,{100,100},false),"cursor dismissal fixture created");
+            preview.OpenChild(3,false);preview.child->Hover(4);
+            Check(cursorPreviews.back()==4,"cursor preview starts in nested menu");
+            SendMessageW(preview.window,WM_CANCELMODE,0,0);
+            Check(preview.done && cursorPreviews.back()==CursorPreviewNone,"outside dismissal restores preview through normal Finish path");
         }
         {
             Popup link;link.controller=controller;link.kind=TrayGeneralCommand;link.rows=GeneralRows();

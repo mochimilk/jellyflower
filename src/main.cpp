@@ -119,7 +119,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[22]{};
+    LONG values[23]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -162,6 +162,7 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"startSurfaces\": " << values[19]
         << ",\n  \"startAttached\": " << values[20]
         << ",\n  \"startLastResult\": " << values[21]
+        << ",\n  \"startSearchHeaders\": " << values[22]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -474,6 +475,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == StartCountQuery) return self->start.Count();
         if (wParam == StartAttachedQuery) return self->start.Attached();
         if (wParam == StartResultQuery) return self->start.Result();
+        if (wParam == StartSearchQuery) return self->start.SearchCount();
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult
@@ -510,6 +512,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return static_cast<UINT>(self->updates.Status());
     } else if (message == TrayCursorQueryMessage) {
         return wParam == 1 ? self->cursors->Mode() : self->cursors->Available();
+    } else if (message == TrayCursorPreviewMessage) {
+        const DWORD error = wParam == CursorPreviewNone ? self->cursors->EndPreview()
+            : self->cursors->Preview(static_cast<UINT>(wParam));
+        if (error) Log(L"Cursor preview error=" + std::to_wstring(error));
+        return error;
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {

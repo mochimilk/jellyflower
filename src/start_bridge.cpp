@@ -4,6 +4,7 @@
 #include <unknwn.h>
 #include "start_shared.hpp"
 #include "start_style.hpp"
+#include "start_search.hpp"
 #include <shobjidl.h>
 #include <xamlOM.h>
 #include <memory>
@@ -43,6 +44,24 @@ struct Surface {
     }
     ~Surface() { if(counted && state) InterlockedDecrement(&state->count); }
 };
+struct Search {
+    StartSearch view;
+    bool counted=false;
+    explicit Search(const sx::Controls::Control& control):view(control) {}
+    void Refresh() noexcept {
+        try { view.Refresh(owner.Alive() && Read(state->enabled),state && Read(state->light)); }
+        catch(...) { Result(winrt::to_hresult()); view.Restore(); }
+        if(state && counted!=view.Applied()) {
+            counted=view.Applied();
+            if(counted) InterlockedIncrement(&state->searches); else InterlockedDecrement(&state->searches);
+        }
+    }
+    ~Search() { if(counted && state) InterlockedDecrement(&state->searches); }
+};
+auto& Searches() {
+    thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Search>>;
+    return *items;
+}
 auto& Surfaces() {
     // XAML objects must be released on their UI thread, never in DLL teardown.
     thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Surface>>;
@@ -53,6 +72,9 @@ void Refresh() noexcept {
         std::vector<std::shared_ptr<Surface>> snapshot;
         for(const auto& item:Surfaces()) snapshot.push_back(item.second);
         for(const auto& item:snapshot) item->Refresh();
+        std::vector<std::shared_ptr<Search>> searches;
+        for(const auto& item:Searches()) searches.push_back(item.second);
+        for(const auto& item:searches) item->Refresh();
     } catch(...) { Result(winrt::to_hresult()); }
 }
 LRESULT CALLBACK Notify(HWND window,UINT message,WPARAM w,LPARAM l) {
@@ -72,15 +94,24 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
     explicit Watcher(IUnknown* site) { winrt::check_hresult(site->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void())); }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation,VisualElement element,VisualMutationType mutation) noexcept override {
         try {
-            if(mutation==Remove) { Surfaces().erase(element.Handle); return S_OK; }
+            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); return S_OK; }
             // Only Handle is valid for Remove. Add strings use the same BSTR
             // ownership contract as the taskbar diagnostics callback.
             struct Strings { VisualElement& e; ~Strings(){SysFreeString(e.Type);SysFreeString(e.Name);} } strings{element};
-            if(mutation!=Add || !element.Type || !element.Name
-                || std::wstring_view(element.Type)!=L"Windows.UI.Xaml.Controls.Border"
-                || (std::wstring_view(element.Name)!=L"AcrylicBorder" && std::wstring_view(element.Name)!=L"AcrylicOverlay")) return S_OK;
+            if(mutation!=Add || !element.Type) return S_OK;
+            const bool search=std::wstring_view(element.Type)==L"StartMenu.SearchBoxToggleButton" || std::wstring_view(element.Type)==L"StartDocked.SearchBoxToggleButton";
+            const bool surface=element.Name && std::wstring_view(element.Type)==L"Windows.UI.Xaml.Controls.Border"
+                && (std::wstring_view(element.Name)==L"AcrylicBorder" || std::wstring_view(element.Name)==L"AcrylicOverlay");
+            if(!search && !surface) return S_OK;
             winrt::Windows::Foundation::IInspectable object{nullptr};
             winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+            if(search) {
+                const auto control=object.try_as<sx::Controls::Control>();
+                if(!IsStartSearch(control) || Searches().count(element.Handle)) return S_OK;
+                EnsureReceiver();
+                const auto item=std::make_shared<Search>(control);Searches().emplace(element.Handle,item);item->Refresh();
+                return S_OK;
+            }
             const auto border=object.try_as<sx::Controls::Border>();
             if(!IsStartSurface(border) || Surfaces().count(element.Handle)) return S_OK;
             EnsureReceiver();

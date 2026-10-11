@@ -167,6 +167,7 @@ struct Popup {
     RECT trayBounds{};
     int hovered = -1, childIndex = -1, suppressedHover = -1, rowHeight = 40;
     UINT kind = 0;
+    UINT previewMode = CursorPreviewNone;
     bool clockDate = true;
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
@@ -179,6 +180,7 @@ struct Popup {
         if (Gdiplus::GdiplusStartup(&graphicsToken, &input, nullptr) != Gdiplus::Ok) graphicsToken = 0;
     }
     ~Popup() {
+        PreviewCursor(-1);
         if (mouseHook) UnhookWindowsHookEx(mouseHook);
         child.reset();
         if (window) DestroyWindow(window);
@@ -226,6 +228,7 @@ struct Popup {
         return child ? child->Target(target) : nullptr;
     }
     void HideBranch() {
+        PreviewCursor(-1);
         CompleteEntrance();
         closing = true;
         if (window) KillTimer(window, UpdateSpinnerTimer);
@@ -253,6 +256,7 @@ struct Popup {
         return 0;
     }
     void Finish(UINT command = 0) {
+        PreviewCursor(-1);
         if (parent) { parent->Finish(command); return; }
         if (done) return;
         result = command;
@@ -444,6 +448,7 @@ struct Popup {
     }
     void Focus(int index, int direction = 1) {
         if (buttons.empty()) return;
+        PreviewCursor(-1);
         const auto count = static_cast<int>(buttons.size());
         for (int tried = 0; tried < count && !rows[static_cast<size_t>(index)].enabled; ++tried)
             index = (index + direction + count) % count;
@@ -501,8 +506,27 @@ struct Popup {
         child->keyboard = fromKeyboard;
         child->RepaintButtons();
     }
+    void PreviewCursor(int index) {
+        if (kind != TrayCursorCommand) return;
+        const UINT next = index >= 0 && index < static_cast<int>(rows.size()) && rows[static_cast<size_t>(index)].enabled
+            ? rows[static_cast<size_t>(index)].command - CursorCommandBase : CursorPreviewNone;
+        if (next == previewMode) return;
+        previewMode = next;
+        SendMessageW(controller, TrayCursorPreviewMessage, next, 0);
+    }
+    void LeaveRow() {
+        // WM_MOUSELEAVE can be queued after entering the next child button.
+        // Resolve the pointer once to avoid briefly restoring between rows.
+        POINT point{}; RECT bounds{};
+        if (kind == TrayCursorCommand && GetCursorPos(&point)) {
+            for (size_t i = 0; i < buttons.size(); ++i)
+                if (GetWindowRect(buttons[i], &bounds) && PtInRect(&bounds, point)) { Hover(static_cast<int>(i)); return; }
+        }
+        Hover(-1);
+    }
     void Hover(int index) {
         if (index >= 0 && !rows[static_cast<size_t>(index)].enabled) index = -1;
+        PreviewCursor(index);
         if (index != suppressedHover) suppressedHover = -1;
         for (auto* level = parent; level; level = level->parent) {
             if (index >= 0) KillTimer(level->window, ChildCloseTimer);
@@ -565,6 +589,9 @@ struct Popup {
             } else if (command == TrayDateCommand) {
                 root->UpdateDate((state & 1) != 0);
             } else if (parent && command >= CursorCommandBase && command <= CursorCommandBase + CursorDisabled) {
+                // The controller commits the preview. A later hover/leave now
+                // starts from this new saved choice, without closing menus.
+                previewMode = CursorPreviewNone;
                 root->cursorMode = state;
                 root->RefreshCursorIcon();
                 for (auto& row : rows) row.checked = row.command == CursorCommandBase + state;
@@ -787,7 +814,7 @@ LRESULT CALLBACK ButtonProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
         TrackMouseEvent(&track);
     } else if (message == WM_MOUSELEAVE) {
-        if (popup->hovered == static_cast<int>(id)) popup->Hover(-1);
+        if (popup->hovered == static_cast<int>(id)) popup->LeaveRow();
     } else if (message == WM_NCDESTROY) RemoveWindowSubclass(window, ButtonProc, id);
     return DefSubclassProc(window, message, wParam, lParam);
 }
@@ -828,7 +855,7 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         TrackMouseEvent(&track);
         return 0;
     }
-    case WM_MOUSELEAVE: popup->Hover(-1); return 0;
+    case WM_MOUSELEAVE: popup->LeaveRow(); return 0;
     case WM_TIMER:
         if (wParam == EntranceTimer) {
             popup->AdvanceEntrance(GetTickCount64());

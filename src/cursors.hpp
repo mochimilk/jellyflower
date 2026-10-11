@@ -20,6 +20,9 @@ public:
     ~CursorManager();
     void Refresh();
     DWORD Select(UINT mode);
+    // Hover previews never change Mode() or the stored preference.
+    DWORD Preview(UINT mode);
+    DWORD EndPreview();
     UINT Mode() const { return mode_; }
     DWORD Error() const { return error_; }
     bool Applied() const { return applied_; }
@@ -31,6 +34,7 @@ public:
     static const wchar_t* Name(UINT mode);
 private:
     DWORD Apply(UINT mode, bool light);
+    DWORD RestoreSelection();
     std::wstring folder_;
     CursorPackImporter importer_;
     UINT mode_ = CursorDefault;
@@ -38,5 +42,7 @@ private:
     bool applied_ = false, touched_ = false, started_ = false, light_ = false, saveFailed_ = false;
     bool available_ = false, importNotice_ = false;
     DWORD importError_ = 0;
+    UINT previewMode_ = CursorDisabled;
+    bool previewing_ = false, previewWindows_ = false;
 };
 } // namespace acrylic

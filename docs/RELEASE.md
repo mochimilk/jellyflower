@@ -1,7 +1,7 @@
-jellyflower 0.16.7
+jellyflower 0.16.8
 
-Use the supplied Lucide checkmark for selected cursor choices, chevron-right for nested menus, and sunset for automatic system light/dark mode. Checkmarks share the other icons' square canvas and alignment. Right-side chevrons and the GitHub hover/keyboard-focus external-link indicator match the secondary status-text color in light and dark modes. Windows contrast themes retain their own normal/highlight colors.
+Start's search header now uses the supplied Lucide magnifier, a borderless input appearance, lowercase search placeholder and a thin divider across the full header. The icon aligns with the pinned/content inset. The existing translucent material is retained. Search keeps its native font, click and keyboard behavior; exiting restores the original header and Start surface. Unrecognized search layouts remain stock.
 
-Selecting auto immediately shows auto and the sunset icon while location is obtained. Location permission, sunrise/sunset scheduling, and useful location-error messages retain their behavior. The current Windows theme stays unchanged until a location is available.
+Hover cursor choices to preview their actual system cursors without changing the saved selection or checkmark. Moving away, closing a submenu, dismissing the menu or switching to keyboard navigation restores the selected cursor. Click to save the preview while keeping the menu open. Default follows the current theme and disable previews the Windows cursor. Cursor artwork remains an optional user-supplied pack; none is bundled.
 
-Menu typography, spacing, acrylic materials, startup and cursor behavior are retained. Install from general's version/download row; no Explorer/Start restart or sign-out is needed for this controller-only update. The native installer, portable build and matching source are included.
+Update through general's version/download row. No sign-out or Explorer/Start restart is needed; Start v3 waits for older helpers to restore before applying. Menu typography, acrylic material recipes, startup and automatic light/dark scheduling are unchanged. The native x64 installer, portable build and matching source are included.

@@ -21,6 +21,8 @@ inline constexpr UINT TrayGeneralCommand = 10;
 inline constexpr UINT TrayGithubCommand = 11;
 inline constexpr wchar_t GithubUrl[] = L"https://github.com/mochimilk/jellyflower";
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
+inline constexpr UINT TrayCursorPreviewMessage = WM_APP + 50;
+inline constexpr UINT CursorPreviewNone = ~0u;
 
 class TrayIcon {
 public:
