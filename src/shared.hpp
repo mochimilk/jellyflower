@@ -12,7 +12,7 @@ inline constexpr GUID TapClass = {0xf43a8b71, 0xcb16, 0x4f42,
     {0x97, 0x4d, 0x3a, 0xc8, 0xef, 0x2b, 0x06, 0x52}};
 inline constexpr GUID PowerSavingGuid = {0xe00958c0, 0xc213, 0x4ace,
     {0xac, 0x77, 0xfe, 0xcc, 0xed, 0x2e, 0xee, 0xa5}};
-inline constexpr LONG Magic = 0x4154423B;
+inline constexpr LONG Magic = 0x4154423C;
 inline constexpr UINT QueryMessage = WM_APP + 42;
 enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, EnabledQuery, TrayQuery,
     CursorModeQuery, CursorAppliedQuery, CursorErrorQuery, BorderQuery, LightQuery, AcrylicModeQuery,
@@ -45,7 +45,7 @@ inline LONG Read(volatile LONG& value) noexcept {
     return InterlockedCompareExchange(&value, 0, 0);
 }
 inline std::wstring MappingName(DWORD explorerPid) {
-    return L"Local\\AcrylicTaskbar.Bridge.v11." + std::to_wstring(explorerPid);
+    return L"Local\\AcrylicTaskbar.Bridge.v12." + std::to_wstring(explorerPid);
 }
 
 class Handle {
@@ -64,7 +64,7 @@ private:
     HANDLE value_;
 };
 inline bool OlderBridgePresent(DWORD explorerPid) {
-    for (UINT version = 1; version < 11; ++version) {
+    for (UINT version = 1; version < 12; ++version) {
         Handle older(OpenFileMappingW(FILE_MAP_READ, FALSE,
             (L"Local\\AcrylicTaskbar.Bridge.v" + std::to_wstring(version) + L"." + std::to_wstring(explorerPid)).c_str()));
         if (older) return true;

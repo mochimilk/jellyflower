@@ -3,18 +3,16 @@
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
-#include <cwchar>
 
 namespace acrylic {
-// Explicit Segoe UI Regular at 14 effective pixels, scaled for the display.
-inline HFONT CreateSystemMenuFont(UINT dpi) {
+using MenuMetricsQuery = decltype(&SystemParametersInfoForDpi);
+// Inherit the complete Windows menu font, including family, size and weight.
+// An empty family would invoke GDI font mapping instead of menu inheritance.
+inline HFONT CreateSystemMenuFont(UINT dpi, MenuMetricsQuery query = SystemParametersInfoForDpi) {
+    NONCLIENTMETRICSW metrics{sizeof(metrics)};
     LOGFONTW font{};
-    wcscpy_s(font.lfFaceName, L"Segoe UI");
-    font.lfCharSet = DEFAULT_CHARSET;
-    font.lfHeight = -MulDiv(14, static_cast<int>(dpi), 96);
-    font.lfWidth = font.lfEscapement = font.lfOrientation = 0;
-    font.lfWeight = FW_NORMAL;
-    font.lfItalic = font.lfUnderline = font.lfStrikeOut = FALSE;
+    if(query(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0,dpi)) font=metrics.lfMenuFont;
+    else if(!GetObjectW(GetStockObject(DEFAULT_GUI_FONT),sizeof(font),&font)) return nullptr;
     // Subpixel ClearType is inappropriate on a translucent ARGB surface.
     font.lfQuality = ANTIALIASED_QUALITY;
     return CreateFontIndirectW(&font);

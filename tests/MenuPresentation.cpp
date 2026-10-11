@@ -14,6 +14,49 @@ bool dateEnabled = true;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 COLORREF behind = RGB(220,30,30);
 void Check(bool condition, const char* text) { if (!condition) throw std::runtime_error(text); }
+BOOL WINAPI AlternateMenuMetrics(UINT action, UINT size, PVOID output, UINT, UINT) {
+    if(action!=SPI_GETNONCLIENTMETRICS || size!=sizeof(NONCLIENTMETRICSW)) return FALSE;
+    auto& metrics=*static_cast<NONCLIENTMETRICSW*>(output);
+    wcscpy_s(metrics.lfMenuFont.lfFaceName,L"Tahoma");
+    metrics.lfMenuFont.lfCharSet=DEFAULT_CHARSET;
+    metrics.lfMenuFont.lfHeight=-18;metrics.lfMenuFont.lfWeight=FW_BOLD;
+    return TRUE;
+}
+BOOL WINAPI MissingMenuMetrics(UINT, UINT, PVOID, UINT, UINT) { return FALSE; }
+void FontSourceChecks() {
+    const auto font=CreateSystemMenuFont(144,AlternateMenuMetrics);Check(font!=nullptr,"queried alternate menu font created");
+    LOGFONTW selected{};GetObjectW(font,sizeof(selected),&selected);DeleteObject(font);
+    Check(wcscmp(selected.lfFaceName,L"Tahoma")==0 && selected.lfHeight==-18 && selected.lfWeight==FW_BOLD,
+        "menu inherits the queried family, size and weight without overrides");
+    LOGFONTW stock{};Check(GetObjectW(GetStockObject(DEFAULT_GUI_FONT),sizeof(stock),&stock)!=0,"stock GUI font available");
+    const auto fallback=CreateSystemMenuFont(96,MissingMenuMetrics);Check(fallback!=nullptr,"failed metrics query falls back to Windows GUI font");
+    GetObjectW(fallback,sizeof(selected),&selected);DeleteObject(fallback);
+    Check(wcscmp(selected.lfFaceName,stock.lfFaceName)==0 && selected.lfHeight==stock.lfHeight && selected.lfWeight==stock.lfWeight,
+        "fallback family, size and weight also come from Windows");
+}
+void NativeTextChecks(Popup& popup) {
+    const auto format=popup.menuText.Format();Check(format!=nullptr,"native DirectWrite text format initialized");
+    LOGFONTW native{};GetObjectW(popup.font,sizeof(native),&native);
+    Check(format->GetFontWeight()==native.lfWeight && std::abs(format->GetFontSize()+native.lfHeight)<.01f,
+        "DirectWrite preserves the inherited size and weight at the actual display DPI");
+    const RECT bounds{0,0,popup.Px(240),popup.Px(40)};
+    for(const auto color:{RGB(0,0,0),RGB(255,255,255),RGB(100,100,100)}) {
+        MenuSurface surface(nullptr,bounds,false);Check(surface.pixels!=nullptr,"transparent text fixture bitmap");
+        Check(popup.menuText.Draw(surface.Dc(),bounds,L"system acrylic date",color,DT_SINGLELINE|DT_VCENTER),"DirectWrite draws directly to alpha pixels");
+        size_t empty=0,edges=0,solid=0;int top=bounds.bottom,bottom=0;
+        for(LONG y=0;y<bounds.bottom;++y) for(LONG x=0;x<bounds.right;++x) {
+            const DWORD pixel=surface.pixels[static_cast<size_t>(y)*bounds.right+x],alpha=pixel>>24;
+            empty+=alpha==0;edges+=alpha>0 && alpha<255;solid+=alpha==255;
+            Check((pixel&255)<=alpha && ((pixel>>8)&255)<=alpha && ((pixel>>16)&255)<=alpha,"DirectWrite pixels have valid premultiplied alpha");
+            if(alpha>20) {top=std::min<int>(top,y);bottom=std::max<int>(bottom,y);}
+        }
+        Check(empty>static_cast<size_t>(bounds.right*bounds.bottom)/2 && edges>20 && solid>5,"native text retains crisp opaque stems, smoothed edges and transparent background");
+        const int center=popup.menuText.InkCenter(L"system acrylic date",bounds);
+        const double pixelCenter=(top+bottom+1)/2.0; // Pixel centers sit at n+0.5.
+        if(std::abs(center-pixelCenter)>1) std::cout<<"Native ink center="<<center<<" pixel top="<<top<<" bottom="<<bottom<<'\n';
+        Check(std::abs(center-pixelCenter)<=1,"icon alignment follows the native glyph ink rather than GDI metrics");
+    }
+}
 LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other) {
     if (message == TrayThemeQueryMessage) return parameter ? static_cast<UINT>(AutoThemeStatus::Manual) : light;
     if (message == TrayDateQueryMessage) return dateEnabled;
@@ -34,6 +77,7 @@ void Capture(Popup& popup, const std::filesystem::path& path) {
     HDC dc=CreateCompatibleDC(nullptr); void* pixels=nullptr;
     HBITMAP bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
     const auto old=SelectObject(dc,bitmap); popup.Paint(dc);
+    Check(popup.textFallbacks==0,"production menu uses DirectWrite without falling back to GDI");
     GdiFlush();
     if (popup.acrylic) {
         size_t empty=0,solid=0,edges=0;
@@ -69,7 +113,9 @@ void Pump() {MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){T
 void Compositor(HWND controller,const std::filesystem::path& destination) {
     WNDCLASSW wc{};wc.lpfnWndProc=Background;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"jellyflower.backdrop.fixture";
     Check(RegisterClassW(&wc)!=0,"background fixture class");
-    const HWND background=CreateWindowExW(WS_EX_TOOLWINDOW,wc.lpszClassName,L"jellyflower acrylic test",WS_POPUP,100,100,500,500,nullptr,nullptr,wc.hInstance,nullptr);
+    // Keep the controlled backdrop visible above unrelated desktop windows without taking focus.
+    const HWND background=CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST|WS_EX_NOACTIVATE,wc.lpszClassName,L"jellyflower acrylic test",WS_POPUP,100,100,500,500,nullptr,nullptr,wc.hInstance,nullptr);
+    Check(background!=nullptr,"background fixture created");
     struct Close {HWND window;~Close(){DestroyWindow(window);}} close{background};
     ShowWindow(background,SW_SHOWNOACTIVATE);UpdateWindow(background);
     for(int theme=0;theme<2;++theme) {
@@ -86,6 +132,7 @@ void Compositor(HWND controller,const std::filesystem::path& destination) {
             RedrawWindow(popup.window,nullptr,nullptr,RDW_INVALIDATE|RDW_ALLCHILDREN|RDW_UPDATENOW);Pump();
             Sleep(400);Pump();
             HDC screen=GetDC(nullptr);
+            Check(GetPixel(screen,550,550)==behind,"controlled background is visible rather than covered by another app");
             samples[color]=GetPixel(screen,bounds.left+150,bounds.top+14);
             BITMAPINFO info{};info.bmiHeader={sizeof(BITMAPINFOHEADER),bounds.right-bounds.left,-(bounds.bottom-bounds.top),1,32};
             HDC dc=CreateCompatibleDC(screen);void* pixels=nullptr;HBITMAP bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);const auto old=SelectObject(dc,bitmap);
@@ -105,6 +152,7 @@ int wmain(int argc,wchar_t** argv) {
     try {
         Check(argc==2 || argc==3,"output directory argument");SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         std::filesystem::create_directories(argv[1]);
+        FontSourceChecks();
         WNDCLASSW owner{};owner.lpfnWndProc=Owner;owner.hInstance=GetModuleHandleW(nullptr);owner.lpszClassName=L"jellyflower.fixture";
         Check(RegisterClassW(&owner)!=0,"fixture class");
         const HWND controller=CreateWindowW(owner.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,owner.hInstance,nullptr);
@@ -118,10 +166,13 @@ int wmain(int argc,wchar_t** argv) {
             Check(popup.Create(controller,{100,100},false),"native popup created");
             Check(popup.acrylic,"Windows accepts explicit acrylic on root menu");
             LOGFONTW font{};GetObjectW(popup.font,sizeof(font),&font);
-            Check(font.lfWeight==FW_NORMAL && font.lfQuality==ANTIALIASED_QUALITY && font.lfHeight==-MulDiv(14,dpi,96),"regular Windows 11 body size with grayscale smoothing for glass");
+            Check(font.lfQuality==ANTIALIASED_QUALITY,"GDI fallback uses grayscale smoothing for glass");
             const HDC fontDc=CreateCompatibleDC(nullptr);const auto previous=SelectObject(fontDc,popup.font);wchar_t face[LF_FACESIZE]{};GetTextFaceW(fontDc,LF_FACESIZE,face);TEXTMETRICW resolved{};GetTextMetricsW(fontDc,&resolved);SelectObject(fontDc,previous);DeleteDC(fontDc);
-            Check(resolved.tmWeight==FW_NORMAL,"resolved glyph face uses normal weight, not a synthesized light/bold request");
-            Check(wcscmp(face,L"Segoe UI")==0,"GDI resolves Segoe UI rather than a substituted family");
+            NONCLIENTMETRICSW metrics{sizeof(metrics)};
+            Check(SystemParametersInfoForDpi(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0,dpi)!=FALSE,"Windows menu font queried at display DPI");
+            Check(wcscmp(font.lfFaceName,metrics.lfMenuFont.lfFaceName)==0 && font.lfHeight==metrics.lfMenuFont.lfHeight
+                && font.lfWeight==metrics.lfMenuFont.lfWeight,"menu inherits Windows' family, size and weight without overrides");
+            NativeTextChecks(popup);
             if(theme==0) std::wcout<<L"Menu font at "<<dpi<<L" DPI: "<<face<<L", height="<<font.lfHeight<<L", weight="<<font.lfWeight<<L'\n';
             Check(popup.rows[0].label==L"system" && popup.rows[0].secondary==(light?L"light":L"dark"),"system first with current theme secondary");
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
@@ -140,12 +191,9 @@ int wmain(int argc,wchar_t** argv) {
             for (const auto result : {UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing}) {
                 state=result;popup.RefreshUpdate();
                 Check(popup.rows[4].label == std::wstring(L"v") + AppVersion,"installed version remains primary label for every update state");
-                HDC dc=GetDC(popup.buttons[4]);const auto old=SelectObject(dc,popup.font);
-                SIZE label{},secondary{};GetTextExtentPoint32W(dc,popup.rows[4].label.c_str(),static_cast<int>(popup.rows[4].label.size()),&label);
-                GetTextExtentPoint32W(dc,popup.rows[4].secondary.c_str(),static_cast<int>(popup.rows[4].secondary.size()),&secondary);
+                const int label=popup.menuText.Width(popup.rows[4].label),secondary=popup.menuText.Width(popup.rows[4].secondary);
                 RECT bounds{};GetClientRect(popup.buttons[4],&bounds);
-                Check(label.cx+secondary.cx+popup.Px(34+12+12)<bounds.right,"update primary and secondary text fit without overlap");
-                SelectObject(dc,old);ReleaseDC(popup.buttons[4],dc);
+                Check(label+secondary+popup.Px(34+12+12)<bounds.right,"native text measurements fit without overlap");
                 wchar_t accessible[256]{};GetWindowTextW(popup.buttons[4],accessible,256);
                 Check(std::wstring(accessible).find(UpdateStatusLabel(result))!=std::wstring::npos,"accessible update state reflects result");
                 const auto name=std::wstring(light?L"light-":L"dark-")+std::to_wstring(dpi)+L"-"+std::to_wstring(static_cast<UINT>(result))+L".bmp";

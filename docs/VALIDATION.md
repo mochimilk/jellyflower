@@ -1,5 +1,17 @@
 # Validation results
 
+## jellyflower 0.16.2, 2026-10-10
+
+The native x64 Release app/helper/setup/test build passed with MSVC 19.44 and Windows SDK 10.0.26100. Helper v12 rejects older pinned code. No account install, Explorer restart, system theme change or network disconnect was performed during validation; ARM64 was not built locally.
+
+NetworkLayout passed the complete overlay suite on both direct ContainerGrid > ContentGrid and optional ContentPresenter > ContentGrid layouts. The new direct fixture first failed against the previous production selector, reproducing the mandatory-wrapper bug. This corrects the 0.16.1 record's inaccurate assertion that its wrapped mock was the actual network template. Both layouts pass all connected glyphs, reordered slots, initial-offline reconnect, offline/airplane/warning/connecting/unknown restoration, foreground binding, measured size/click/tooltip preservation, neighboring icons, overlay recovery, latest opacity/binding and exit restoration. Real Explorer matching and physical connection changes remain acceptance checks.
+
+MenuPresentation passed alternate Windows menu metrics and failed-query fallback, with no family/size/weight overrides. Windows supplies Segoe UI on this PC at 12/18/24 pixels for 96/144/192 DPI, weight 400. DirectWrite keeps those metrics; native text pixels pass premultiplied-alpha, opaque stems, antialiased edges, empty background and glyph-ink alignment checks for primary/secondary colors. Every production capture used DirectWrite without falling back to GDI. Root/date/update/cursor states, text fit using DirectWrite, spinner frames, fallback/acrylic recovery, placement and entrance checks pass in both themes.
+
+The initial compositor check was occluded by another desktop window, leaving unchanged samples. The test background now stays above unrelated windows without activation, and a separate background pixel verifies that it is visible before sampling the menu. Actual menu samples then changed with red/blue backdrops in both themes: dark 0x1f1f4c/0x611e1e and light 0xc8c8e8/0xe6c7c7. Both final 96-DPI compositor menu captures were visually inspected for complete text/icons and transparency. This validates this desktop's menu material, not taskbar GPU blur or an exact match to private WinUI typography.
+
+BridgeNotify passed v11 rejection for v12 and UI-thread dispatch (16 ms). TaskbarLifetime, SetupLockLogic, SetupRecovery and UpdateLogic passed. Installer payload QA checks normal-user/DPI manifests, icons, exact embedded EXE/DLL/docs/icon bytes and native extraction; final packages carry complete corresponding source and SHA256SUMS. The previously validated 0.16.1 taskbar opacity recipe is unchanged. Use INSTALLATION_TESTS step 23 for real-desktop font comparison, one-time helper reload and network transitions.
+
 ## jellyflower 0.16.1, 2026-10-10
 
 The full native x64 Release app/helper/setup/test build passed with MSVC 19.44 and SDK 10.0.26100. Explorer helper v11 isolates the corrected template selector and lighter taskbar recipe from pinned v10 code. No account install, Explorer restart, system theme change, or network disconnect was performed during validation.

@@ -52,11 +52,11 @@ bool NetworkGlyph(const winrt::hstring& value) noexcept {
     }
 }
 NetworkTarget IconTarget(const xaml::DependencyObject& icon, XamlClassName name) {
-    // The real IconView template has a ContentPresenter and TextIconContent
-    // between its outer grid and glyph. Never infer network from slot order.
-    auto child=Child(icon,L"ContainerGrid",name);
-    child=Child(child,L"ContentPresenter",name);
-    child=Child(child,L"ContentGrid",name);
+    // Quick Settings normally puts ContentGrid directly in ContainerGrid.
+    // Accept an explicit presenter wrapper as well, without requiring one.
+    const auto container=Child(icon,L"ContainerGrid",name);
+    auto child=Child(container,L"ContentGrid",name);
+    if(!child) child=Child(Child(container,L"ContentPresenter",name),L"ContentGrid",name);
     child=Child(child,L"SystemTray.TextIconContent",name,false);
     child=Child(child,L"ContainerGrid",name);
     const auto base=Child(child,L"Base",name).try_as<controls::Grid>();

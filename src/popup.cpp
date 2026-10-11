@@ -7,6 +7,7 @@
 #include "version.hpp"
 #include "menu_surface.hpp"
 #include "menu_style.hpp"
+#include "menu_text.hpp"
 #include "auto_theme.hpp"
 #include "cursor_icon.hpp"
 #include <commctrl.h>
@@ -85,29 +86,6 @@ LRESULT CALLBACK PopupProc(HWND, UINT, WPARAM, LPARAM);
 LRESULT CALLBACK ButtonProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
 LRESULT CALLBACK PopupMouseProc(int, WPARAM, LPARAM);
 
-int LabelCenter(HDC dc, const std::wstring& label, const RECT& bounds) {
-    const int fallback = (bounds.top + bounds.bottom) / 2;
-    TEXTMETRICW metrics{};
-    RECT layout{};
-    const int height = DrawTextW(dc, label.c_str(), -1, &layout, DT_SINGLELINE | DT_CALCRECT | DT_NOPREFIX);
-    if (!height || !GetTextMetricsW(dc, &metrics)) return fallback;
-    const MAT2 identity{{0, 1}, {0, 0}, {0, 0}, {0, 1}};
-    int top = 0, bottom = 0;
-    bool found = false;
-    for (const auto character : label) {
-        GLYPHMETRICS glyph{};
-        if (GetGlyphOutlineW(dc, character, GGO_METRICS, &glyph, 0, nullptr, &identity) == GDI_ERROR || !glyph.gmBlackBoxY) continue;
-        const int upper = -glyph.gmptGlyphOrigin.y;
-        const int lower = upper + static_cast<int>(glyph.gmBlackBoxY);
-        top = found ? std::min(top, upper) : upper;
-        bottom = found ? std::max(bottom, lower) : lower;
-        found = true;
-    }
-    if (!found) return fallback;
-    const int baseline = bounds.top + (bounds.bottom - bounds.top - height) / 2 + metrics.tmAscent;
-    return MulDiv(2 * baseline + top + bottom, 1, 2);
-}
-
 struct Popup {
     HWND window = nullptr, controller = nullptr;
     std::vector<HWND> buttons;
@@ -115,6 +93,8 @@ struct Popup {
     std::unique_ptr<Popup> child;
     Popup* parent = nullptr;
     HFONT font = nullptr;
+    MenuText menuText;
+    UINT textFallbacks = 0;
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr;
@@ -513,6 +493,12 @@ struct Popup {
         }
         return false;
     }
+    void DrawLabel(HDC dc, RECT bounds, const std::wstring& label, COLORREF ink, UINT flags) {
+        if(!menuText.Draw(dc,bounds,label,ink,flags)) {
+            ++textFallbacks;
+            MenuSurface::Text(dc,bounds,label,font,ink,flags);
+        }
+    }
     void DrawButtonContent(const DRAWITEMSTRUCT& item, ULONGLONG frameTime) {
         const auto found = std::find(buttons.begin(), buttons.end(), item.hwndItem);
         if (found == buttons.end()) return;
@@ -536,22 +522,22 @@ struct Popup {
         bounds.right -= Px(24);
         if (!row.secondary.empty()) {
             RECT status = item.rcItem; status.right -= Px(12);
-            SIZE statusSize{};
-            GetTextExtentPoint32W(item.hDC, row.secondary.c_str(), static_cast<int>(row.secondary.size()), &statusSize);
-            status.left = status.right - statusSize.cx;
+            const int statusWidth=menuText.Width(row.secondary);
+            SIZE fallback{};if(!statusWidth) GetTextExtentPoint32W(item.hDC,row.secondary.c_str(),static_cast<int>(row.secondary.size()),&fallback);
+            status.left = status.right - (statusWidth?statusWidth:fallback.cx);
             SetTextColor(item.hDC, light ? RGB(100, 100, 100) : RGB(170, 170, 170));
             HIGHCONTRASTW contrast{sizeof(contrast)};
             if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON)) SetTextColor(item.hDC, ink);
-            MenuSurface::Text(item.hDC, status, row.secondary, font, GetTextColor(item.hDC), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            DrawLabel(item.hDC, status, row.secondary, GetTextColor(item.hDC), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             SetTextColor(item.hDC, ink);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
-        MenuSurface::Text(item.hDC, bounds, row.label, font, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        DrawLabel(item.hDC, bounds, row.label, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         const auto pen = CreatePen(PS_SOLID, std::max(1, Px(1)), ink);
         const auto oldPen = SelectObject(item.hDC, pen);
         // Font line boxes include unused space. Align every glyph to the
         // label's visible ink instead, using the selected font at this DPI.
-        const int cy = LabelCenter(item.hDC, row.label, bounds);
+        const int cy = menuText.InkCenter(row.label,bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayUpdateCommand
@@ -627,6 +613,7 @@ struct Popup {
         if (!UpdateTheme(systemLight)) return false;
         font = CreateSystemMenuFont(dpi);
         if (!background || !highlight || !separator || !font) return false;
+        menuText.Initialize(font); // GDI remains a readable fallback if graphics initialization fails.
         MONITORINFO monitor{sizeof(monitor)};
         if (!GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
         // Reserve the same breathing room at the taskbar and screen edge.

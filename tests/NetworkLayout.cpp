@@ -29,7 +29,7 @@ void Pump() { MSG msg{}; while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) { 
 struct Slot {
     controls::Grid presenter, icon, outer, contentPresenter, contentGrid, textIcon, textContainer, inner;
     controls::TextBlock glyph;
-    explicit Slot(wchar_t symbol) {
+    explicit Slot(wchar_t symbol, bool withPresenter) {
         Alias(presenter, L"Windows.UI.Xaml.Controls.ContentPresenter"); Alias(icon, L"SystemTray.IconView");
         Alias(contentPresenter,L"Windows.UI.Xaml.Controls.ContentPresenter");Alias(textIcon,L"SystemTray.TextIconContent");
         outer.Name(L"ContainerGrid");contentPresenter.Name(L"ContentPresenter");contentGrid.Name(L"ContentGrid");
@@ -37,11 +37,12 @@ struct Slot {
         glyph.Text(winrt::hstring(&symbol, 1)); glyph.FontSize(16);
         inner.MinWidth(24);inner.Children().Append(glyph);textContainer.Children().Append(inner);
         textIcon.Children().Append(textContainer);contentGrid.Children().Append(textIcon);
-        contentPresenter.Children().Append(contentGrid);outer.Children().Append(contentPresenter);
+        if(withPresenter) {contentPresenter.Children().Append(contentGrid);outer.Children().Append(contentPresenter);}
+        else outer.Children().Append(contentGrid);
         icon.Children().Append(outer); presenter.Children().Append(icon);
     }
 };
-void Run() {
+void Run(bool withPresenter) {
     const HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"Network layout fixture",
         WS_POPUP, 0, 0, 400, 48, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     Check(host != nullptr, "host window");
@@ -56,7 +57,7 @@ void Run() {
         root.Name(L"ControlCenterButton"); Alias(root, L"SystemTray.OmniButton");
         Alias(content, L"Windows.UI.Xaml.Controls.ContentPresenter"); Alias(items, L"Windows.UI.Xaml.Controls.ItemsPresenter");
         controls::StackPanel stack; stack.Orientation(controls::Orientation::Horizontal);
-        Slot network(0xF8C3), volume(0xE995), battery(0xE83F);
+        Slot network(0xF8C3,withPresenter), volume(0xE995,withPresenter), battery(0xE83F,withPresenter);
         stack.Children().Append(network.presenter); stack.Children().Append(volume.presenter); stack.Children().Append(battery.presenter);
         items.Children().Append(stack); content.Children().Append(items); frame.Children().Append(content); root.Children().Append(frame);
         button.Content(root); source.Content(button); Pump(); button.UpdateLayout();
@@ -111,19 +112,19 @@ void Run() {
         Check(acrylic::FindNetworkTarget(root,Name).glyph==network.glyph,"network identified after slot reorder without affecting speaker/battery");
         const wchar_t offline=0xF8CC;network.glyph.Text(winrt::hstring(&offline,1));
         Check(acrylic::FindNetworkTarget(network.glyph,Name).glyph==network.glyph,"initially offline network still watched for reconnect");
-        network.contentPresenter.Name(L"UnexpectedPresenter");Check(!acrylic::FindNetworkTarget(root,Name),"unsupported template rejected");
-        network.contentPresenter.Name(L"ContentPresenter");network.inner.Name(L"UnexpectedBase");
+        network.contentGrid.Name(L"UnexpectedContentGrid");Check(!acrylic::FindNetworkTarget(root,Name),"unsupported template rejected");
+        network.contentGrid.Name(L"ContentGrid");network.inner.Name(L"UnexpectedBase");
         Check(!acrylic::FindNetworkTarget(root,Name),"unrecognized glyph parent rejected");
         button.Click(token); source.Content(nullptr); names.clear();
     }
     source.Close(); DestroyWindow(host); Pump();
-    std::puts("PASS: real IconView template, MobWifi/SysWifi/Ethernet vector, reordered slots, initially offline reconnect; offline/warning/unknown restoration; theme binding, native size/click/tooltip, overlay recovery, opacity/binding/exit restoration, unsupported tree rejection.");
+    std::printf("PASS: %s IconView template, MobWifi/SysWifi/Ethernet vector, reordered slots, initially offline reconnect; offline/warning/unknown restoration; theme binding, native size/click/tooltip, overlay recovery, opacity/binding/exit restoration, unsupported tree rejection.\n",withPresenter?"wrapped":"direct");
 }
 int main() {
     try {
         winrt::init_apartment(winrt::apartment_type::single_threaded);
         auto manager = xaml::Hosting::WindowsXamlManager::InitializeForCurrentThread();
-        Run(); manager.Close(); Pump(); return 0;
+        Run(false); Run(true); manager.Close(); Pump(); return 0;
     } catch (const winrt::hresult_error& e) { std::printf("FAIL: XAML HRESULT %08lx\n", static_cast<unsigned long>(e.code())); std::fwprintf(stderr, L"%s\n", e.message().c_str()); return 1; }
     catch (const std::exception& e) { std::printf("FAIL: %s\n", e.what()); return 1; }
 }
