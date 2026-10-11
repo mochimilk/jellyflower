@@ -54,3 +54,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
+
+
+The connected-network artwork in assets/network.svg and src/network_art.hpp preserves the two paths from the user-supplied Y2K Bold Icons Element 2-01.svg. Its fill is replaced by the current native network foreground; no font or cursor pack is embedded. The artwork is supplied for this project and retains its creator's applicable license; this project does not claim it is GPL-original artwork.

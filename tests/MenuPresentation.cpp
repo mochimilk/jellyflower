@@ -117,7 +117,12 @@ int wmain(int argc,wchar_t** argv) {
             popup.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
             Check(popup.Create(controller,{100,100},false),"native popup created");
             Check(popup.acrylic,"Windows accepts explicit acrylic on root menu");
-            LOGFONTW font{};GetObjectW(popup.font,sizeof(font),&font);Check(font.lfWeight==FW_NORMAL && font.lfQuality==ANTIALIASED_QUALITY,"regular Segoe UI with grayscale smoothing for transparent surfaces");
+            LOGFONTW font{};GetObjectW(popup.font,sizeof(font),&font);
+            Check(font.lfWeight==FW_NORMAL && font.lfQuality==ANTIALIASED_QUALITY && font.lfHeight==-MulDiv(14,dpi,96),"regular Windows 11 body size with grayscale smoothing for glass");
+            const HDC fontDc=CreateCompatibleDC(nullptr);const auto previous=SelectObject(fontDc,popup.font);wchar_t face[LF_FACESIZE]{};GetTextFaceW(fontDc,LF_FACESIZE,face);TEXTMETRICW resolved{};GetTextMetricsW(fontDc,&resolved);SelectObject(fontDc,previous);DeleteDC(fontDc);
+            Check(resolved.tmWeight==FW_NORMAL,"resolved glyph face uses normal weight, not a synthesized light/bold request");
+            Check(wcscmp(face,L"Segoe UI Variable Text")==0,"GDI resolves the actual installed Windows 11 variable text face");
+            if(theme==0) std::wcout<<L"Menu font at "<<dpi<<L" DPI: "<<face<<L", height="<<font.lfHeight<<L", weight="<<font.lfWeight<<L'\n';
             Check(popup.rows[0].label==L"system" && popup.rows[0].secondary==(light?L"light":L"dark"),"system first with current theme secondary");
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
@@ -172,6 +177,23 @@ int wmain(int argc,wchar_t** argv) {
             popup.highContrast=true;popup.ConfigureBackdrop();
             Check(!popup.acrylic,"high contrast uses a solid fallback");
             popup.highContrast=false;popup.ConfigureBackdrop();Check(popup.acrylic,"acrylic recovers after fallback");
+        }
+        Check(MenuEntranceProgress(0)==0 && MenuEntranceProgress(1)==1,"entrance curve endpoints");
+        Check(std::abs(MenuEntranceProgress(.125)-.5)<.000001,"bezier x inversion matches analytic control point curve");
+        double last=0;for(int i=0;i<=1000;++i){const auto value=MenuEntranceProgress(i/1000.0);Check(value>=last && value<=1,"entrance curve monotonic without overshoot");last=value;}
+        for(UINT dpi:{96u,120u,144u,168u,192u}) {
+            MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromWindow(controller,MONITOR_DEFAULTTOPRIMARY),&monitor);
+            Popup edge;edge.controller=controller;edge.dpi=dpi;edge.rows=RootRows(AcrylicMode::System,true,false,1u<<CursorDisabled);
+            Check(edge.Create(controller,{monitor.rcWork.right,monitor.rcWork.bottom},false),"edge popup created");
+            RECT rect{};GetWindowRect(edge.window,&rect);
+            Check(rect.right==monitor.rcWork.right-edge.Px(12) && rect.bottom==monitor.rcWork.bottom-edge.Px(12),"equal 12 DIP bottom/right screen margins at all scales");
+            edge.entering=true;edge.entranceStarted=1000;edge.AdvanceEntrance(1000);GetWindowRect(edge.window,&rect);
+            Check(rect.top==edge.restingBounds.top+edge.Px(32),"entrance starts below resting position");
+            edge.AdvanceEntrance(1125);GetWindowRect(edge.window,&rect);Check(rect.top>=edge.restingBounds.top && rect.top<edge.restingBounds.top+edge.Px(16),"documented fast entrance curve advances upward");
+            edge.AdvanceEntrance(1250);GetWindowRect(edge.window,&rect);Check(!edge.entering && EqualRect(&rect,&edge.restingBounds),"animation settles exactly and stops its timer");
+            edge.highContrast=true;edge.BeginEntrance();Check(!edge.entering,"contrast fallback skips motion");
+            Popup nested;nested.parent=&edge;nested.controller=controller;nested.dpi=dpi;nested.rows=CursorRows(1u<<CursorDisabled,CursorDisabled);
+            Check(nested.Create(edge.window,{rect.right,rect.top},true),"nested edge popup created");nested.BeginEntrance();Check(!nested.entering,"nested hover menu does not repeat root entrance");
         }
         if(argc==3 && wcscmp(argv[2],L"--compositor")==0) Compositor(controller,argv[1]);
         DestroyWindow(controller);

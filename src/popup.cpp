@@ -6,6 +6,7 @@
 #include "updates.hpp"
 #include "version.hpp"
 #include "menu_surface.hpp"
+#include "menu_style.hpp"
 #include "auto_theme.hpp"
 #include "cursor_icon.hpp"
 #include <commctrl.h>
@@ -29,6 +30,7 @@ constexpr UINT_PTR HoverTimer = 1;
 constexpr UINT_PTR ChildCloseTimer = 2, TrayDeactivateTimer = 3;
 constexpr UINT_PTR UpdateSpinnerTimer = 4;
 constexpr UINT_PTR ColorPreviewTimer = 5;
+constexpr UINT_PTR EntranceTimer = 6;
 // Documented Windows 11 DWM values; compatible with Windows 10 SDK headers.
 constexpr auto CornerPreference = static_cast<DWMWINDOWATTRIBUTE>(33);
 constexpr auto ImmersiveDarkMode = static_cast<DWMWINDOWATTRIBUTE>(20);
@@ -133,6 +135,9 @@ struct Popup {
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
     bool acrylic = false, highContrast = false;
+    RECT restingBounds{};
+    ULONGLONG entranceStarted = 0;
+    bool entering = false;
     Popup() {
         Gdiplus::GdiplusStartupInput input;
         if (Gdiplus::GdiplusStartup(&graphicsToken, &input, nullptr) != Gdiplus::Ok) graphicsToken = 0;
@@ -157,12 +162,33 @@ struct Popup {
         if (graphicsToken) Gdiplus::GdiplusShutdown(graphicsToken);
     }
     int Px(int dip) const { return MulDiv(dip, static_cast<int>(dpi), 96); }
+    void CompleteEntrance() {
+        if (!entering) return;
+        entering = false;
+        KillTimer(window, EntranceTimer);
+        SetWindowPos(window, nullptr, restingBounds.left, restingBounds.top, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    void AdvanceEntrance(ULONGLONG now) {
+        if (!entering) return;
+        const auto elapsed = now - entranceStarted;
+        if (elapsed >= MenuEntranceDuration) { CompleteEntrance(); return; }
+        const int offset = static_cast<int>(std::lround(Px(MenuEntranceDistance)
+            * (1 - MenuEntranceProgress(static_cast<double>(elapsed) / MenuEntranceDuration))));
+        SetWindowPos(window, nullptr, restingBounds.left, restingBounds.top + offset, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    void BeginEntrance() {
+        if (parent || highContrast || !MenuAnimationsEnabled()) return;
+        entranceStarted = GetTickCount64(); entering = true;
+        AdvanceEntrance(entranceStarted);
+        if (!SetTimer(window, EntranceTimer, 10, nullptr)) CompleteEntrance();
+    }
     Popup* Root() { return parent ? parent->Root() : this; }
     Popup* Target(HWND target) {
         if (target == window || IsChild(window, target)) return this;
         return child ? child->Target(target) : nullptr;
     }
     void HideBranch() {
+        CompleteEntrance();
         closing = true;
         if (child) child->HideBranch();
         if (window) ShowWindow(window, SW_HIDE);
@@ -192,6 +218,7 @@ struct Popup {
         if (done) return;
         result = command;
         done = true;
+        CompleteEntrance();
         if (mouseHook) { UnhookWindowsHookEx(mouseHook); mouseHook = nullptr; }
         if (child) child->HideBranch();
         if (window) {
@@ -373,6 +400,7 @@ struct Popup {
         else SetFocus(buttons[static_cast<size_t>(hovered >= 0 ? hovered : std::max(0, childIndex))]);
     }
     void OpenChild(int index, bool fromKeyboard) {
+        Root()->CompleteEntrance();
         if (index < 0 || index >= static_cast<int>(rows.size())) return;
         const UINT command = rows[static_cast<size_t>(index)].command;
         if (!HasSubmenu(command)) return;
@@ -433,6 +461,7 @@ struct Popup {
         return childIndex >= 0 && GetWindowRect(buttons[static_cast<size_t>(childIndex)], &bounds) && PtInRect(&bounds, point);
     }
     void Activate(int index, bool fromKeyboard) {
+        Root()->CompleteEntrance();
         if (index < 0 || index >= static_cast<int>(rows.size()) || !rows[static_cast<size_t>(index)].enabled) return;
         const UINT command = rows[static_cast<size_t>(index)].command;
         if (HasSubmenu(command)) OpenChild(index, fromKeyboard);
@@ -465,6 +494,7 @@ struct Popup {
         }
     }
     bool Key(WPARAM key) {
+        Root()->CompleteEntrance();
         const int current = Focused(), count = static_cast<int>(buttons.size());
         switch (key) {
         case VK_ESCAPE: case VK_LEFT:
@@ -595,25 +625,28 @@ struct Popup {
     }
     bool Create(HWND owner, POINT anchor, bool submenu) {
         if (!UpdateTheme(systemLight)) return false;
-        font = CreateFontW(-MulDiv(10, static_cast<int>(dpi), 72), 0, 0, 0, FW_NORMAL,
-            FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-            ANTIALIASED_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        font = CreateSystemMenuFont(dpi);
         if (!background || !highlight || !separator || !font) return false;
         MONITORINFO monitor{sizeof(monitor)};
         if (!GetMonitorInfoW(MonitorFromPoint(anchor, MONITOR_DEFAULTTONEAREST), &monitor)) return false;
+        // Reserve the same breathing room at the taskbar and screen edge.
+        // Work-area coordinates also handle secondary/negative-coordinate monitors.
+        RECT area = monitor.rcWork;
+        InflateRect(&area, -Px(MenuEdgeGap), -Px(MenuEdgeGap));
         const int width = Px(parent ? 228 : 296);
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
-        rowHeight = std::min<int>(Px(40), (monitor.rcWork.bottom - monitor.rcWork.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
+        rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
         int x = anchor.x;
-        if (submenu && x + width > monitor.rcWork.right) {
+        if (submenu && x + width > area.right) {
             RECT ownerBounds{};
             GetWindowRect(owner, &ownerBounds);
             x = ownerBounds.left - width + Px(2);
         }
-        x = std::clamp<LONG>(x, monitor.rcWork.left, std::max(monitor.rcWork.left, monitor.rcWork.right - width));
-        const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(6), monitor.rcWork.top,
-            std::max(monitor.rcWork.top, monitor.rcWork.bottom - height));
+        x = std::clamp<LONG>(x, area.left, std::max(area.left, area.right - width));
+        const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(MenuEdgeGap), area.top,
+            std::max(area.top, area.bottom - height));
+        restingBounds = {x, y, x + width, y + height};
         window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : L"jellyflower",
             WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
@@ -714,7 +747,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     }
     case WM_MOUSELEAVE: popup->Hover(-1); return 0;
     case WM_TIMER:
-        if (wParam == ColorPreviewTimer) {
+        if (wParam == EntranceTimer) {
+            popup->AdvanceEntrance(GetTickCount64());
+        } else if (wParam == ColorPreviewTimer) {
             ++popup->colorFrame;
             popup->RepaintButtons();
         } else if (wParam == UpdateSpinnerTimer) {
@@ -748,6 +783,7 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_SETTINGCHANGE: case WM_THEMECHANGED: {
         auto* root = popup->Root();
+        if (!MenuAnimationsEnabled()) root->CompleteEntrance();
         if (!root->done) root->UpdateTheme(SendMessageW(root->controller, TrayThemeQueryMessage, 0, 0) != 0);
         return 0;
     }
@@ -799,6 +835,7 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     // Startup uses a hidden controller. Consume any initial show override on
     // the still-hidden popup before displaying it, then activate only the menu.
     ShowWindow(popup.window, SW_HIDE);
+    popup.BeginEntrance();
     ShowWindow(popup.window, SW_SHOWNORMAL);
     SetForegroundWindow(popup.window);
     SetFocus(popup.buttons[0]);

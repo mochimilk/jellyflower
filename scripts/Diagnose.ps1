@@ -11,7 +11,8 @@ Get-Content -LiteralPath $OutputPath -Raw | ConvertFrom-Json | Format-List
 Write-Host "Saved $OutputPath"
 Write-Host 'Applied backgrounds means the API/brush request succeeded. Inspect the taskbar visually to verify blur.'
 Write-Host 'singleLineClocks counts accepted clock layouts. If zero, the helper has not found a supported clock; check bridgeState and clockLastResult.'
-Write-Host 'hiddenVolumeIcons counts hidden speaker glyphs. If zero, the helper has not found the supported Quick Settings layout; network and battery are left alone.'
+Write-Host 'hiddenVolumeIcons counts hidden speaker glyphs. Battery and the Quick Settings click target remain native.'
+Write-Host 'replacedNetworkIcons counts accepted connected-network replacements. Offline/warning icons and unknown layouts remain native; networkLastResult records helper errors.'
 Write-Host 'bridgeRetained means a live Explorer connection is being kept across transient layout changes. taskbarXamlIslands is a discovery count, not a blur measurement.'
 
 Write-Host 'clockDate reports the saved date toggle. The single-line clock uses the native Windows system font.'
