@@ -1,5 +1,9 @@
 # Validation results
 
+## jellyflower 0.16.9, 2026-10-11
+
+Cursor preview dispatch now requires a visible, live submenu. Hiding a window can queue WM_MOUSELEAVE after its original button bounds still contain the pointer; that stale event must not restart a temporary cursor. MenuPresentation adds hidden-branch and dismissed-root hover regressions alongside the existing leave/commit/keyboard/outside cleanup checks. The complete fixture runs both themes and 96/120/144/168/192 DPI. Start v3, its search styling/material and the cursor manager are unchanged from the tested 0.16.8 implementation. The current installer/source/portable version is 0.16.9; build, extraction and package checks are repeated for those final bytes.
+
 ## jellyflower 0.16.8, 2026-10-11
 
 Native x64 Release app, Start v3 helper, setup and relevant fixtures build with MSVC 19.44 / SDK 10.0.26100. The Start search adapter preserves the native toggle/template, font family/size, event handler, tab stop and foreground while changing only the recognized header parts. StartSearch passes exact Lucide path/circle/stroke geometry, lowercase visible/accessibility label, transparent input fill/border, hidden native icon/underline, section alignment, full-width divider, heading/width changes, both themes, and local/unset/binding/latest-shell-value/template/destructor restoration. RenderTargetBitmap pixel checks verify the magnifier and themed divider at both edges. An opaque fixture-only background preserves capture coordinates because XAML crops outer transparent space; production remains transparent. StartSurface also passes the existing live XAML compositor/tint response and restoration checks; the material recipe is unchanged.

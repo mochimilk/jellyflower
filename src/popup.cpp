@@ -508,7 +508,10 @@ struct Popup {
     }
     void PreviewCursor(int index) {
         if (kind != TrayCursorCommand) return;
-        const UINT next = index >= 0 && index < static_cast<int>(rows.size()) && rows[static_cast<size_t>(index)].enabled
+        // Hiding a window can queue WM_MOUSELEAVE while its old button bounds
+        // still contain the pointer. Hidden/finished menus may only end previews.
+        const bool live = !closing && !Root()->done && window && IsWindowVisible(window);
+        const UINT next = live && index >= 0 && index < static_cast<int>(rows.size()) && rows[static_cast<size_t>(index)].enabled
             ? rows[static_cast<size_t>(index)].command - CursorCommandBase : CursorPreviewNone;
         if (next == previewMode) return;
         previewMode = next;

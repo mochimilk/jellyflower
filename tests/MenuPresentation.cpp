@@ -403,6 +403,8 @@ int wmain(int argc,wchar_t** argv) {
             Check(cursorChoice==5 && popup.cursorMode==5 && cursors.rows[5].checked && !popup.done && IsWindowVisible(submenu),"click commits preview in place and leave retains new selection");
             cursors.Hover(6);cursors.Focus(5);Check(cursorPreviews.back()==CursorPreviewNone,"keyboard navigation ends mouse preview");
             cursors.Hover(7);cursors.HideBranch();Check(cursorPreviews.back()==CursorPreviewNone,"hiding a nested branch ends preview immediately");
+            const auto hiddenPreviews=cursorPreviews.size();cursors.Hover(7);
+            Check(cursorPreviews.size()==hiddenPreviews && cursors.previewMode==CursorPreviewNone,"queued row hover cannot restart a hidden submenu preview");
             ShowWindow(submenu,SW_SHOWNORMAL);cursors.closing=false;
             cursorChoice=CursorDisabled;cursors.RefreshCursors();
             Capture(cursors,std::filesystem::path(argv[1])/(std::wstring(light?L"unlocked-light-":L"unlocked-dark-")+std::to_wstring(dpi)+L".bmp"));
@@ -423,6 +425,8 @@ int wmain(int argc,wchar_t** argv) {
             Check(cursorPreviews.back()==4,"cursor preview starts in nested menu");
             SendMessageW(preview.window,WM_CANCELMODE,0,0);
             Check(preview.done && cursorPreviews.back()==CursorPreviewNone,"outside dismissal restores preview through normal Finish path");
+            const auto finishedPreviews=cursorPreviews.size();preview.child->Hover(4);
+            Check(cursorPreviews.size()==finishedPreviews,"queued row hover cannot restart a dismissed menu preview");
         }
         {
             Popup link;link.controller=controller;link.kind=TrayGeneralCommand;link.rows=GeneralRows();
