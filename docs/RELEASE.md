@@ -1,7 +1,7 @@
-jellyflower 0.16.10
+jellyflower 0.16.11
 
-Auto light/dark mode calculates and caches a day of sunrise/sunset transitions, then waits on a separate timer for the next event or daily refresh. It catches up after sleep, clock changes and location refreshes. Location permission changes are event-driven. The five-second taskbar recovery loop remains separate; no battery-life measurement is claimed.
+Start's category, name-grid, name-list, pinned and Recommended views distribute columns evenly inside balanced side insets. Expanded Recommended no longer retains its old inset. Native vertical spacing and inner padding remain; pinned page-indicator space stays free. Start keeps its existing width and translucent material.
 
-Start has tighter, symmetrical side padding for search, section headings, apps, right-side actions and the footer, with larger 20-DIP outer corners. Native controls, vertical spacing, typography and the existing translucent material remain. Unknown layouts keep their stock spacing; exiting restores original margins and bindings.
+The native shadow now matches the 20-DIP outer radius, and the inset native background uses a matching 19-DIP radius. Windows retains its existing layout and compositor clips. The Start search magnifier is 20 DIP and uses primary text color; its placeholder stays secondary and typography stays native.
 
-Update through general's version/download row. No sign-out or Explorer/Start restart is needed; the new Start v4 helper waits for older helpers to restore before applying. The native x64 installer, portable build and matching source are included.
+Update through general's version/download row. No sign-out or Explorer/Start restart is needed; Start v8 waits for older helpers to restore before applying. The native x64 installer, portable build and matching source are included.

@@ -3,46 +3,35 @@
 #include "start_properties.hpp"
 #include <algorithm>
 namespace acrylic {
-enum class StartSpacingRule { None, Heading, Left, Right, Both };
+enum class StartSpacingRule { None, Heading, Left, Right, Both, PinnedPadding };
 inline StartSpacingRule StartSpacingFor(const sx::FrameworkElement& element, StartClassName name = nullptr) {
     if (!element) return StartSpacingRule::None;
-    bool start = false, list = false;
+    bool start = false;
     const auto parent = sx::Media::VisualTreeHelper::GetParent(element).try_as<sx::FrameworkElement>();
     auto current = sx::Media::VisualTreeHelper::GetParent(element);
     for (unsigned depth=0; current && depth<48; ++depth) {
         const auto type = name ? name(current) : winrt::get_class_name(current);
         const std::wstring_view text(type);
         if (text.substr(0,10)==L"StartMenu." || text.substr(0,12)==L"StartDocked.") { start = true; break; }
-        // Only the nearest list owns this ItemsWrapGrid. Never style folder or
-        // app-item grids which happen to sit deeper inside the main app list.
-        if (const auto grid = current.try_as<sx::Controls::GridView>()) {
-            list = grid.Name()==L"AllAppsGrid" || grid.Name()==L"PinnedList";
-            break;
-        }
         current = sx::Media::VisualTreeHelper::GetParent(current);
-    }
-    if (!start) {
-        current = sx::Media::VisualTreeHelper::GetParent(element);
-        for (unsigned depth=0; current && depth<48; ++depth) {
-            const auto type = name ? name(current) : winrt::get_class_name(current);
-            const std::wstring_view text(type);
-            if (text.substr(0,10)==L"StartMenu." || text.substr(0,12)==L"StartDocked.") {start=true;break;}
-            current=sx::Media::VisualTreeHelper::GetParent(current);
-        }
     }
     if (!start) return StartSpacingRule::None;
     const auto id = element.Name();
     if (element.try_as<sx::Controls::TextBlock>() && (id==L"PinnedListHeaderText" || id==L"AllListHeadingText"
         || id==L"TopLevelSuggestionsListHeaderText" || id==L"MoreSuggestionsListHeaderText" || id==L"ZoomedOutHeading")) return StartSpacingRule::Heading;
     if (element.try_as<sx::Controls::Grid>() && id==L"NavPanePlaceholder" && parent && parent.Name()==L"MainContent") return StartSpacingRule::Both;
-    if (element.try_as<sx::Controls::Grid>() && id==L"TopLevelSuggestionsContainer") return StartSpacingRule::Left;
+    if (element.try_as<sx::Controls::Grid>() && id==L"TopLevelSuggestionsContainer") return StartSpacingRule::Both;
+    if (element.try_as<sx::Controls::Grid>() && id==L"Root" && parent) {
+        const auto type=name ? name(parent) : winrt::get_class_name(parent);
+        if(type==L"StartMenu.PinnedList" || type==L"StartDocked.PinnedList") return StartSpacingRule::PinnedPadding;
+    }
     if (element.try_as<sx::Controls::Control>() && (id==L"ViewSelectionButton" || id==L"ShowMoreSuggestionsButton"
         || id==L"ZoomInButton" || id==L"HideMoreSuggestionsButton" || (parent && parent.Name()==L"ShowMorePinnedGrid"))) return StartSpacingRule::Right;
-    if (list && element.try_as<sx::Controls::ItemsWrapGrid>()) return StartSpacingRule::Both;
+    // Main app panels are owned by StartGrid, which also balances their cells.
     return StartSpacingRule::None;
 }
 inline sx::Thickness CompactStartMargin(sx::Thickness margin, StartSpacingRule rule) {
-    const auto inset=[](double original) {return original>0 ? std::max(12.0, original-40.0) : original;};
+    const auto inset=[](double original) {return original>12 ? std::max(12.0, original-40.0) : original;};
     if (rule==StartSpacingRule::Heading) margin.Left=24;
     else if (rule==StartSpacingRule::Left || rule==StartSpacingRule::Both) margin.Left=inset(margin.Left);
     if (rule==StartSpacingRule::Right || rule==StartSpacingRule::Both) margin.Right=inset(margin.Right);
@@ -58,8 +47,14 @@ public:
     void Refresh(bool enabled) {
         if (!enabled) {Restore();return;}
         if (applied_ || rule_==StartSpacingRule::None) return;
-        values_.Set(element_,sx::FrameworkElement::MarginProperty(),nullptr,[rule=rule_](const auto& value) {
-            return winrt::box_value(CompactStartMargin(winrt::unbox_value<sx::Thickness>(value),rule));
+        if(rule_==StartSpacingRule::PinnedPadding) {
+            values_.Set(element_,sx::Controls::Grid::PaddingProperty(),nullptr,[](const auto& value){
+                auto p=winrt::unbox_value<sx::Thickness>(value);p.Left=p.Right=0;return winrt::box_value(p);
+            });
+        } else values_.Set(element_,sx::FrameworkElement::MarginProperty(),nullptr,[rule=rule_](const auto& value) {
+            auto p=CompactStartMargin(winrt::unbox_value<sx::Thickness>(value),rule);
+            if(rule==StartSpacingRule::Both) p.Left=p.Right=12;
+            return winrt::box_value(p);
         });
         applied_=true;
     }

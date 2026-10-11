@@ -32,22 +32,23 @@ int main(){try{
     auto cells=FindStartElement(root,L"AppCells");auto other=FindStartElement(root,L"OtherCells");
     Check(cells && other,"native list templates realized");
     Check(StartSpacingFor(heading)==StartSpacingRule::None,"unrelated XAML tree rejected");
-    Check(StartSpacingFor(cells,Supported)==StartSpacingRule::Both && StartSpacingFor(other,Supported)==StartSpacingRule::None,"nearest list guard excludes unknown/nested list templates");
+    Check(StartSpacingFor(cells,Supported)==StartSpacingRule::None && StartSpacingFor(other,Supported)==StartSpacingRule::None,"grid panels are owned only by the responsive grid adapter");
     std::vector<std::unique_ptr<StartSpacing>> adapters;
-    for(const auto name:{L"PinnedListHeaderText",L"AllListHeadingText",L"ShowPinned",L"NavPanePlaceholder",L"TopLevelSuggestionsContainer",L"ViewSelectionButton",L"AppCells"}) {
+    for(const auto name:{L"PinnedListHeaderText",L"AllListHeadingText",L"ShowPinned",L"NavPanePlaceholder",L"TopLevelSuggestionsContainer",L"ViewSelectionButton"}) {
         const auto element=FindStartElement(root,name);const auto rule=StartSpacingFor(element,Supported);
         Check(rule!=StartSpacingRule::None,"known native spacing anchor recognized");
         adapters.push_back(std::make_unique<StartSpacing>(element,rule));adapters.back()->Refresh(true);
     }
     Layout(root);
     Check(heading.Margin().Left==24 && heading.Margin().Top==6 && heading.Margin().Bottom==7,"headings compact without changing vertical spacing");
-    Check(cells.Margin().Left==12 && cells.Margin().Right==12 && cells.Margin().Bottom==14,"app cells use symmetrical tighter side margins");
+    Check(cells.Margin().Left==52 && cells.Margin().Right==52,"spacing adapter leaves grid measurement to StartGrid");
     Check(footer.Margin().Left==12 && footer.Margin().Right==12 && footer.ActualWidth()==616,"footer expands through native layout rather than a translated overlay");
     Check(FindStartElement(root,L"ShowPinned").Margin().Right==12 && FindStartElement(root,L"ViewSelectionButton").Margin().Right==12,"right-side controls follow the same compact inset");
     Check(other.Margin().Left==52,"unknown list remains stock");
-    cells.Margin({60,4,60,18});Check(cells.Margin().Left==20 && cells.Margin().Right==20 && cells.Margin().Top==4 && cells.Margin().Bottom==18,"later shell margin changes retain vertical updates and compact both sides");
+    footer.Margin({60,4,60,18});Check(footer.Margin().Left==12 && footer.Margin().Right==12 && footer.Margin().Top==4 && footer.Margin().Bottom==18,"later shell margin changes retain vertical updates and symmetric insets");
     for(auto& adapter:adapters)adapter->Refresh(false);
-    Check(heading.Margin().Left==63 && footer.Margin().Left==52 && cells.Margin().Left==60 && cells.Margin().Top==4,"disable restores latest stock margins");
+    Check(heading.Margin().Left==63 && footer.Margin().Left==60 && footer.Margin().Top==4,"disable restores latest stock margins");
+    Check(CompactStartMargin({4,0,6,0},StartSpacingRule::Left).Left==4,"already-small insets are never enlarged");
     sx::Data::Binding binding;binding.Source(winrt::box_value(sx::Thickness{52,3,52,9}));footer.SetBinding(sx::FrameworkElement::MarginProperty(),binding);
     {StartSpacing spacing(footer,StartSpacingRule::Both);spacing.Refresh(true);Check(footer.Margin().Left==12,"bound margin is compacted");}
     Check(footer.GetBindingExpression(sx::FrameworkElement::MarginProperty()).ParentBinding()==binding && footer.Margin().Left==52,"destructor restores original binding");

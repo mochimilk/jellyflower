@@ -27,9 +27,9 @@ void RenderChecks(const sx::Controls::Grid& pane,const sx::Controls::Canvas& ico
     const double scale=image.PixelWidth()/pane.ActualWidth();
     Check(std::abs(image.PixelHeight()/scale-pane.ActualHeight())<1,"opaque fixture background retains the full capture origin");
     const auto point=icon.TransformToVisual(pane).TransformPoint({0,0});unsigned ink=0;
-    for(int y=static_cast<int>(point.Y*scale);y<static_cast<int>((point.Y+24)*scale);++y)
-        for(int x=static_cast<int>(point.X*scale);x<static_cast<int>((point.X+24)*scale);++x)
-            if(pixels[(static_cast<size_t>(y)*image.PixelWidth()+x)*4]>128) ++ink;
+    for(int y=static_cast<int>(point.Y*scale);y<static_cast<int>((point.Y+20)*scale);++y)
+        for(int x=static_cast<int>(point.X*scale);x<static_cast<int>((point.X+20)*scale);++x)
+            if(light?pixels[(static_cast<size_t>(y)*image.PixelWidth()+x)*4]<128:pixels[(static_cast<size_t>(y)*image.PixelWidth()+x)*4]>128) ++ink;
     Check(ink>30,"Lucide strokes render visibly outside the zero-size overlay container");
     // Fractional-DPI layout rounding can move a one-DIP stroke to either
     // adjacent physical row. Inspect its narrow band, not one pixel center.
@@ -57,6 +57,7 @@ int main(){
         sx::Controls::Grid header;header.Height(64);header.Margin({32,0,28,0});header.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(header);
         sx::Controls::Primitives::ToggleButton button;button.Height(32);button.HorizontalAlignment(sx::HorizontalAlignment::Stretch);button.Template(Template());header.Children().Append(button);
         sx::Controls::TextBlock heading;heading.Name(L"PinnedListHeaderText");heading.Text(L"Pinned");heading.Margin({64,80,0,0});heading.HorizontalAlignment(sx::HorizontalAlignment::Left);heading.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(heading);
+        sx::Media::SolidColorBrush primary(winrt::Windows::UI::Color{255,245,245,245});heading.Foreground(primary);
         host.Content(pane);ShowWindow(window,SW_SHOWNOACTIVATE);Layout(pane);
         Check(!IsStartSearch(button) && IsStartSearch(button,Supported),"only the two native Start control classes match the watcher guard");
         const auto originalTemplate=button.Template();const auto nativePlaceholder=FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>();
@@ -67,6 +68,8 @@ int main(){
         {
             StartSearch search(button);
             for(bool light:{false,true}){
+                primary.Color(light?winrt::Windows::UI::Color{255,0,0,0}:winrt::Windows::UI::Color{255,245,245,245});
+                pane.Background(sx::Media::SolidColorBrush(light?winrt::Windows::UI::Color{255,249,249,249}:winrt::Windows::UI::Color{255,16,16,16}));
                 search.Refresh(true,light);Layout(pane);search.Refresh(true,light);Layout(pane);
                 Check(search.Applied() && button.Template()==originalTemplate && button.IsTabStop(),"native search button/template/keyboard navigation retained");
                 Check(nativePlaceholder.Text()==L"search" && sx::Automation::AutomationProperties::GetName(button)==L"search","lowercase visible and accessible search labels");
@@ -77,17 +80,19 @@ int main(){
                 const auto icon=layer.Children().GetAt(0).as<sx::Controls::Canvas>();const auto position=icon.TransformToVisual(pane).TransformPoint({0,0});
                 const auto handle=icon.Children().GetAt(0).as<sx::Shapes::Path>();const auto circle=icon.Children().GetAt(1).as<sx::Shapes::Ellipse>();
                 const auto bounds=handle.Data().Bounds();
-                Check(handle.StrokeThickness()==2 && handle.StrokeStartLineCap()==sx::Media::PenLineCap::Round && handle.StrokeEndLineCap()==sx::Media::PenLineCap::Round
-                    && std::abs(bounds.X-16.66)<.01 && std::abs(bounds.Y-16.66)<.01 && std::abs(bounds.Width-4.34)<.01,"supplied diagonal handle uses exact Lucide coordinates and round caps");
-                Check(circle.StrokeThickness()==2 && circle.Width()==16 && circle.Height()==16 && sx::Controls::Canvas::GetLeft(circle)==3 && sx::Controls::Canvas::GetTop(circle)==3,"supplied radius-eight circle retains Lucide geometry");
-                Check(std::abs(position.X-64)<.1 && icon.Width()==24 && icon.Height()==24,"Lucide canvas aligns with stock section inset");
+                Check(std::abs(handle.StrokeThickness()-2*20.0/24)<.001 && handle.StrokeStartLineCap()==sx::Media::PenLineCap::Round && handle.StrokeEndLineCap()==sx::Media::PenLineCap::Round
+                    && std::abs(bounds.X-16.66*20/24)<.01 && std::abs(bounds.Y-16.66*20/24)<.01 && std::abs(bounds.Width-4.34*20/24)<.01,"Lucide handle scales uniformly to 20 DIP with round caps");
+                Check(std::abs(circle.Width()-16*20.0/24)<.001 && circle.Height()==circle.Width() && sx::Controls::Canvas::GetLeft(circle)==2.5 && sx::Controls::Canvas::GetTop(circle)==2.5,"circle retains Lucide proportions at 20 DIP");
+                Check(std::abs(position.X-64)<.1 && icon.Width()==20 && icon.Height()==20,"20-DIP canvas aligns with stock section inset");
+                Check(handle.Stroke()==primary && circle.Stroke()==primary && nativePlaceholder.Foreground()!=primary,"magnifier uses native primary ink while placeholder stays secondary");
+                Check(std::abs(sx::Controls::Canvas::GetTop(icon)-(button.ActualHeight()-20)/2)<.1,"smaller magnifier stays vertically centered");
                 const auto lineLayer=FindStartElement(pane,L"JellyflowerSearchDivider").as<sx::Controls::Canvas>();const auto line=lineLayer.Children().GetAt(0).as<sx::Controls::Border>();
                 Check(line.Width()==pane.ActualWidth() && line.Height()==1 && std::abs(line.TransformToVisual(pane).TransformPoint({0,0}).Y-63)<.1,"one-DIP stroke spans the entire header below search");
                 const auto color=line.Background().as<sx::Media::SolidColorBrush>().Color();Check(color.R==(light?210:69),"divider follows existing translucent-menu border theme");
                 RenderChecks(pane,icon,light);
                 heading.Margin({80,80,0,0});Layout(pane);Check(std::abs(icon.TransformToVisual(pane).TransformPoint({0,0}).X-80)<.1,"layout updates follow heading alignment");heading.Margin({64,80,0,0});
                 pane.Width(720);Layout(pane);Check(line.Width()==720,"divider follows native width changes");pane.Width(640);
-                const auto text=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(text.X-96)<.1,"placeholder has 8 DIP after the 24-DIP icon");
+                const auto text=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(text.X-92)<.1,"placeholder has 8 DIP after the 20-DIP icon");
                 button.IsChecked(true);Check(checked,"native toggle behavior and event handlers retained");button.IsChecked(false);checked=false;
                 search.Refresh(false,light);Layout(pane);
                 Check(!search.Applied() && nativePlaceholder.Text()==L"Search for apps, settings, and documents" && nativeOutline.Background()==originalBackground,"disable restores native label and input fill");

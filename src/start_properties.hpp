@@ -19,7 +19,7 @@ class StartSearchValues {
     struct Item {
         sx::FrameworkElement object{nullptr};
         sx::DependencyProperty key{nullptr};
-        winrt::Windows::Foundation::IInspectable local{nullptr}, custom{nullptr};
+        winrt::Windows::Foundation::IInspectable local{nullptr}, custom{nullptr}, effective{nullptr};
         sx::Data::BindingBase binding{nullptr};
         int64_t token = 0;
         std::function<winrt::Windows::Foundation::IInspectable(const winrt::Windows::Foundation::IInspectable&)> transform;
@@ -28,6 +28,7 @@ class StartSearchValues {
     bool writing_ = false;
     void Save(Item& item) {
         item.local = item.object.ReadLocalValue(item.key);
+        item.effective = item.object.GetValue(item.key);
         const auto expression = item.object.GetBindingExpression(item.key);
         item.binding = expression ? expression.ParentBinding() : nullptr;
     }
@@ -45,6 +46,19 @@ public:
     StartSearchValues(const StartSearchValues&) = delete;
     StartSearchValues& operator=(const StartSearchValues&) = delete;
     ~StartSearchValues() { Clear(); }
+    auto Original(const sx::FrameworkElement& object,const sx::DependencyProperty& key) const {
+        for(const auto& item:items_) if(item.object==object && item.key==key) return item.effective;
+        return object.GetValue(key);
+    }
+    void Update(const sx::FrameworkElement& object,const sx::DependencyProperty& key,
+        const winrt::Windows::Foundation::IInspectable& custom) {
+        for(auto& item:items_) if(item.object==object && item.key==key) {
+            item.custom=custom;writing_=true;
+            try {object.SetValue(key,custom);writing_=false;}catch(...){writing_=false;throw;}
+            return;
+        }
+        Set(object,key,custom);
+    }
     void Set(const sx::FrameworkElement& object, const sx::DependencyProperty& key,
         const winrt::Windows::Foundation::IInspectable& custom,
         std::function<winrt::Windows::Foundation::IInspectable(const winrt::Windows::Foundation::IInspectable&)> transform = {}) {

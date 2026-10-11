@@ -82,10 +82,10 @@ class StartSearch {
             left = std::clamp(left, 16.0, std::max(16.0, pane_.ActualWidth() - 64));
             const double iconLeft = left - button.X;
             if (sx::Controls::Canvas::GetLeft(icon_) != iconLeft) sx::Controls::Canvas::SetLeft(icon_, iconLeft);
-            const double top = (button_.ActualHeight() - 24) / 2;
+            const double top = (button_.ActualHeight() - 20) / 2;
             if (sx::Controls::Canvas::GetTop(icon_) != top) sx::Controls::Canvas::SetTop(icon_, top);
             const auto text = presenter_.TransformToVisual(pane_).TransformPoint({0,0});
-            const double shift = left + 24 + 8 - (text.X - textShift_.X());
+            const double shift = left + 20 + 8 - (text.X - textShift_.X());
             if (std::abs(textShift_.X() - shift) > .01) textShift_.X(shift);
             if (caretShift_ && std::abs(caretShift_.X() - shift) > .01) caretShift_.X(shift);
             const double bottom = header_.ActualHeight() <= button_.ActualHeight() + 64
@@ -96,8 +96,11 @@ class StartSearch {
         positioning_ = false;
     }
     void Ink() {
-        auto brush = placeholder_.Foreground();
-        if (!brush) brush = button_.Foreground();
+        // Use the section's native primary text brush, not the deliberately
+        // secondary search placeholder. The fallback follows the active theme.
+        sx::Media::Brush brush{nullptr};
+        if(auto heading=heading_.get().try_as<sx::Controls::TextBlock>())brush=heading.Foreground();
+        if(!brush)brush=sx::Media::SolidColorBrush(light_?winrt::Windows::UI::Color{255,0,0,0}:winrt::Windows::UI::Color{255,255,255,255});
         const auto count = sx::Media::VisualTreeHelper::GetChildrenCount(icon_);
         for (int i = 0; i < count; ++i) if (auto shape = sx::Media::VisualTreeHelper::GetChild(icon_, i).try_as<sx::Shapes::Shape>()) shape.Stroke(brush);
         const auto stroke = MenuBorder(light_);
@@ -132,7 +135,7 @@ public:
                 textShift_ = Shift(presenter_);
                 caret_ = FindStartElement(template_, L"TextCaret");
                 if (caret_) caretShift_ = Shift(caret_);
-                icon_ = sx::Markup::XamlReader::Load(LR"(<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="24" Height="24"><Path Data="M21,21 L16.66,16.66" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><Ellipse Canvas.Left="3" Canvas.Top="3" Width="16" Height="16" StrokeThickness="2"/></Canvas>)").as<sx::Controls::Canvas>();
+                icon_ = sx::Markup::XamlReader::Load(LR"(<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="20" Height="20"><Path Data="M17.5,17.5 L13.8833333333,13.8833333333" StrokeThickness="1.6666666667" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="13.3333333333" Height="13.3333333333" StrokeThickness="1.6666666667"/></Canvas>)").as<sx::Controls::Canvas>();
                 iconLayer_ = Layer(); iconLayer_.Name(L"JellyflowerSearchIcon"); iconLayer_.Children().Append(icon_);
                 dividerLayer_ = Layer(); dividerLayer_.Name(L"JellyflowerSearchDivider");
                 divider_ = sx::Controls::Border(); divider_.Height(1); sx::Controls::Canvas::SetLeft(divider_,0); dividerLayer_.Children().Append(divider_);

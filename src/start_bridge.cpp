@@ -6,6 +6,8 @@
 #include "start_style.hpp"
 #include "start_search.hpp"
 #include "start_spacing.hpp"
+#include "start_grid.hpp"
+#include "start_corners.hpp"
 #include <shobjidl.h>
 #include <xamlOM.h>
 #include <memory>
@@ -81,6 +83,27 @@ auto& Spacings() {
     thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Spacing>>;
     return *items;
 }
+template<class View> struct LayoutStyle {
+    View view;bool counted=false;
+    unsigned lastPasses=0;
+    template<class... Args> explicit LayoutStyle(Args&&... args):view(std::forward<Args>(args)...) {}
+    void Refresh() noexcept {
+        try {view.Refresh(owner.Alive() && Read(state->enabled));}
+        catch(...) {Result(winrt::to_hresult());view.Restore();}
+        if constexpr(std::is_same_v<View,StartGrid>) {
+            if(state){auto total=view.Name()==L"PinnedList"?&state->pinnedPasses:view.Name()==L"RecommendedList"?&state->recommendedPasses:&state->gridPasses;
+                const auto passes=view.LayoutPasses();InterlockedExchangeAdd(total,static_cast<LONG>(passes-lastPasses));lastPasses=passes;}
+        }
+        if(state && counted!=view.Applied()) {
+            counted=view.Applied();if(counted)InterlockedIncrement(&state->spacing);else InterlockedDecrement(&state->spacing);
+        }
+    }
+    ~LayoutStyle(){if(counted && state)InterlockedDecrement(&state->spacing);}
+};
+template<class View> auto& Layouts() {
+    thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<LayoutStyle<View>>>;
+    return *items;
+}
 auto& Surfaces() {
     // XAML objects must be released on their UI thread, never in DLL teardown.
     thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Surface>>;
@@ -97,6 +120,12 @@ void Refresh() noexcept {
         std::vector<std::shared_ptr<Spacing>> spacing;
         for(const auto& item:Spacings()) spacing.push_back(item.second);
         for(const auto& item:spacing) item->Refresh();
+        std::vector<std::shared_ptr<LayoutStyle<StartGrid>>> grids;
+        for(const auto& item:Layouts<StartGrid>())grids.push_back(item.second);
+        for(const auto& item:grids)item->Refresh();
+        std::vector<std::shared_ptr<LayoutStyle<StartCorners>>> corners;
+        for(const auto& item:Layouts<StartCorners>())corners.push_back(item.second);
+        for(const auto& item:corners)item->Refresh();
     } catch(...) { Result(winrt::to_hresult()); }
 }
 LRESULT CALLBACK Notify(HWND window,UINT message,WPARAM w,LPARAM l) {
@@ -116,7 +145,7 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
     explicit Watcher(IUnknown* site) { winrt::check_hresult(site->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void())); }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation,VisualElement element,VisualMutationType mutation) noexcept override {
         try {
-            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); Spacings().erase(element.Handle); return S_OK; }
+            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); Spacings().erase(element.Handle); Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);return S_OK; }
             // Only Handle is valid for Remove. Add strings use the same BSTR
             // ownership contract as the taskbar diagnostics callback.
             struct Strings { VisualElement& e; ~Strings(){SysFreeString(e.Type);SysFreeString(e.Name);} } strings{element};
@@ -125,11 +154,25 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
             const bool surface=element.Name && std::wstring_view(element.Type)==L"Windows.UI.Xaml.Controls.Border"
                 && (std::wstring_view(element.Name)==L"AcrylicBorder" || std::wstring_view(element.Name)==L"AcrylicOverlay");
             const std::wstring_view type(element.Type);
+            const bool grid=type==L"Windows.UI.Xaml.Controls.GridView";
+            const bool corner=element.Name && (type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Windows.UI.Xaml.Controls.Border");
             const bool spacing=type==L"Windows.UI.Xaml.Controls.ItemsWrapGrid" || type==L"Windows.UI.Xaml.Controls.Button"
                 || (element.Name && (type==L"Windows.UI.Xaml.Controls.TextBlock" || type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Microsoft.UI.Xaml.Controls.DropDownButton"));
-            if(!search && !surface && !spacing) return S_OK;
+            if(!search && !surface && !spacing && !grid && !corner) return S_OK;
             winrt::Windows::Foundation::IInspectable object{nullptr};
             winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+            if(grid) {
+                auto view=object.try_as<sx::Controls::GridView>();
+                if(IsStartGrid(view) && !Layouts<StartGrid>().count(element.Handle)) {
+                    EnsureReceiver();auto item=std::make_shared<LayoutStyle<StartGrid>>(view);Layouts<StartGrid>().emplace(element.Handle,item);item->Refresh();
+                }
+            }
+            if(corner) {
+                auto framework=object.try_as<sx::FrameworkElement>();const auto rule=StartCornerFor(framework);
+                if(rule!=StartCornerRule::None && !Layouts<StartCorners>().count(element.Handle)) {
+                    EnsureReceiver();auto item=std::make_shared<LayoutStyle<StartCorners>>(framework,rule);Layouts<StartCorners>().emplace(element.Handle,item);item->Refresh();
+                }
+            }
             if(spacing) {
                 const auto framework=object.try_as<sx::FrameworkElement>();
                 const auto rule=StartSpacingFor(framework);
