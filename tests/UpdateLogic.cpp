@@ -11,7 +11,8 @@ std::string Release(const std::string& tag, const std::string& architecture = "x
 }
 int wmain(int argc, wchar_t** argv) {
     try {
-        winrt::init_apartment();
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
         Check(NewerVersion(L"v0.14.0", L"0.13.0"), "minor update");
         Check(NewerVersion(L"v0.13.10", L"0.13.9"), "numeric ordering");
         Check(!NewerVersion(L"v0.13.0", L"0.13.0"), "equal version");
@@ -34,7 +35,6 @@ int wmain(int argc, wchar_t** argv) {
         Check(ParseRelease(preview, L"0.13.0", L"x64").status == UpdateStatus::Error, "prerelease rejected");
         Check(ParseRelease(std::string(1024*1024+1,'x'), L"0.13.0", L"x64").status == UpdateStatus::Error, "response size bounded");
         Check(ParseRelease(std::string("\xff"), L"0.13.0", L"x64").status == UpdateStatus::Error, "invalid UTF-8 rejected");
-        winrt::uninit_apartment();
         std::cout << "PASS: numeric versions, stable releases, strict asset origin/architecture, malformed/oversized responses.\n";
         if (argc == 2 && wcscmp(argv[1], L"--live") == 0) {
             const auto live = CheckForUpdates();
