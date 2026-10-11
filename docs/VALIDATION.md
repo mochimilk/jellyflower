@@ -1,5 +1,13 @@
 # Validation results
 
+## jellyflower 0.16.4, 2026-10-10
+
+The complete native x64 Release build passed with MSVC 19.44 and Windows SDK 10.0.26100. Menu typography was reverted to the earlier Windows-provided menu metrics, retaining DirectWrite/Direct2D drawing. Production has no fixed font family, size, weight, line height or Fluent Body resource. Helper v13 and the faster login path are unchanged. The user reported 0.16.3 now opens very quickly after login; no numerical reboot timing was measured in the build session.
+
+MenuPresentation passed at 96/120/144/168/192 DPI in both themes, including alternate Windows font metrics, failed-query Windows GUI-font fallback, actual-DPI DirectWrite size/weight, native premultiplied alpha, opaque stems/antialiased edges, glyph-ink/icon alignment and zero production GDI fallbacks. Root/date/cursor/update states, spinner frames, text fit, placement, entrance and acrylic/fallback recovery passed. Live compositor samples changed with red/blue backdrops (dark 0x1f1f4c/0x611e1e; light 0xc8c8e8/0xe6c7c7); both 96-DPI menu captures were visually inspected for complete regular text and icons.
+
+UpdateLogic and installer payload QA passed: normal-user/PerMonitorV2 manifests, matching version/icons, byte-identical embedded app/helper/docs/icons and native extraction. Final packages are checked against the build and source, with ZIP integrity and SHA-256 sums and no personal cursor/font files. No account installation, system theme change, task registration or Explorer restart was performed for this menu-only update. Updating from 0.16.3 applies on automatic relaunch without a reboot. See INSTALLATION_TESTS step 26 for desktop acceptance.
+
 ## jellyflower 0.16.3, 2026-10-10
 
 The complete native x64 Release app/helper/setup/test build passed with MSVC 19.44 and Windows SDK 10.0.26100. Production Element 2 network code, callbacks, shared fields, diagnostics and assets are removed. Helper v13 rejects older mappings. No account install, task registration, Explorer restart, system theme change, network disconnect or computer restart was performed during validation; ARM64 was not built locally.

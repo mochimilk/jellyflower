@@ -1,6 +1,6 @@
 # Native and laptop test checklist
 
-Current 0.16.3 uses the Fluent Body role for menu text and native network artwork. Historical Element 2/network tests below are retired. See INSTALLATION_TESTS steps 24–25 for current typography/startup acceptance.
+Current 0.16.4 inherits Windows menu font metrics and keeps native network artwork. The 0.16.3 Fluent Body checks below are historical; use INSTALLATION_TESTS step 26 for current typography. Historical Element 2/network tests below are retired. See INSTALLATION_TESTS steps 24–25 for current typography/startup acceptance.
 
 Current 0.14.1 clock behavior is system font only, with a date row directly below acrylic. Earlier font/submenu checks below describe retired behavior and are retained as development history; use INSTALLATION_TESTS.md steps 13–17 for current acceptance.
 

@@ -6,8 +6,8 @@
 
 namespace acrylic {
 using MenuMetricsQuery = decltype(&SystemParametersInfoForDpi);
-// Classic Windows metrics are only the readable GDI failure fallback.
-// Normal menu drawing uses the Fluent Body role below through DirectWrite.
+// Inherit the complete Windows menu font, including family, size and weight.
+// An empty family would invoke GDI font mapping instead of menu inheritance.
 inline HFONT CreateSystemMenuFont(UINT dpi, MenuMetricsQuery query = SystemParametersInfoForDpi) {
     NONCLIENTMETRICSW metrics{sizeof(metrics)};
     LOGFONTW font{};
@@ -17,14 +17,6 @@ inline HFONT CreateSystemMenuFont(UINT dpi, MenuMetricsQuery query = SystemParam
     font.lfQuality = ANTIALIASED_QUALITY;
     return CreateFontIndirectW(&font);
 }
-// Native equivalent of WinUI's BodyTextBlockStyle/BodyTextBlockFontSize.
-// https://learn.microsoft.com/windows/apps/design/signature-experiences/typography
-// Shared by every primary and secondary menu label. These are DIPs, not pixels.
-struct BodyTextStyle {
-    static constexpr const wchar_t* Resource = L"BodyTextBlockStyle";
-    static constexpr float Size = 14, LineHeight = 20;
-    static constexpr LONG Weight = FW_NORMAL;
-};
 constexpr int MenuEdgeGap = 12;
 constexpr ULONGLONG MenuEntranceDuration = 250;
 constexpr int MenuEntranceDistance = 32;
