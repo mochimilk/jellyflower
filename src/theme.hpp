@@ -9,6 +9,12 @@ inline bool SystemLightTheme() {
         L"SystemUsesLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &bytes);
     return light != 0;
 }
+inline bool AppLightTheme() {
+    DWORD light = 0, bytes = sizeof(light);
+    RegGetValueW(HKEY_CURRENT_USER, PersonalizeKey,
+        L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &light, &bytes);
+    return light != 0;
+}
 struct ThemeChangeResult {
     DWORD error = ERROR_SUCCESS, rollbackError = ERROR_SUCCESS, notificationError = ERROR_SUCCESS;
 };

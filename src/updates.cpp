@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "updates.hpp"
 #include "version.hpp"
+#include "update_download.hpp"
 #include <winhttp.h>
+#include <objbase.h>
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <array>
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <atomic>
+#include <cmath>
 
 namespace acrylic {
 namespace {
@@ -61,7 +65,17 @@ UpdateResult ParseRelease(const std::string& json, const std::wstring& current, 
         for (const auto& item : release.GetNamedArray(L"assets")) {
             const auto asset = item.GetObject();
             if (asset.GetNamedString(L"name") == name && asset.GetNamedString(L"state") == L"uploaded"
-                && asset.GetNamedNumber(L"size") > 0 && asset.GetNamedString(L"browser_download_url") == expected) {
+                && asset.GetNamedString(L"browser_download_url") == expected) {
+                const auto size = asset.GetNamedNumber(L"size");
+                const std::wstring digest(asset.GetNamedString(L"digest", L""));
+                if (!std::isfinite(size) || size < 1 || size > MaximumInstallerSize || std::floor(size) != size
+                    || digest.size() != 71 || digest.substr(0, 7) != L"sha256:") return Error(ERROR_INVALID_DATA);
+                result.sha256 = digest.substr(7);
+                for (auto& character : result.sha256) {
+                    if (character >= L'A' && character <= L'F') character += L'a' - L'A';
+                    if (!((character >= L'0' && character <= L'9') || (character >= L'a' && character <= L'f'))) return Error(ERROR_INVALID_DATA);
+                }
+                result.size = static_cast<ULONGLONG>(size);
                 result.status = UpdateStatus::Available;
                 result.download = expected;
                 return result;
@@ -109,6 +123,8 @@ UpdateResult CheckForUpdates() {
 const wchar_t* UpdateStatusLabel(UpdateStatus status) noexcept {
     switch (status) {
     case UpdateStatus::Checking: return L"checking...";
+    case UpdateStatus::Downloading: return L"downloading...";
+    case UpdateStatus::Ready: case UpdateStatus::Installing: return L"installing...";
     case UpdateStatus::Current: return L"up to date";
     case UpdateStatus::Available: return L"available";
     case UpdateStatus::NoRelease: return L"no release yet";
@@ -120,12 +136,14 @@ struct UpdateChecker::State {
     mutable std::mutex lock;
     UpdateResult result{UpdateStatus::Idle};
     bool pending = false;
+    std::atomic<bool> cancelled{false};
 };
 UpdateChecker::UpdateChecker() : state_(std::make_shared<State>()) {}
+UpdateChecker::~UpdateChecker() { state_->cancelled = true; }
 void UpdateChecker::Start() {
     const auto state = state_;
     std::lock_guard<std::mutex> lock(state->lock);
-    if (state->result.status == UpdateStatus::Checking) return;
+    if (UpdateBusy(state->result.status)) return;
     state->result = UpdateResult{UpdateStatus::Checking}; state->pending = false;
     try {
         // The worker owns only its shared result, never a controller or HWND.
@@ -136,6 +154,39 @@ void UpdateChecker::Start() {
             state->result = result; state->pending = true;
         }).detach();
     } catch (...) { state->result = Error(ERROR_NOT_ENOUGH_MEMORY); state->pending = true; }
+}
+void UpdateChecker::Download() {
+    const auto state = state_;
+    std::lock_guard<std::mutex> lock(state->lock);
+    if (state->result.status != UpdateStatus::Available) return;
+    const auto release = state->result;
+    state->result.status = UpdateStatus::Downloading;
+    state->pending = false;
+    try {
+        std::thread([state, release] {
+            auto result = release;
+            const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+            struct Apartment { HRESULT result; ~Apartment() { if (SUCCEEDED(result)) CoUninitialize(); } } apartment{initialized};
+            try {
+                if (FAILED(initialized)) winrt::throw_hresult(initialized);
+                const auto folder = CreateUpdateFolder();
+                result.installer = (folder / L"jellyflower-setup.exe").wstring();
+                result.error = DownloadUpdate(release, result.installer, [&] { return state->cancelled.load(); });
+                if (result.error || state->cancelled) {
+                    RemoveUpdateDownload(result.installer);
+                    result.installer.clear();
+                    result.status = UpdateStatus::Error;
+                } else result.status = UpdateStatus::Ready;
+            } catch (...) { result = Error(ERROR_WRITE_FAULT); }
+            std::lock_guard<std::mutex> done(state->lock);
+            if (state->cancelled) { RemoveUpdateDownload(result.installer); return; }
+            state->result = result; state->pending = true;
+        }).detach();
+    } catch (...) { state->result = Error(ERROR_NOT_ENOUGH_MEMORY); state->pending = true; }
+}
+void UpdateChecker::Installing() {
+    std::lock_guard<std::mutex> lock(state_->lock);
+    state_->result.status = UpdateStatus::Installing;
 }
 bool UpdateChecker::Poll(UpdateResult& result) {
     std::lock_guard<std::mutex> lock(state_->lock);

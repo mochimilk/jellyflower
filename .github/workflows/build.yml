@@ -28,7 +28,12 @@ jobs:
         run: cmake --build build --config Release --parallel 1
       - name: check update logic
         if: matrix.architecture == 'x64'
-        run: .\build\Release\UpdateLogic.exe
+        shell: pwsh
+        run: |
+          foreach ($test in 'UpdateLogic','SetupLockLogic','SetupRecovery','SolarLogic','ThemeLogic') {
+            & ".\build\Release\$test.exe"
+            if ($LASTEXITCODE -ne 0) { throw "$test failed." }
+          }
       - name: package
         run: cmake --install build --config Release --prefix dist
       - uses: actions/upload-artifact@v4

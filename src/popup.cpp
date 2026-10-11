@@ -6,6 +6,8 @@
 #include "updates.hpp"
 #include "version.hpp"
 #include "menu_surface.hpp"
+#include "auto_theme.hpp"
+#include "cursor_icon.hpp"
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <algorithm>
@@ -26,6 +28,7 @@ constexpr int MenuGlyphSize = 16;
 constexpr UINT_PTR HoverTimer = 1;
 constexpr UINT_PTR ChildCloseTimer = 2, TrayDeactivateTimer = 3;
 constexpr UINT_PTR UpdateSpinnerTimer = 4;
+constexpr UINT_PTR ColorPreviewTimer = 5;
 // Documented Windows 11 DWM values; compatible with Windows 10 SDK headers.
 constexpr auto CornerPreference = static_cast<DWMWINDOWATTRIBUTE>(33);
 constexpr auto ImmersiveDarkMode = static_cast<DWMWINDOWATTRIBUTE>(20);
@@ -37,8 +40,15 @@ std::vector<Row> CursorRows(UINT mask, UINT selected) {
     for (size_t i = 0; i < CursorColors.size(); ++i)
         rows.push_back({CursorCommandBase + static_cast<UINT>(i) + 1, CursorColors[i].label, i == 0, selected == i + 1, L"", (mask & (1u << (i + 1))) != 0});
     rows.push_back({CursorCommandBase + CursorDisabled, L"disable", true, selected == CursorDisabled});
-    rows.push_back({TrayCursorUnlockCommand, L"unlock colors", true});
     return rows;
+}
+bool HasCursorPack(UINT mask) { return (mask & ((1u << CursorDisabled) - 1)) != 0; }
+std::vector<Row> RootRows(AcrylicMode mode, bool date, bool light, UINT mask) {
+    return {{TrayThemeCommand, L"system", false, false, light ? L"light" : L"dark"},
+        {TrayToggleCommand, L"acrylic", false, false, AcrylicModeName(mode)},
+        {TrayDateCommand, L"date", false, false, date ? L"on" : L"off"},
+        HasCursorPack(mask) ? Row{TrayCursorCommand, L"cursor"} : Row{TrayCursorUnlockCommand, L"colors", false, false, L"unlock"},
+        {TrayUpdateCommand, std::wstring(L"v") + AppVersion, true}, {TrayExitCommand, L"exit"}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -106,6 +116,9 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr;
+    std::vector<HICON> colorIcons;
+    size_t colorFrame = 0;
+    bool hasCursorPack = false;
     ULONG_PTR graphicsToken = 0;
     std::unique_ptr<Gdiplus::Bitmap> spinnerBitmap;
     UpdateStatus updateStatus = UpdateStatus::Idle;
@@ -136,6 +149,7 @@ struct Popup {
         if (updateIcon) DestroyIcon(updateIcon);
         if (packageIcon) DestroyIcon(packageIcon);
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
+        for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
         if (separator) DeleteObject(separator);
@@ -186,7 +200,7 @@ struct Popup {
         }
     }
     void RepaintButtons() const {
-        for (const auto button : buttons) if (button) InvalidateRect(button, nullptr, FALSE);
+        if (window) InvalidateRect(window, nullptr, FALSE);
     }
     void RefreshCursorIcon() {
         const HICON replacement = reinterpret_cast<HICON>(SendMessageW(controller, TrayCursorIconMessage, Px(MenuGlyphSize), 0));
@@ -198,10 +212,10 @@ struct Popup {
     }
     void RefreshUpdate() {
         const auto state = static_cast<UpdateStatus>(SendMessageW(controller, TrayUpdateQueryMessage, 0, 0));
-        if (state == UpdateStatus::Checking && updateStatus != state) updateStarted = GetTickCount64();
+        if (UpdateBusy(state) && updateStatus != state) updateStarted = GetTickCount64();
         updateStatus = state;
         if (window) {
-            if (state == UpdateStatus::Checking) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+            if (UpdateBusy(state)) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
             else KillTimer(window, UpdateSpinnerTimer);
         }
         for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayUpdateCommand) {
@@ -214,6 +228,25 @@ struct Popup {
         auto* root = Root();
         root->cursorMode = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 1, 0));
         const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
+        root->hasCursorPack = HasCursorPack(mask);
+        if (!parent) {
+            for (size_t i = 0; i < rows.size(); ++i) {
+                auto& row = rows[i];
+                if (row.command != TrayCursorCommand && row.command != TrayCursorUnlockCommand) continue;
+                row.command = hasCursorPack ? TrayCursorCommand : TrayCursorUnlockCommand;
+                row.label = hasCursorPack ? L"cursor" : L"colors";
+                row.secondary = hasCursorPack ? L"" : L"unlock";
+                if (i < buttons.size()) {
+                    SetWindowLongPtrW(buttons[i], GWLP_ID, row.command);
+                    SetWindowTextW(buttons[i], (row.label + (row.secondary.empty() ? L"" : L", " + row.secondary)).c_str());
+                }
+            }
+            if (window) {
+                if (hasCursorPack) KillTimer(window, ColorPreviewTimer);
+                else SetTimer(window, ColorPreviewTimer, 650, nullptr);
+            }
+            if (!hasCursorPack && child) CloseChild(false);
+        }
         for (size_t i = 0; i < rows.size(); ++i) {
             auto& row = rows[i];
             if (row.command < CursorCommandBase || row.command > CursorCommandBase + CursorDisabled) continue;
@@ -256,7 +289,7 @@ struct Popup {
             const int resources[]{darkInk ? IDI_ACRYLIC_OFF_LIGHT : IDI_ACRYLIC_OFF_DARK,
                 darkInk ? IDI_ACRYLIC_SYSTEM_LIGHT : IDI_ACRYLIC_SYSTEM_DARK,
                 darkInk ? IDI_ACRYLIC_PURE_LIGHT : IDI_ACRYLIC_PURE_DARK,
-                systemLight ? (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK) : (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK),
+                systemLight ? (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK) : (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK),
                 darkInk ? IDI_CALENDAR_OFF_LIGHT : IDI_CALENDAR_OFF_DARK,
                 darkInk ? IDI_CALENDAR_LIGHT : IDI_CALENDAR_DARK,
                 darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
@@ -271,8 +304,12 @@ struct Popup {
             if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
             RefreshCursorIcon();
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayThemeCommand) {
-                rows[i].label = systemLight ? L"dark mode" : L"light mode";
-                if (i < buttons.size()) SetWindowTextW(buttons[i], rows[i].label.c_str());
+                const auto automatic = static_cast<AutoThemeStatus>(SendMessageW(controller, TrayThemeQueryMessage, 1, 0));
+                rows[i].label = L"system";
+                rows[i].secondary = automatic == AutoThemeStatus::Automatic ? L"auto" : automatic == AutoThemeStatus::Locating ? L"locating..."
+                    : automatic == AutoThemeStatus::Denied ? L"location off" : automatic == AutoThemeStatus::Unavailable ? L"no location"
+                    : automatic == AutoThemeStatus::Error ? L"try again" : systemLight ? L"light" : L"dark";
+                if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
             }
             if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1]) return false;
         }
@@ -292,14 +329,28 @@ struct Popup {
         DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &none, sizeof(none));
         const MARGINS margins{1, 1, 1, 1};
         DwmExtendFrameIntoClientArea(window, &margins);
+        SetAccent(0);
+    }
+    bool SetAccent(int state) {
+        // Windows' documented transient backdrop is almost opaque on some
+        // builds. Use the same native accent acrylic API as our legacy taskbar
+        // backend, with an explicit translucent tint and no painted backdrop.
+        struct Policy { int state; UINT flags; DWORD color; DWORD animation; };
+        struct Data { int attribute; void* data; SIZE_T size; };
+        using Set = BOOL(WINAPI*)(HWND, const Data*);
+        const auto set = reinterpret_cast<Set>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "SetWindowCompositionAttribute"));
+        Policy policy{state, 0, light ? 0xB8F9F9F9u : 0xB8202020u, 0};
+        const Data data{19, &policy, sizeof(policy)};
+        return set && set(window, &data);
     }
     void ConfigureBackdrop() {
-        // DWMSBT_TRANSIENTWINDOW is the documented Windows 11 desktop acrylic
-        // backdrop. Unsupported systems and high contrast keep a solid menu.
-        const int transient = 3;
+        DWORD transparency = 1, bytes = sizeof(transparency);
+        RegGetValueW(HKEY_CURRENT_USER, L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+            L"EnableTransparency", RRF_RT_REG_DWORD, nullptr, &transparency, &bytes);
+        const int none = 1;
+        DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &none, sizeof(none));
         const MARGINS full{-1, -1, -1, -1};
-        acrylic = !highContrast && SUCCEEDED(DwmExtendFrameIntoClientArea(window, &full))
-            && SUCCEEDED(DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &transient, sizeof(transient)));
+        acrylic = !highContrast && transparency && SUCCEEDED(DwmExtendFrameIntoClientArea(window, &full)) && SetAccent(4);
         if (!acrylic) DisableBackdrop();
     }
     void Focus(int index, int direction = 1) {
@@ -394,9 +445,10 @@ struct Popup {
             if (root->done) return;
             if (command == TrayToggleCommand) {
                 root->mode = DecodeAcrylicMode(static_cast<LONG>(state));
-                auto& row = root->rows[0];
-                row.secondary = AcrylicModeName(root->mode);
-                SetWindowTextW(root->buttons[0], (row.label + L", " + row.secondary).c_str());
+                for (size_t i = 0; i < root->rows.size(); ++i) if (root->rows[i].command == TrayToggleCommand) {
+                    auto& row = root->rows[i]; row.secondary = AcrylicModeName(root->mode);
+                    SetWindowTextW(root->buttons[i], (row.label + L", " + row.secondary).c_str());
+                }
                 root->RepaintButtons();
             } else if (command == TrayUpdateCommand) {
                 root->RefreshUpdate();
@@ -431,22 +483,11 @@ struct Popup {
         }
         return false;
     }
-    void DrawButton(const DRAWITEMSTRUCT& item) {
-        const auto frameTime = GetTickCount64();
-        if (acrylic) {
-            if (MenuSurface::Paint(item.hDC, item.rcItem, [&](HDC dc) {
-                auto layer = item; layer.hDC = dc; DrawButtonContent(layer, false, frameTime);
-            })) return;
-            DisableBackdrop();
-        }
-        DrawButtonContent(item, true, frameTime);
-    }
-    void DrawButtonContent(const DRAWITEMSTRUCT& item, bool opaque, ULONGLONG frameTime) {
+    void DrawButtonContent(const DRAWITEMSTRUCT& item, ULONGLONG frameTime) {
         const auto found = std::find(buttons.begin(), buttons.end(), item.hwndItem);
         if (found == buttons.end()) return;
         const int index = static_cast<int>(found - buttons.begin());
         const auto& row = rows[static_cast<size_t>(index)];
-        if (opaque) FillRect(item.hDC, &item.rcItem, background);
         const bool focused = keyboard && (item.itemState & ODS_FOCUS);
         const bool highlighted = row.enabled && (hovered == index || focused || (item.itemState & ODS_SELECTED));
         if (highlighted) {
@@ -471,28 +512,28 @@ struct Popup {
             SetTextColor(item.hDC, light ? RGB(100, 100, 100) : RGB(170, 170, 170));
             HIGHCONTRASTW contrast{sizeof(contrast)};
             if (SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0) && (contrast.dwFlags & HCF_HIGHCONTRASTON)) SetTextColor(item.hDC, ink);
-            DrawTextW(item.hDC, row.secondary.c_str(), -1, &status, DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            MenuSurface::Text(item.hDC, status, row.secondary, font, GetTextColor(item.hDC), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             SetTextColor(item.hDC, ink);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
-        DrawTextW(item.hDC, row.label.c_str(), -1, &bounds, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        MenuSurface::Text(item.hDC, bounds, row.label, font, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         const auto pen = CreatePen(PS_SOLID, std::max(1, Px(1)), ink);
         const auto oldPen = SelectObject(item.hDC, pen);
         // Font line boxes include unused space. Align every glyph to the
         // label's visible ink instead, using the selected font at this DPI.
         const int cy = LabelCenter(item.hDC, row.label, bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
-            : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayThemeCommand ? themeIcon
+            : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayUpdateCommand
-                ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : updateStatus == UpdateStatus::Checking ? updateIcon : packageIcon) : nullptr;
+                ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon) : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
         // Give its centered square a small optical adjustment without scaling it.
-        const int iconCenter = row.command == TrayCursorCommand ? (item.rcItem.top + item.rcItem.bottom) / 2 + Px(1) : cy;
+        const int iconCenter = row.command == TrayCursorCommand || row.command == TrayCursorUnlockCommand ? (item.rcItem.top + item.rcItem.bottom) / 2 + Px(1) : cy;
         const int iconTop = iconCenter - iconSize / 2;
         const int iconLeft = item.rcItem.left + Px(MenuIconInset) + (Px(MenuIconSize) - iconSize) / 2;
-        if (row.command == TrayUpdateCommand && updateStatus == UpdateStatus::Checking && spinnerBitmap && spinnerBitmap->GetLastStatus() == Gdiplus::Ok) {
+        if (row.command == TrayUpdateCommand && UpdateBusy(updateStatus) && spinnerBitmap && spinnerBitmap->GetLastStatus() == Gdiplus::Ok) {
             Gdiplus::Graphics graphics(item.hDC);
             graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
             graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
@@ -521,13 +562,14 @@ struct Popup {
     void Paint(HDC dc) {
         RECT bounds{};
         GetClientRect(window, &bounds);
+        const auto frameTime = GetTickCount64();
         if (acrylic) {
-            if (MenuSurface::Paint(dc, bounds, [&](HDC layer) { PaintContent(layer, bounds, false); })) return;
+            if (MenuSurface::Paint(dc, bounds, [&](HDC layer) { PaintContent(layer, bounds, false, frameTime); })) return;
             DisableBackdrop();
         }
-        PaintContent(dc, bounds, true);
+        PaintContent(dc, bounds, true, frameTime);
     }
-    void PaintContent(HDC dc, const RECT& bounds, bool opaque) const {
+    void PaintContent(HDC dc, const RECT& bounds, bool opaque, ULONGLONG frameTime) {
         if (opaque) FillRect(dc, &bounds, background);
         int y = Px(Padding);
         for (const auto& row : rows) {
@@ -538,6 +580,17 @@ struct Popup {
                 y += Px(SeparatorHeight);
             }
             y += rowHeight;
+        }
+        // One ARGB surface owns all foreground pixels. Independently painted
+        // child HWNDs can lose/overwrite alpha on glass. Keep real buttons for
+        // accessibility, keyboard input and hit testing, but paint them here.
+        for (size_t i=0; i<buttons.size(); ++i) {
+            RECT position{}; GetWindowRect(buttons[i], &position);
+            MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&position),2);
+            const int saved=SaveDC(dc);SetViewportOrgEx(dc,position.left-bounds.left,position.top-bounds.top,nullptr);
+            DRAWITEMSTRUCT item{};item.hwndItem=buttons[i];item.CtlID=rows[i].command;item.hDC=dc;
+            if(GetFocus()==buttons[i]) item.itemState|=ODS_FOCUS;
+            GetClientRect(buttons[i],&item.rcItem);DrawButtonContent(item,frameTime);RestoreDC(dc,saved);
         }
     }
     bool Create(HWND owner, POINT anchor, bool submenu) {
@@ -562,7 +615,7 @@ struct Popup {
         const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(6), monitor.rcWork.top,
             std::max(monitor.rcWork.top, monitor.rcWork.bottom - height));
         window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : L"jellyflower",
-            WS_POPUP | WS_CLIPCHILDREN, x, y, width, height,
+            WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;
         const BOOL dark = !light;
@@ -573,7 +626,7 @@ struct Popup {
         int top = Px(Padding);
         for (size_t i = 0; i < rows.size(); ++i) {
             if (rows[i].divider) top += Px(SeparatorHeight);
-            const auto button = CreateWindowExW(0, L"BUTTON", (rows[i].secondary.empty() ? rows[i].label : rows[i].label + L", " + rows[i].secondary).c_str(),
+            const auto button = CreateWindowExW(WS_EX_TRANSPARENT, L"BUTTON", (rows[i].secondary.empty() ? rows[i].label : rows[i].label + L", " + rows[i].secondary).c_str(),
                 WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW, Px(Padding), top,
                 width - 2 * Px(Padding), rowHeight, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(rows[i].command)),
                 GetModuleHandleW(nullptr), nullptr);
@@ -584,7 +637,12 @@ struct Popup {
             if (!SetWindowSubclass(button, ButtonProc, i, reinterpret_cast<DWORD_PTR>(this))) return false;
             top += rowHeight;
         }
-        if (!parent && updateStatus == UpdateStatus::Checking) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+        if (!parent && UpdateBusy(updateStatus)) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+        if (!parent) {
+            constexpr COLORREF fills[]{RGB(250,250,250), RGB(40,40,40), RGB(145,170,240), RGB(148,182,104), RGB(129,216,184), RGB(244,143,167), RGB(230,170,100), RGB(245,229,179), RGB(231,194,218)};
+            for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));
+            RefreshCursors();
+        }
         return true;
     }
 };
@@ -605,6 +663,9 @@ LRESULT CALLBACK PopupMouseProc(int code, WPARAM message, LPARAM data) {
 
 LRESULT CALLBACK ButtonProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam, UINT_PTR id, DWORD_PTR data) {
     auto* popup = reinterpret_cast<Popup*>(data);
+    if (message == WM_PAINT) { PAINTSTRUCT paint{};BeginPaint(window,&paint);EndPaint(window,&paint);return 0; }
+    if (message == WM_ERASEBKGND) return 1;
+    if (message == WM_SETFOCUS || message == WM_KILLFOCUS) popup->RepaintButtons();
     if (message == WM_MOUSEMOVE) {
         popup->Hover(static_cast<int>(id));
         TRACKMOUSEEVENT track{sizeof(track), TME_LEAVE, window, 0};
@@ -638,7 +699,7 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         EndPaint(window, &paint);
         return 0;
     }
-    case WM_DRAWITEM: popup->DrawButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lParam)); return TRUE;
+    case WM_DRAWITEM: return TRUE; // Foreground is composed once by the parent.
     case WM_COMMAND:
         if (HIWORD(wParam) == BN_CLICKED) {
             for (size_t i = 0; i < popup->rows.size(); ++i)
@@ -653,9 +714,11 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     }
     case WM_MOUSELEAVE: popup->Hover(-1); return 0;
     case WM_TIMER:
-        if (wParam == UpdateSpinnerTimer) {
-            for (size_t i = 0; i < popup->rows.size(); ++i) if (popup->rows[i].command == TrayUpdateCommand)
-                InvalidateRect(popup->buttons[i], nullptr, FALSE);
+        if (wParam == ColorPreviewTimer) {
+            ++popup->colorFrame;
+            popup->RepaintButtons();
+        } else if (wParam == UpdateSpinnerTimer) {
+            popup->RepaintButtons();
         } else if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0) popup->OpenChild(popup->hovered, false); }
         else if (wParam == ChildCloseTimer) {
             KillTimer(window, ChildCloseTimer);
@@ -704,6 +767,10 @@ void RefreshUpdateMenu(HWND owner) {
 void RefreshCursorMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshCursors();
 }
+void RefreshThemeMenu(HWND owner) {
+    if (activePopup && activePopup->controller == owner && !activePopup->done)
+        activePopup->UpdateTheme(SendMessageW(owner, TrayThemeQueryMessage, 0, 0) != 0);
+}
 UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode, const RECT& trayBounds) {
     if (activePopup) { activePopup->Finish(); return 0; }
     WNDCLASSW wc{};
@@ -724,9 +791,7 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayDateQueryMessage, 0, 0));
     popup.clockDate = (clockState & 1) != 0;
     SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &popup.hoverDelay, 0);
-    popup.rows = {{TrayToggleCommand, L"acrylic", false, false, AcrylicModeName(mode)},
-        {TrayDateCommand, L"date", false, false, popup.clockDate ? L"on" : L"off"}, {TrayCursorCommand, L"cursor"}, {TrayThemeCommand, popup.systemLight ? L"dark mode" : L"light mode"},
-        {TrayUpdateCommand, std::wstring(L"v") + AppVersion, true}, {TrayExitCommand, L"exit"}};
+    popup.rows = RootRows(mode, popup.clockDate, popup.systemLight, static_cast<UINT>(SendMessageW(owner, TrayCursorQueryMessage, 0, 0)));
     popup.RefreshUpdate();
     if (!popup.Create(owner, anchor, false)) return 0;
     activePopup = &popup;

@@ -117,6 +117,10 @@ HICON CreateCursorMenuIcon(const wchar_t* file, int pixels) {
     if (pixels < 8 || pixels > 128) return nullptr;
     Palette palette;
     if (!ReadPalette(file, palette)) return nullptr;
+    return CreateCursorColorIcon(pixels, palette.fill, palette.stroke);
+}
+HICON CreateCursorColorIcon(int pixels, COLORREF fill, COLORREF stroke) {
+    if (pixels < 8 || pixels > 128) return nullptr;
     constexpr int Samples = 8, Area = Samples * Samples;
     const int size = pixels * Samples;
     Surface surface(size);
@@ -128,7 +132,7 @@ HICON CreateCursorMenuIcon(const wchar_t* file, int pixels) {
     std::vector<BYTE> coverage(count);
     for (size_t i = 0; i < count; ++i) coverage[i] = static_cast<BYTE>(surface.bits[i] & 255);
     std::fill_n(surface.bits, count, 0);
-    if (!PaintSvg(surface.dc, size, palette.fill, palette.stroke)) return nullptr;
+    if (!PaintSvg(surface.dc, size, fill, stroke)) return nullptr;
     GdiFlush();
     Surface output(pixels);
     if (!output.bits) return nullptr;

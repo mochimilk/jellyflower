@@ -7,4 +7,5 @@ namespace acrylic {
 // The caller owns the returned icon.
 // A missing file falls back to Windows' current arrow.
 HICON CreateCursorMenuIcon(const wchar_t* file, int pixels);
+HICON CreateCursorColorIcon(int pixels, COLORREF fill, COLORREF stroke);
 }

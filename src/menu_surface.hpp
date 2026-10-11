@@ -2,6 +2,7 @@
 #pragma once
 #include <windows.h>
 #include <algorithm>
+#include <string>
 
 namespace acrylic {
 // GDI does not preserve alpha for text and lines. Render the same foreground
@@ -24,6 +25,9 @@ public:
         if (!bitmap_) return;
         previous_ = SelectObject(dc_, bitmap_);
         SetViewportOrgEx(dc_, -bounds.left, -bounds.top, nullptr);
+        // GDI text smoothing consults the DC background color even with a
+        // transparent text background. Match each coverage pass to its pixels.
+        SetBkColor(dc_, white ? RGB(255,255,255) : RGB(0,0,0));
         FillRect(dc_, &bounds, static_cast<HBRUSH>(GetStockObject(white ? WHITE_BRUSH : BLACK_BRUSH)));
     }
     ~MenuSurface() {
@@ -34,6 +38,26 @@ public:
     MenuSurface(const MenuSurface&) = delete;
     MenuSurface& operator=(const MenuSurface&) = delete;
     HDC Dc() const { return dc_; }
+    static void Text(HDC target, RECT bounds, const std::wstring& text, HFONT font, COLORREF color, UINT flags) {
+        // Render one neutral coverage mask for both themes. GDI's gamma varies
+        // with foreground/background colors; drawing twice with different
+        // colors made white text heavier and ClearType text look hollow.
+        MenuSurface mask(target, bounds, true);
+        if (!mask.pixels) { DrawTextW(target, text.c_str(), -1, &bounds, flags); return; }
+        const auto previous = SelectObject(mask.Dc(), font);
+        SetBkMode(mask.Dc(), TRANSPARENT); SetTextColor(mask.Dc(), RGB(0,0,0));
+        RECT layout = bounds; DrawTextW(mask.Dc(), text.c_str(), -1, &layout, flags); GdiFlush();
+        const size_t count = static_cast<size_t>(bounds.right-bounds.left)*(bounds.bottom-bounds.top);
+        for (size_t i=0; i<count; ++i) {
+            const DWORD alpha = 255-(mask.pixels[i]&255);
+            mask.pixels[i]=(alpha<<24)|((GetRValue(color)*alpha/255)<<16)|((GetGValue(color)*alpha/255)<<8)|(GetBValue(color)*alpha/255);
+        }
+        const BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
+        AlphaBlend(target,bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,
+            mask.Dc(),bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top,blend);
+        GdiFlush(); // Finish reading the DIB before its storage is released.
+        SelectObject(mask.Dc(),previous);
+    }
     template<class Draw> static bool Paint(HDC target, const RECT& bounds, Draw draw) {
         MenuSurface black(target, bounds, false), white(target, bounds, true);
         if (!black.pixels || !white.pixels) return false;
@@ -50,8 +74,10 @@ public:
             for (int shift : {0, 8, 16}) pixel |= std::min(alpha, (b >> shift) & 255) << shift;
             black.pixels[i] = pixel;
         }
-        return BitBlt(target, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+        const bool copied = BitBlt(target, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
             black.Dc(), bounds.left, bounds.top, SRCCOPY) != FALSE;
+        GdiFlush();
+        return copied;
     }
 };
 }

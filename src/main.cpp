@@ -6,8 +6,11 @@
 #include "tray.hpp"
 #include "cursors.hpp"
 #include "theme.hpp"
+#include "auto_theme.hpp"
+#include <winrt/base.h>
 #include "popup.hpp"
 #include "updates.hpp"
+#include "update_download.hpp"
 #include "version.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
@@ -204,6 +207,21 @@ public:
     AcrylicMode mode = AcrylicMode::System;
     TrayIcon tray;
     UpdateChecker updates;
+    AutoTheme autoTheme;
+    AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
+    void RefreshAutoTheme() {
+        bool light = false;
+        if (autoTheme.Tick(light) && (SystemLightTheme() != light || AppLightTheme() != light)) {
+            const auto changed = SetWindowsLightTheme(light);
+            if (changed.error) Log(L"Automatic theme error=" + std::to_wstring(changed.error));
+        }
+        const auto state = autoTheme.Status();
+        if (state != lastAutoStatus) {
+            lastAutoStatus = state;
+            Log(L"Auto theme status=" + std::to_wstring(static_cast<UINT>(state)) + L" error=" + std::to_wstring(autoTheme.Error()));
+            RefreshThemeMenu(window);
+        }
+    }
     CursorManager cursors;
     ClockOptions clock = LoadClockOptions();
     DWORD build = BuildNumber();
@@ -305,6 +323,7 @@ public:
         changedLegacyTaskbars.clear();
     }
     void Refresh() {
+        RefreshAutoTheme();
         tray.Refresh(window, mode);
         const DWORD cursorBefore = cursors.Error();
         cursors.Refresh();
@@ -312,7 +331,7 @@ public:
         if (cursors.TakeImportResult(importError)) {
             Log(L"Cursor ZIP import error=" + std::to_wstring(importError));
             if (importError) tray.UpdateNotice(L"cursor zip could not be imported",
-                L"Use the original, complete Cursor Concept 3 HDPi ZIP. Choose cursor > unlock colors for instructions. Your current cursor is unchanged.", true);
+                L"Use the original, complete Cursor Concept 3 HDPi ZIP. Choose colors / unlock for instructions. Your current cursor is unchanged.", true);
             else tray.UpdateNotice(L"cursor colors unlocked", L"Your pack is ready. Open cursor to choose a color or follow Windows light/dark mode.");
             RefreshCursorMenu(window);
         }
@@ -384,17 +403,48 @@ public:
     }
     void UpdateAction() {
         const auto available = updates.Result();
+        if (UpdateBusy(available.status)) return;
         if (available.status == UpdateStatus::Available) {
-            const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", available.download.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-            if (result <= 32) { updates.DownloadFailed(static_cast<DWORD>(result)); Log(L"Update download could not be opened: " + std::to_wstring(result)); }
-            return;
-        }
-        updates.Start();
+            updates.Download();
+        } else updates.Start();
         SetTimer(window, UpdateTimer, 150, nullptr);
     }
+    Handle updateInstaller;
+    std::wstring updateDownload;
     void PollUpdate() {
+        if (updateInstaller) {
+            if (WaitForSingleObject(updateInstaller.get(), 0) != WAIT_OBJECT_0) return;
+            DWORD error = ERROR_INSTALL_FAILURE;
+            GetExitCodeProcess(updateInstaller.get(), &error);
+            updateInstaller.reset();
+            RemoveUpdateDownload(updateDownload); updateDownload.clear();
+            // A successful installer replaces this controller. If it exited
+            // while we are still here, keep the working app and allow retry.
+            updates.DownloadFailed(error ? error : ERROR_INSTALL_FAILURE);
+            Log(L"Update installation failed=" + std::to_wstring(error));
+            KillTimer(window, UpdateTimer);
+            RefreshUpdateMenu(window);
+            return;
+        }
         UpdateResult result;
         if (!updates.Poll(result)) return;
+        if (result.status == UpdateStatus::Ready) {
+            DWORD error = VerifyUpdateFile(result, result.installer);
+            if (!error) {
+                std::wstring command = L"\"" + result.installer + L"\" --update";
+                STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
+                startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_HIDE;
+                if (CreateProcessW(result.installer.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+                    std::filesystem::path(result.installer).parent_path().c_str(), &startup, &process)) {
+                    CloseHandle(process.hThread); updateInstaller.reset(process.hProcess);
+                    updateDownload = result.installer;
+                    updates.Installing(); RefreshUpdateMenu(window); return;
+                }
+                error = GetLastError();
+            }
+            RemoveUpdateDownload(result.installer);
+            updates.DownloadFailed(error);
+        }
         KillTimer(window, UpdateTimer);
         RefreshUpdateMenu(window);
         Log(L"Update check status=" + std::to_wstring(static_cast<UINT>(result.status)) + L" error=" + std::to_wstring(result.error));
@@ -461,7 +511,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         return 0;
     } else if (message == TrayThemeQueryMessage) {
-        return SystemLightTheme();
+        return wParam ? static_cast<UINT>(self->autoTheme.Status()) : SystemLightTheme();
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayUpdateQueryMessage) {
@@ -482,7 +532,14 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         if (wParam == TrayDateCommand) return self->ChangeDate();
         if (wParam == TrayThemeCommand) {
-            const auto change = SetWindowsLightTheme(!SystemLightTheme());
+            const auto state = self->autoTheme.Status();
+            if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {
+                self->autoTheme.Enable();
+                self->Refresh();
+                return SystemLightTheme();
+            }
+            const DWORD disabled = self->autoTheme.Disable();
+            const auto change = disabled ? ThemeChangeResult{disabled} : SetWindowsLightTheme(state != AutoThemeStatus::Manual ? true : !SystemLightTheme());
             if (change.error) {
                 Log(L"Windows mode error=" + std::to_wstring(change.error) + L" rollback=" + std::to_wstring(change.rollbackError));
                 self->tray.ThemeError(change.error, change.rollbackError != 0);
@@ -565,7 +622,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Handle singleton(CreateMutexW(nullptr, FALSE, L"Local\\AcrylicTaskbar.Controller.v1"));
     if (!singleton) return static_cast<int>(GetLastError());
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
+    winrt::init_apartment(winrt::apartment_type::single_threaded);
+    struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;
     Controller app;
+    CleanupUpdateDownloads();
+    DWORD updateError = 0, updateBytes = sizeof(updateError);
+    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\jellyflower", L"UpdateError", RRF_RT_REG_DWORD,
+        nullptr, &updateError, &updateBytes) == ERROR_SUCCESS && updateError) app.updates.DownloadFailed(updateError);
     controller = &app;
     WNDCLASSW wc{};
     wc.hInstance = instance;

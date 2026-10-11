@@ -9,11 +9,15 @@
 #include "shared.hpp"
 #include "version.hpp"
 #include "resource.h"
+#include "setup_lock.hpp"
 
 using namespace acrylic;
 namespace fs = std::filesystem;
 namespace {
 constexpr wchar_t UninstallKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\jellyflower";
+const wchar_t* operation = L"preparing setup";
+bool silentUpdate = false;
+bool needsReload = false;
 struct Payload { int id; const wchar_t* name; };
 constexpr Payload Files[] = {{201, L"jellyflower.exe"}, {202, L"jellyflower-bridge.dll"},
     {203, L"LICENSE.md"}, {204, L"THIRD_PARTY_NOTICES.md"}, {205, L"LICENSE-LUCIDE.txt"},
@@ -74,6 +78,34 @@ DWORD Run(const fs::path& executable, const wchar_t* argument, bool wait = true)
     if (WaitForSingleObject(handle.get(), 15000) != WAIT_OBJECT_0) return ERROR_TIMEOUT;
     DWORD exit = ERROR_GEN_FAILURE; GetExitCodeProcess(handle.get(), &exit); return exit;
 }
+fs::path RunningController() {
+    DWORD pid = 0; GetWindowThreadProcessId(FindWindowW(WindowClass, nullptr), &pid);
+    Handle process(pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr);
+    wchar_t path[32768]{}; DWORD size = 32768;
+    if (!process || !QueryFullProcessImageNameW(process.get(), 0, path, &size)) return {};
+    const fs::path executable(path);
+    return executable.filename() == L"jellyflower.exe" ? executable : fs::path{};
+}
+DWORD StartController(const fs::path& executable) {
+    std::wstring command = L"\"" + executable.wstring() + L"\"";
+    STARTUPINFOW startup{sizeof(startup)}; PROCESS_INFORMATION process{};
+    startup.dwFlags = STARTF_USESHOWWINDOW; startup.wShowWindow = SW_HIDE;
+    if (!CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+        executable.parent_path().c_str(), &startup, &process)) return GetLastError();
+    Handle thread(process.hThread), handle(process.hProcess);
+    const auto deadline = GetTickCount64() + 10000;
+    do {
+        if (WaitForSingleObject(handle.get(), 50) == WAIT_OBJECT_0) {
+            DWORD error = ERROR_GEN_FAILURE; GetExitCodeProcess(handle.get(), &error);
+            return error ? error : ERROR_PROCESS_ABORTED;
+        }
+        DWORD pid = 0; const HWND window = FindWindowW(WindowClass, nullptr);
+        if (window && GetWindowThreadProcessId(window, &pid) && pid == process.dwProcessId) return ERROR_SUCCESS;
+    } while (GetTickCount64() < deadline);
+    // Close our own newly launched controller normally before rollback.
+    Run(executable, L"--stop");
+    return ERROR_TIMEOUT;
+}
 fs::path Shortcut() { return fs::path(Known(FOLDERID_Programs)) / L"jellyflower.lnk"; }
 void Link(const fs::path& folder) {
     IShellLinkW* link = nullptr;
@@ -113,6 +145,7 @@ void RemoveKnownFiles(const fs::path& folder) noexcept {
     std::error_code error; fs::remove(folder / L"uninstall.exe", error); fs::remove(folder, error);
 }
 void Uninstall() {
+    operation = L"uninstalling jellyflower";
     const auto base = fs::path(Known(FOLDERID_LocalAppData)) / L"Programs" / L"jellyflower";
     const auto folder = Self().parent_path();
     // Never follow a supplied/computed arbitrary path when removing an installation.
@@ -131,55 +164,144 @@ void Uninstall() {
             && fs::weakly_canonical(entry.path()).parent_path() == fs::weakly_canonical(base)) RemoveKnownFiles(entry.path());
     }
     fs::remove(base, ignored);
-    MessageBoxW(nullptr, L"jellyflower has been removed from login startup and your taskbar has been restored.\n\nWindows may retain helper files until you sign out. You can then delete the jellyflower folder under LocalAppData\\Programs.",
-        L"jellyflower", MB_OK | MB_ICONINFORMATION);
+}
+struct RegistryBackup {
+    struct Value { std::wstring name; DWORD type; std::vector<BYTE> bytes; };
+    const wchar_t* path;
+    const wchar_t* only;
+    bool exists = false;
+    std::vector<Value> values;
+    RegistryBackup(const wchar_t* keyPath, const wchar_t* value = nullptr) : path(keyPath), only(value) {
+        HKEY key = nullptr;
+        const auto result = RegOpenKeyExW(HKEY_CURRENT_USER, path, 0, KEY_QUERY_VALUE, &key);
+        if (result == ERROR_FILE_NOT_FOUND) return;
+        if (result) throw static_cast<DWORD>(result);
+        exists = true;
+        for (DWORD index = 0;; ++index) {
+            wchar_t name[256]{}; DWORD count = 256, type = 0, size = 0;
+            auto status = only ? RegQueryValueExW(key, only, nullptr, &type, nullptr, &size)
+                : RegEnumValueW(key, index, name, &count, nullptr, &type, nullptr, &size);
+            if (status == ERROR_NO_MORE_ITEMS || (only && status == ERROR_FILE_NOT_FOUND)) break;
+            if (status) { RegCloseKey(key); throw static_cast<DWORD>(status); }
+            Value snapshot{only ? only : name, type, std::vector<BYTE>(size)};
+            status = RegQueryValueExW(key, snapshot.name.c_str(), nullptr, &type, snapshot.bytes.data(), &size);
+            if (status) { RegCloseKey(key); throw static_cast<DWORD>(status); }
+            values.push_back(std::move(snapshot));
+            if (only) break;
+        }
+        RegCloseKey(key);
+    }
+    void Restore() const noexcept {
+        if (!only) RegDeleteTreeW(HKEY_CURRENT_USER, path);
+        HKEY key = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER, path, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr)) return;
+        if (only) RegDeleteValueW(key, only);
+        for (const auto& value : values) RegSetValueExW(key, value.name.c_str(), 0, value.type, value.bytes.data(), static_cast<DWORD>(value.bytes.size()));
+        RegCloseKey(key);
+        if (!only && !exists) RegDeleteTreeW(HKEY_CURRENT_USER, path);
+    }
+};
+fs::path PreviousInstall(const fs::path& base) {
+    wchar_t text[32768]{}; DWORD size = sizeof(text);
+    if (RegGetValueW(HKEY_CURRENT_USER, UninstallKey, L"InstallLocation", RRF_RT_REG_SZ, nullptr, text, &size)) return {};
+    const fs::path folder(text);
+    if (fs::weakly_canonical(folder).parent_path() != fs::weakly_canonical(base) || fs::is_symlink(folder)
+        || folder.filename().wstring().rfind(L"v", 0) != 0 || !fs::is_regular_file(folder / L"jellyflower.exe")) return {};
+    return folder;
+}
+void UpdateOutcome(DWORD error) noexcept {
+    HKEY key = nullptr;
+    if (!RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\jellyflower", 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr)) {
+        RegSetValueExW(key, L"UpdateError", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&error), sizeof(error));
+        RegCloseKey(key);
+    }
 }
 void Install() {
+    operation = L"checking Windows architecture";
     if (!NativeArchitecture()) throw static_cast<DWORD>(ERROR_EXE_MACHINE_TYPE_MISMATCH);
     const auto base = fs::path(Known(FOLDERID_LocalAppData)) / L"Programs" / L"jellyflower";
     const auto folder = base / (std::wstring(L"v") + AppVersion + L"-" + Architecture + L"-" + std::to_wstring(GetTickCount64()));
-    // Stage and verify resources before stopping the currently working copy.
+    operation = L"extracting the new version";
     try { Extract(folder); fs::copy_file(Self(), folder / L"uninstall.exe"); }
     catch (...) { RemoveKnownFiles(folder); throw; }
-    DWORD result = Run(folder / L"jellyflower.exe", L"--stop");
-    if (result) { RemoveKnownFiles(folder); throw result; }
-    result = Run(folder / L"jellyflower.exe", L"--install");
-    if (result) { RemoveKnownFiles(folder); throw result; }
-    Register(folder); Link(folder);
+    const auto previous = PreviousInstall(base);
+    const auto running = RunningController();
+    const RegistryBackup startup(RunKey, RunValue), legacyStartup(RunKey, L"AcrylicTaskbar"), registration(UninstallKey);
+    const auto shortcut = Shortcut(), backup = folder / L"shortcut.backup";
+    const bool hadShortcut = fs::exists(shortcut);
+    if (hadShortcut) fs::copy_file(shortcut, backup);
+    bool stopped = false;
+    DWORD result = ERROR_SUCCESS;
+    try {
+        operation = L"closing the previous version";
+        result = Run(folder / L"jellyflower.exe", L"--stop");
+        if (result) throw result;
+        stopped = true;
+        operation = L"updating login startup";
+        result = Run(folder / L"jellyflower.exe", L"--install");
+        if (result) throw result;
+        operation = L"registering the new version";
+        Register(folder); Link(folder);
+        operation = L"starting the new version";
+        UpdateOutcome(ERROR_SUCCESS);
+        result = StartController(folder / L"jellyflower.exe");
+        if (result) throw result;
+    } catch (...) {
+        if (silentUpdate) UpdateOutcome(ERROR_INSTALL_FAILURE);
+        startup.Restore(); legacyStartup.Restore(); registration.Restore();
+        std::error_code ignored;
+        if (hadShortcut) fs::copy_file(backup, shortcut, fs::copy_options::overwrite_existing, ignored);
+        else fs::remove(shortcut, ignored);
+        fs::remove(backup, ignored);
+        if (stopped && !running.empty()) Run(running, L"", false);
+        else if (stopped && !previous.empty()) Run(previous / L"jellyflower.exe", L"", false);
+        RemoveKnownFiles(folder);
+        throw;
+    }
+    std::error_code ignored; fs::remove(backup, ignored);
     DWORD explorer = 0;
     GetWindowThreadProcessId(FindWindowW(L"Shell_TrayWnd", nullptr), &explorer);
-    const bool reload = explorer && OlderBridgePresent(explorer);
-    result = Run(folder / L"jellyflower.exe", L"", false);
-    if (result) throw result;
-    std::wstring message = L"jellyflower is installed and will start when you sign in.";
-    if (reload) message += L"\n\nSign out and back in once to finish this update.";
-    message += L"\n\nOpen its flower icon under show hidden icons to use the menu.\n\nQuit TranslucentTB if it is still running.";
-    MessageBoxW(nullptr, message.c_str(), L"jellyflower", MB_OK | MB_ICONINFORMATION);
+    needsReload = explorer && OlderBridgePresent(explorer);
 }
 }
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     int count = 0; PWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &count);
     DWORD error = ERROR_SUCCESS;
-    Handle setupMutex(CreateMutexW(nullptr, FALSE, L"Local\\jellyflower.Setup.v1"));
-    const DWORD mutexError = GetLastError();
+    SetupLock setup;
+    bool uninstall = false, extract = false;
     try {
-        if (!setupMutex) throw mutexError;
-        if (mutexError == ERROR_ALREADY_EXISTS) throw static_cast<DWORD>(ERROR_BUSY);
         if (!arguments) throw GetLastError();
-        if (count == 1) Install();
-        else if (count == 2 && wcscmp(arguments[1], L"--uninstall") == 0) Uninstall();
-        else if (count == 3 && wcscmp(arguments[1], L"--extract") == 0) Extract(fs::absolute(arguments[2]));
-        else throw static_cast<DWORD>(ERROR_INVALID_PARAMETER);
+        silentUpdate = count == 2 && wcscmp(arguments[1], L"--update") == 0;
+        uninstall = count == 2 && wcscmp(arguments[1], L"--uninstall") == 0;
+        extract = count == 3 && wcscmp(arguments[1], L"--extract") == 0;
+        if (extract) Extract(fs::absolute(arguments[2]));
+        else {
+            if (count != 1 && !silentUpdate && !uninstall) throw static_cast<DWORD>(ERROR_INVALID_PARAMETER);
+            const auto locked = setup.Acquire();
+            if (locked) throw locked;
+            if (uninstall) Uninstall(); else Install();
+        }
     } catch (DWORD value) { error = value ? value : ERROR_GEN_FAILURE; }
     catch (const fs::filesystem_error& value) { error = static_cast<DWORD>(value.code().value()); }
     catch (...) { error = ERROR_GEN_FAILURE; }
+    // Dialog lifetime is independent of the installation lock. A finished
+    // installer may remain open without blocking a later update.
+    setup.Release();
+    if (silentUpdate) UpdateOutcome(error);
     if (arguments) LocalFree(arguments);
     if (SUCCEEDED(apartment)) CoUninitialize();
-    if (error) {
-        const auto message = std::wstring(L"jellyflower could not finish. Windows error ") + std::to_wstring(error)
-            + (error == ERROR_EXE_MACHINE_TYPE_MISMATCH ? L". Download the installer matching your Windows system type (x64 or ARM64)." : L". Close other setup windows and try again.");
+    if (error && !silentUpdate) {
+        const auto message = std::wstring(L"jellyflower could not finish ") + operation + L". Windows error " + std::to_wstring(error)
+            + (error == ERROR_EXE_MACHINE_TYPE_MISMATCH ? L". Download the installer matching your Windows system type (x64 or ARM64)."
+                : error == ERROR_BUSY ? L". Another installation is still working. Wait for it to finish and try again."
+                : L". Your previous installation was retained. Try again, or include this error and step in a GitHub issue.");
         MessageBoxW(nullptr, message.c_str(), L"jellyflower", MB_OK | MB_ICONERROR);
+    } else if (!error && !silentUpdate && !extract) {
+        std::wstring message = uninstall ? L"jellyflower has been removed from login startup and your taskbar has been restored."
+            : L"jellyflower is installed and will start when you sign in.\n\nOpen its flower icon under show hidden icons to use the menu.";
+        if (needsReload) message += L"\n\nSign out and back in once to finish this update.";
+        MessageBoxW(nullptr, message.c_str(), L"jellyflower", MB_OK | MB_ICONINFORMATION);
     }
     return static_cast<int>(error);
 }
