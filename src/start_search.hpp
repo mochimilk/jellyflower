@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "start_style.hpp"
+#include "start_properties.hpp"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
@@ -15,64 +15,6 @@ inline bool IsStartSearch(const sx::Controls::Control& control, StartClassName n
     const auto type = name ? name(control) : winrt::get_class_name(control);
     return type == L"StartMenu.SearchBoxToggleButton" || type == L"StartDocked.SearchBoxToggleButton";
 }
-inline sx::FrameworkElement FindStartElement(const sx::DependencyObject& root, std::wstring_view name) {
-    std::vector<sx::DependencyObject> pending{root};
-    for (size_t i = 0; i < pending.size() && i < 12000; ++i) {
-        if (auto element = pending[i].try_as<sx::FrameworkElement>(); element && element.Name() == name) return element;
-        const auto count = sx::Media::VisualTreeHelper::GetChildrenCount(pending[i]);
-        for (int child = 0; child < count && pending.size() < 12000; ++child)
-            pending.push_back(sx::Media::VisualTreeHelper::GetChild(pending[i], child));
-    }
-    return nullptr;
-}
-// Each override owns its original local value/binding. Shell visual-state and
-// localization changes become the new originals while the override is active.
-class StartSearchValues {
-    struct Item {
-        sx::FrameworkElement object{nullptr};
-        sx::DependencyProperty key{nullptr};
-        winrt::Windows::Foundation::IInspectable local{nullptr}, custom{nullptr};
-        sx::Data::BindingBase binding{nullptr};
-        int64_t token = 0;
-    };
-    std::vector<Item> items_;
-    bool writing_ = false;
-    void Save(Item& item) {
-        item.local = item.object.ReadLocalValue(item.key);
-        const auto expression = item.object.GetBindingExpression(item.key);
-        item.binding = expression ? expression.ParentBinding() : nullptr;
-    }
-    void Changed(size_t index) noexcept {
-        if (writing_) return;
-        try {
-            auto& item = items_[index]; Save(item); writing_ = true;
-            item.object.SetValue(item.key, item.custom); writing_ = false;
-        } catch (...) { writing_ = false; }
-    }
-public:
-    ~StartSearchValues() { Clear(); }
-    void Set(const sx::FrameworkElement& object, const sx::DependencyProperty& key,
-        const winrt::Windows::Foundation::IInspectable& custom) {
-        const auto index = items_.size();
-        Item item{object, key, nullptr, custom}; Save(item); items_.push_back(item);
-        items_.back().token = object.RegisterPropertyChangedCallback(key, [this, index](auto&&, auto&&) { Changed(index); });
-        writing_ = true;
-        try { object.SetValue(key, custom); writing_ = false; }
-        catch (...) { writing_ = false; throw; }
-    }
-    void Clear() noexcept {
-        writing_ = true;
-        for (auto& item : items_) {
-            try { if (item.token) item.object.UnregisterPropertyChangedCallback(item.key, item.token); } catch (...) {}
-            try {
-                item.object.ClearValue(item.key);
-                if (item.binding) item.object.SetBinding(item.key, item.binding);
-                else if (item.local != sx::DependencyProperty::UnsetValue()) item.object.SetValue(item.key, item.local);
-            } catch (...) {}
-        }
-        items_.clear(); writing_ = false;
-    }
-};
 class StartSearch {
     sx::Controls::Control button_;
     sx::Controls::Grid template_{nullptr}, pane_{nullptr}, header_{nullptr};
@@ -132,9 +74,9 @@ class StartSearch {
         try {
             const auto button = button_.TransformToVisual(pane_).TransformPoint({0,0});
             const auto header = header_.TransformToVisual(pane_).TransformPoint({0,0});
-            // Modern Start's section inset is 64 DIP. Follow a named stock
+            // Compact Start's section inset is 24 DIP. Follow a named stock
             // heading when available, including a resized/localized layout.
-            double left = 64;
+            double left = 24;
             const auto heading = heading_.get();
             if (heading && heading.ActualWidth() > 0) left = heading.TransformToVisual(pane_).TransformPoint({0,0}).X;
             left = std::clamp(left, 16.0, std::max(16.0, pane_.ActualWidth() - 64));
@@ -174,6 +116,9 @@ public:
         if (!applied_) {
             try {
                 sx::Media::SolidColorBrush clear(winrt::Windows::UI::Color{0,0,0,0});
+                values_.Set(header_, sx::FrameworkElement::MarginProperty(), nullptr, [](const auto& value) {
+                    auto margin=winrt::unbox_value<sx::Thickness>(value);margin.Left=24;margin.Right=24;return winrt::box_value(margin);
+                });
                 values_.Set(button_, sx::Controls::Control::BackgroundProperty(), clear);
                 values_.Set(button_, sx::Controls::Control::BorderBrushProperty(), clear);
                 values_.Set(button_, sx::Controls::Control::BorderThicknessProperty(), winrt::box_value(sx::Thickness{}));

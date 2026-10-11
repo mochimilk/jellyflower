@@ -41,16 +41,16 @@ void Notify(DWORD target) {
 }
 HRESULT Inject(DWORD pid) {
     // Earlier helpers stay pinned after an in-app update. Wait for their
-    // restorations before v3 saves original shell properties; never unload them.
-    struct LegacyState { volatile LONG magic,pid,epoch,running,enabled,light,attached,count,result; };
-    for (const auto version : {L"v1",L"v2"}) {
+    // restorations before v4 saves original shell properties; never unload them.
+    struct LegacyState { volatile LONG magic,pid,epoch,running,enabled,light,attached,count,result,searches; };
+    for (const auto version : {L"v1",L"v2",L"v3"}) {
         Handle retired(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,(L"Local\\jellyflower.Start."+std::wstring(version)+L"."+std::to_wstring(pid)).c_str()));
         if(!retired) continue;
-        auto* previous=static_cast<LegacyState*>(MapViewOfFile(retired.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(LegacyState)));
+        auto* previous=static_cast<LegacyState*>(MapViewOfFile(retired.get(),FILE_MAP_ALL_ACCESS,0,0,std::wstring_view(version)==L"v3" ? sizeof(LegacyState) : 9*sizeof(LONG)));
         if(!previous) continue;
         bool ready=false;
         for(unsigned attempt=0;attempt<20;++attempt) {
-            if(!Read(previous->count)) {ready=true;break;}
+            if(!Read(previous->count) && (std::wstring_view(version)!=L"v3" || !Read(previous->searches))) {ready=true;break;}
             HWND receiver=nullptr;
             const auto notifyClass=L"jellyflower.StartNotify."+std::wstring(version);
             while((receiver=FindWindowExW(HWND_MESSAGE,receiver,notifyClass.c_str(),nullptr))) {
@@ -69,7 +69,7 @@ HRESULT Inject(DWORD pid) {
     const auto initialize=reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(GetProcAddress(xaml,"InitializeXamlDiagnosticsEx"));
     wchar_t file[32768]{};const DWORD length=GetModuleFileNameW(nullptr,file,32768);
     if(initialize && length && length<32768) {
-        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v3.dll";
+        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v4.dll";
         // Initialization runs on a fresh background thread. Probe existing
         // endpoint names until one accepts; never create/replace Start.
         for(unsigned index=1;index<=64;++index) {

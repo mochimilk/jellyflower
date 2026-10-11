@@ -94,6 +94,10 @@ int main(){
                 Check(nativePresenter.ReadLocalValue(sx::UIElement::RenderTransformProperty())==originalTransform,"unset original transform is restored");
                 Check(!FindStartElement(pane,L"JellyflowerSearchIcon") && !FindStartElement(pane,L"JellyflowerSearchDivider"),"owned visuals removed completely");
             }
+            heading.Name(L"UnrecognizedHeading");search.Refresh(true,false);Layout(pane);
+            const auto compactIcon=FindStartElement(button,L"JellyflowerSearchIcon").as<sx::Controls::Canvas>().Children().GetAt(0).as<sx::Controls::Canvas>();
+            Check(header.Margin().Left==24 && header.Margin().Right==24 && std::abs(compactIcon.TransformToVisual(pane).TransformPoint({0,0}).X-24)<.1,"compact header has symmetric margins and 24-DIP fallback alignment");
+            search.Restore();heading.Name(L"PinnedListHeaderText");Layout(pane);Check(header.Margin().Left==32 && header.Margin().Right==28,"native asymmetric header margins restore");
             search.Refresh(true,false);nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==L"search","shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
             sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true);search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");
             search.Refresh(true,false);button.Template(Template());Layout(pane);search.Refresh(true,false);Layout(pane);Check(search.Applied() && FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>().Text()==L"search","replacement native templates are rediscovered without duplicate overlays");

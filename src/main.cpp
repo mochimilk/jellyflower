@@ -28,6 +28,7 @@ constexpr UINT_PTR RefreshTimer = 1;
 constexpr UINT_PTR DebounceTimer = 2;
 constexpr UINT_PTR UpdateTimer = 3;
 constexpr UINT_PTR FastAttachTimer = 4;
+constexpr UINT_PTR AutoThemeTimer = 5;
 constexpr UINT RefreshMs = 5000;
 struct AccentPolicy { int state; UINT flags; DWORD color; DWORD animation; };
 struct CompositionData { int attribute; void* data; SIZE_T size; };
@@ -119,7 +120,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[23]{};
+    LONG values[24]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -163,6 +164,7 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"startAttached\": " << values[20]
         << ",\n  \"startLastResult\": " << values[21]
         << ",\n  \"startSearchHeaders\": " << values[22]
+        << ",\n  \"startSpacingOverrides\": " << values[23]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -181,12 +183,19 @@ public:
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
     AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
-    void RefreshAutoTheme() {
+    void RefreshAutoTheme(bool invalidate = false) {
         bool light = false;
-        if (autoTheme->Tick(light) && (SystemLightTheme() != light || AppLightTheme() != light)) {
+        UINT delay = 0;
+        if (!autoTheme) return;
+        KillTimer(window, AutoThemeTimer);
+        if (autoTheme->Update(light, delay, invalidate) && (SystemLightTheme() != light || AppLightTheme() != light)) {
             const auto changed = SetWindowsLightTheme(light);
             if (changed.error) Log(L"Automatic theme error=" + std::to_wstring(changed.error));
         }
+        // A non-waking window timer. Re-arm from the next absolute deadline,
+        // rather than running solar calculations in the taskbar recovery loop.
+        if (delay && !SetTimer(window, AutoThemeTimer, delay, nullptr))
+            Log(L"Auto theme timer error=" + std::to_wstring(GetLastError()));
         const auto state = autoTheme->Status();
         if (state != lastAutoStatus) {
             lastAutoStatus = state;
@@ -310,7 +319,6 @@ public:
         changedLegacyTaskbars.clear();
     }
     void Refresh() {
-        RefreshAutoTheme();
         RefreshTaskbar();
         start.Refresh(SystemLightTheme());
         tray.Refresh(window, mode);
@@ -476,6 +484,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == StartAttachedQuery) return self->start.Attached();
         if (wParam == StartResultQuery) return self->start.Result();
         if (wParam == StartSearchQuery) return self->start.SearchCount();
+        if (wParam == StartSpacingQuery) return self->start.SpacingCount();
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult
@@ -537,10 +546,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             const auto state = self->autoTheme->Status();
             if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {
                 self->autoTheme->Enable();
+                self->RefreshAutoTheme();
                 self->Refresh();
                 return SystemLightTheme();
             }
             const DWORD disabled = self->autoTheme->Disable();
+            self->RefreshAutoTheme();
             const auto change = disabled ? ThemeChangeResult{disabled} : SetWindowsLightTheme(state != AutoThemeStatus::Manual ? true : !SystemLightTheme());
             if (change.error) {
                 Log(L"Windows mode error=" + std::to_wstring(change.error) + L" rollback=" + std::to_wstring(change.rollbackError));
@@ -560,7 +571,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             if (error) { Log(L"Cursor selection error=" + std::to_wstring(error)); self->tray.CursorError(error, self->cursors->SaveFailed()); }
         }
         return self->cursors->Mode();
+    } else if (message == AutoThemeChangedMessage || message == WM_TIMECHANGE) {
+        self->RefreshAutoTheme(message == WM_TIMECHANGE);
+        self->Refresh();
+        return 0;
     } else if (message == WM_TIMER) {
+        if (wParam == AutoThemeTimer) { self->RefreshAutoTheme(); self->Refresh(); return 0; }
         if (wParam == UpdateTimer) { self->PollUpdate(); return 0; }
         if (wParam == FastAttachTimer) { self->FastAttach(); return 0; }
         if (wParam == DebounceTimer) KillTimer(window, DebounceTimer);
@@ -569,6 +585,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == self->taskbarCreated || message == WM_DISPLAYCHANGE
         || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DWMCOMPOSITIONCHANGED
         || message == WM_DPICHANGED) {
+        if (message == WM_SETTINGCHANGE) self->RefreshAutoTheme();
         if (message == self->taskbarCreated) {
             self->tray.ShellRestarted();
             self->attachStarted = GetTickCount64();
@@ -579,6 +596,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         SetTimer(window, DebounceTimer, 300, nullptr);
         return 0;
     } else if (message == WM_POWERBROADCAST) {
+        if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND)
+            self->RefreshAutoTheme(true);
         if (wParam == PBT_POWERSETTINGCHANGE && lParam) {
             const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(lParam);
             if (IsEqualGUID(setting->PowerSetting, PowerSavingGuid) && setting->DataLength == sizeof(DWORD)) {
@@ -594,6 +613,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         DestroyWindow(window);
         return 0;
     } else if (message == WM_DESTROY) {
+        self->autoTheme.reset();
         self->tray.Remove();
         self->window = nullptr;
         PostQuitMessage(0);
@@ -636,7 +656,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Controller app;
     // Apply before download housekeeping, tray artwork, or cursor refresh.
     app.RefreshTaskbar();
-    app.autoTheme = std::make_unique<AutoTheme>();
     app.cursors = std::make_unique<CursorManager>();
     CleanupUpdateDownloads();
     DWORD updateError = 0, updateBytes = sizeof(updateError);
@@ -652,6 +671,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WindowClass, L"jellyflower",
         WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, &app);
     if (!window) return static_cast<int>(GetLastError());
+    app.autoTheme = std::make_unique<AutoTheme>(window);
     app.powerNotification = RegisterPowerSettingNotification(window, &PowerSavingGuid, DEVICE_NOTIFY_WINDOW_HANDLE);
     app.foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
         ForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
@@ -661,6 +681,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return static_cast<int>(error ? error : ERROR_NOT_ENOUGH_MEMORY);
     }
     Log(L"Started pid=" + std::to_wstring(GetCurrentProcessId()));
+    app.RefreshAutoTheme();
     app.Refresh();
     SetTimer(window, FastAttachTimer, 100, nullptr);
     MSG message{};

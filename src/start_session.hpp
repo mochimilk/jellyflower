@@ -17,6 +17,7 @@ public:
     void Refresh(bool light);
     LONG Count() const {return state_ ? Read(state_->count):0;}
     LONG SearchCount() const {return state_ ? Read(state_->searches):0;}
+    LONG SpacingCount() const {return state_ ? Read(state_->spacing):0;}
     LONG Attached() const {return state_ ? Read(state_->attached):0;}
     LONG Result() const {return state_ ? Read(state_->result):0;}
     DWORD Pid() const {return pid_;}

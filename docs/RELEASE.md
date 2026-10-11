@@ -1,7 +1,7 @@
-jellyflower 0.16.9
+jellyflower 0.16.10
 
-Start's search header now uses the supplied Lucide magnifier, a borderless input appearance, lowercase search placeholder and a thin divider across the full header. The icon aligns with the pinned/content inset. The existing translucent material is retained. Search keeps its native font, click and keyboard behavior; exiting restores the original header and Start surface. Unrecognized search layouts remain stock.
+Auto light/dark mode calculates and caches a day of sunrise/sunset transitions, then waits on a separate timer for the next event or daily refresh. It catches up after sleep, clock changes and location refreshes. Location permission changes are event-driven. The five-second taskbar recovery loop remains separate; no battery-life measurement is claimed.
 
-Hover cursor choices to preview their actual system cursors without changing the saved selection or checkmark. Moving away, closing a submenu, dismissing the menu or switching to keyboard navigation restores the selected cursor. Queued mouse events cannot restart previews after the menu closes. Click to save the preview while keeping the menu open. Default follows the current theme and disable previews the Windows cursor. Cursor artwork remains an optional user-supplied pack; none is bundled.
+Start has tighter, symmetrical side padding for search, section headings, apps, right-side actions and the footer, with larger 20-DIP outer corners. Native controls, vertical spacing, typography and the existing translucent material remain. Unknown layouts keep their stock spacing; exiting restores original margins and bindings.
 
-Update through general's version/download row. No sign-out or Explorer/Start restart is needed; Start v3 waits for older helpers to restore before applying. Menu typography, acrylic material recipes, startup and automatic light/dark scheduling are unchanged. The native x64 installer, portable build and matching source are included.
+Update through general's version/download row. No sign-out or Explorer/Start restart is needed; the new Start v4 helper waits for older helpers to restore before applying. The native x64 installer, portable build and matching source are included.

@@ -64,7 +64,7 @@ int main() {
                     Check(brush!=nullptr,"custom backdrop material");
                     Check(brush.FallbackColor().R==(light?249:32),"shared menu fallback tint");
                     const auto stroke=border.BorderBrush().as<sx::Media::SolidColorBrush>().Color();
-                    Check(stroke.R==(light?210:69) && border.BorderThickness().Left==1 && border.CornerRadius().TopLeft==8,"menu stroke and radius");
+                    Check(stroke.R==(light?210:69) && border.BorderThickness().Left==1 && border.CornerRadius().TopLeft==20,"menu stroke and larger radius");
                     surface.Refresh(false,light);
                     Check(!surface.Applied() && border.Background()==original && border.CornerRadius().TopLeft==4,"disable restores original values");
                     Check(border.ReadLocalValue(sx::Controls::Border::BorderBrushProperty())==sx::DependencyProperty::UnsetValue(),"unset restored");

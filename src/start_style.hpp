@@ -66,7 +66,7 @@ public:
                 Add(sx::Controls::Border::BackgroundProperty(),nullptr);
                 Add(sx::Controls::Border::BorderBrushProperty(),nullptr);
                 Add(sx::Controls::Border::BorderThicknessProperty(),winrt::box_value(sx::Thickness{1,1,1,1}));
-                Add(sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(sx::CornerRadius{8,8,8,8}));
+                Add(sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(sx::CornerRadius{20,20,20,20}));
             }
         } catch(...) {
             for(auto& p:properties_) if(p.token) border_.UnregisterPropertyChangedCallback(p.key,p.token);

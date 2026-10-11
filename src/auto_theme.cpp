@@ -28,7 +28,11 @@ struct AutoTheme::State {
     UINT generation = 0;
     bool alive = true, reading = false;
     ULONGLONG nextPosition = 0;
+    HWND window = nullptr;
+    SolarSchedule schedule;
     winrt::Windows::Devices::Geolocation::Geolocator locator{nullptr};
+    winrt::Windows::Devices::Geolocation::Geolocator::StatusChanged_revoker permission;
+    void Notify() const noexcept { if (alive && window) PostMessageW(window, AutoThemeChangedMessage, 0, 0); }
     static winrt::fire_and_forget Locate(std::shared_ptr<State> state, UINT generation, bool prompt) {
         using namespace winrt::Windows::Devices::Geolocation;
         AutoThemeStatus status = AutoThemeStatus::Unavailable;
@@ -42,7 +46,18 @@ struct AutoTheme::State {
                 {
                     std::lock_guard<std::mutex> lock(state->lock);
                     if (!state->alive || state->generation != generation) co_return;
+                    state->permission.revoke();
                     state->locator = locator;
+                    state->permission = locator.StatusChanged(winrt::auto_revoke,
+                        [weak = std::weak_ptr<State>(state), generation](auto&&, const StatusChangedEventArgs& args) {
+                            if (args.Status() != PositionStatus::Disabled) return;
+                            if (const auto strong = weak.lock()) {
+                                std::lock_guard<std::mutex> guard(strong->lock);
+                                if (!strong->alive || strong->generation != generation) return;
+                                strong->status = AutoThemeStatus::Denied; strong->error = ERROR_ACCESS_DENIED;
+                                ++strong->generation; strong->reading = false; Save(false); strong->Notify();
+                            }
+                        });
                 }
                 const auto position = co_await locator.GetGeopositionAsync(std::chrono::hours(1), std::chrono::seconds(15));
                 const auto point = position.Coordinate().Point().Position();
@@ -58,7 +73,11 @@ struct AutoTheme::State {
         state->reading = false;
         if (!error) {
             error = Save(true, &coordinates);
-            if (!error) state->coordinates = coordinates;
+            if (!error) {
+                if (state->coordinates.latitude != coordinates.latitude || state->coordinates.longitude != coordinates.longitude)
+                    state->schedule.Invalidate();
+                state->coordinates = coordinates;
+            }
             else status = AutoThemeStatus::Error;
         }
         if (error && (status == AutoThemeStatus::Denied || (prompt && status != AutoThemeStatus::Automatic))) Save(false);
@@ -67,9 +86,11 @@ struct AutoTheme::State {
         if (!prompt && error && status != AutoThemeStatus::Denied && state->status == AutoThemeStatus::Automatic) status = AutoThemeStatus::Automatic;
         state->status = status; state->error = error;
         state->nextPosition = GetTickCount64() + (error ? 15*60*1000 : 24*60*60*1000);
+        state->Notify();
     }
 };
-AutoTheme::AutoTheme() : state_(std::make_shared<State>()) {
+AutoTheme::AutoTheme(HWND window) : state_(std::make_shared<State>()) {
+    state_->window = window;
     DWORD enabled = 0, size = sizeof(enabled);
     if (RegGetValueW(HKEY_CURRENT_USER, Key, L"AutoTheme", RRF_RT_REG_DWORD, nullptr, &enabled, &size) || enabled != 1) return;
     size = sizeof(Coordinates);
@@ -82,7 +103,10 @@ AutoTheme::AutoTheme() : state_(std::make_shared<State>()) {
         State::Locate(state_, state_->generation, false);
     }
 }
-AutoTheme::~AutoTheme() { std::lock_guard<std::mutex> lock(state_->lock); state_->alive = false; ++state_->generation; }
+AutoTheme::~AutoTheme() {
+    std::lock_guard<std::mutex> lock(state_->lock);
+    state_->alive = false; state_->window = nullptr; ++state_->generation; state_->permission.revoke();
+}
 void AutoTheme::Enable() {
     UINT generation = 0;
     {
@@ -98,13 +122,15 @@ DWORD AutoTheme::Disable() {
     const DWORD error = Save(false);
     if (!error) {
         ++state_->generation; state_->reading = false;
-        state_->status = AutoThemeStatus::Manual; state_->error = 0; state_->locator = nullptr;
+        state_->status = AutoThemeStatus::Manual; state_->error = 0;
+        state_->permission.revoke(); state_->locator = nullptr; state_->schedule.Invalidate();
     }
     return error;
 }
-bool AutoTheme::Tick(bool& light) {
+bool AutoTheme::Update(bool& light, UINT& delay, bool invalidate) {
     UINT generation = 0;
     bool refresh = false, automatic = false;
+    delay = 0;
     {
         std::lock_guard<std::mutex> lock(state_->lock);
         if (state_->status == AutoThemeStatus::Automatic) {
@@ -116,11 +142,18 @@ bool AutoTheme::Tick(bool& light) {
                 state_->error = static_cast<DWORD>(failure.code());
                 if (failure.code() == E_ACCESSDENIED) { state_->status = AutoThemeStatus::Denied; Save(false); return false; }
             }
-            SYSTEMTIME now{}; GetSystemTime(&now);
-            light = SunIsUp(now, state_->coordinates.latitude, state_->coordinates.longitude); automatic = true;
-            if (!state_->reading && GetTickCount64() >= state_->nextPosition) {
+            SYSTEMTIME utc{}; GetSystemTime(&utc);
+            const auto now = SolarSeconds(utc);
+            if (invalidate) state_->schedule.Invalidate();
+            state_->schedule.Update(now, state_->coordinates.latitude, state_->coordinates.longitude);
+            light = state_->schedule.Light(now); automatic = true;
+            const auto tick = GetTickCount64();
+            if (!state_->reading && tick >= state_->nextPosition) {
                 generation = state_->generation; state_->reading = true; refresh = true;
             }
+            auto wait = (state_->schedule.Next(now) - now)*1000 - utc.wMilliseconds;
+            if (!state_->reading) wait = std::min(wait, state_->nextPosition-tick);
+            delay = static_cast<UINT>(std::max<ULONGLONG>(1, wait));
         }
     }
     if (refresh) State::Locate(state_, generation, false);
