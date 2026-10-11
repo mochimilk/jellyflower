@@ -112,14 +112,14 @@ def app_icon(svg, size, light):
 
 
 if __name__ == '__main__':
-    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'calendar', 'calendar-off', 'flower', 'update', 'package', 'package-open', 'settings'):
+    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'calendar', 'calendar-off', 'flower', 'update', 'package', 'package-open', 'settings', 'github', 'external'):
         svg = ET.parse(assets / f'{name}.svg')
         elements = list(shapes(svg))
         if name == 'flower':
             # Preserve 24x23 aspect ratio and square-canvas vertical centering.
             elements = [([[(x, y+.5) for x,y in path] for path in item[0]], *item[1:4], True) for item in elements]
         for theme, color in (('light', (0, 0, 0, 255)), ('dark', (255, 255, 255, 255))):
-            frames = [render(elements, size, color) for size in sizes]
+            frames = [render(elements, size, color, viewbox=float(svg.getroot().attrib.get("viewBox", "0 0 24 24").split()[2])) for size in sizes]
             destination = assets / f'{name}-{theme}.ico'
             frames[-1].save(destination, sizes=[(size, size) for size in sizes], append_images=frames[:-1])
             with Image.open(destination) as check:

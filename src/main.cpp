@@ -513,6 +513,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
+        if (wParam == TrayGithubCommand) {
+            return reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", GithubUrl, nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+        }
         if (wParam == TrayCursorUnlockCommand) {
             const DWORD error = OpenCursorGuide();
             if (error) self->tray.UpdateNotice(L"cursor guide could not be opened", L"The cursor files folder could not be created or opened. Check your account's folder permissions.", true);

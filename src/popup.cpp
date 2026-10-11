@@ -55,7 +55,7 @@ std::vector<Row> RootRows(AcrylicMode mode, bool date, bool light, UINT mask) {
         {TrayGeneralCommand, L"general", true}};
 }
 std::vector<Row> GeneralRows() {
-    return {{TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit"}};
+    return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -102,6 +102,7 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
+    HICON githubIcon = nullptr, externalIcon = nullptr;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -113,7 +114,7 @@ struct Popup {
     COLORREF text = 0, highlightedText = 0, border = 0;
     UINT dpi = 96, result = 0, cursorMode = 0, hoverDelay = 400;
     RECT trayBounds{};
-    int hovered = -1, childIndex = -1, rowHeight = 40;
+    int hovered = -1, childIndex = -1, suppressedHover = -1, rowHeight = 40;
     UINT kind = 0;
     bool clockDate = true;
     AcrylicMode mode = AcrylicMode::System;
@@ -139,6 +140,8 @@ struct Popup {
         if (packageIcon) DestroyIcon(packageIcon);
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
         if (generalIcon) DestroyIcon(generalIcon);
+        if (githubIcon) DestroyIcon(githubIcon);
+        if (externalIcon) DestroyIcon(externalIcon);
         for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
@@ -327,15 +330,17 @@ struct Popup {
             const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
             const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
                 darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
-                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK};
-            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon};
+                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK,
+                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK,
+                darkInk ? IDI_EXTERNAL_LIGHT : IDI_EXTERNAL_DARK};
+            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon, &externalIcon};
             for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
                 if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
             }
             if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
-            if (!updateIcon || !packageIcon || !packageOpenIcon) return false;
+            if (!updateIcon || !packageIcon || !packageOpenIcon || !githubIcon || !externalIcon) return false;
         }
         if (window) {
             const BOOL dark = !light;
@@ -401,6 +406,7 @@ struct Popup {
         if (index < 0 || index >= static_cast<int>(rows.size())) return;
         const UINT command = rows[static_cast<size_t>(index)].command;
         if (!HasSubmenu(command)) return;
+        suppressedHover = -1;
         KillTimer(window, HoverTimer);
         KillTimer(window, ChildCloseTimer);
         if (child && childIndex != index) { child->HideBranch(); child.reset(); }
@@ -437,6 +443,7 @@ struct Popup {
     }
     void Hover(int index) {
         if (index >= 0 && !rows[static_cast<size_t>(index)].enabled) index = -1;
+        if (index != suppressedHover) suppressedHover = -1;
         for (auto* level = parent; level; level = level->parent) {
             if (index >= 0) KillTimer(level->window, ChildCloseTimer);
             else if (level->child && IsWindowVisible(level->child->window))
@@ -451,7 +458,7 @@ struct Popup {
         keyboard = false;
         RepaintButtons();
         KillTimer(window, HoverTimer);
-        if (index >= 0 && HasSubmenu(rows[static_cast<size_t>(index)].command)
+        if (index >= 0 && index != suppressedHover && HasSubmenu(rows[static_cast<size_t>(index)].command)
             && (!child || childIndex != index || !IsWindowVisible(child->window)))
             SetTimer(window, HoverTimer, std::max(1u, hoverDelay), nullptr);
     }
@@ -465,7 +472,17 @@ struct Popup {
         Root()->CompleteEntrance();
         if (index < 0 || index >= static_cast<int>(rows.size()) || !rows[static_cast<size_t>(index)].enabled) return;
         const UINT command = rows[static_cast<size_t>(index)].command;
-        if (HasSubmenu(command)) OpenChild(index, fromKeyboard);
+        if (HasSubmenu(command)) {
+            if (!fromKeyboard && child && childIndex == index && IsWindowVisible(child->window)) {
+                // A click collapses this branch. Movement within the same row
+                // must not immediately reopen it, including a queued timer.
+                KillTimer(window, HoverTimer);
+                suppressedHover = index;
+                CloseChild(false);
+                hovered = index; keyboard = false;
+                RepaintButtons();
+            } else OpenChild(index, fromKeyboard);
+        }
         else if (command == TrayExitCommand) Finish(command);
         else {
             // Settings share one live controller path. Keep the existing
@@ -473,6 +490,7 @@ struct Popup {
             auto* root = Root();
             const UINT state = static_cast<UINT>(SendMessageW(root->controller, TraySettingMessage, command, 0));
             if (root->done) return;
+            if (command == TrayGithubCommand && state) { Finish(); return; }
             if (command == TrayToggleCommand) {
                 root->mode = DecodeAcrylicMode(static_cast<LONG>(state));
                 for (size_t i = 0; i < root->rows.size(); ++i) if (root->rows[i].command == TrayToggleCommand) {
@@ -569,7 +587,8 @@ struct Popup {
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayGeneralCommand ? generalIcon : row.command == TrayUpdateCommand
-                ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon) : nullptr;
+                ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
+                : row.command == TrayGithubCommand ? githubIcon : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
@@ -594,6 +613,9 @@ struct Popup {
             POINT chevron[]{{right - Px(3), cy - Px(4)}, {right + Px(1), cy}, {right - Px(3), cy + Px(4)}};
             Polyline(item.hDC, chevron, 3);
         }
+        if (row.command == TrayGithubCommand && highlighted && externalIcon)
+            DrawIconEx(item.hDC, item.rcItem.right - Px(12) - iconSize, cy - iconSize / 2,
+                externalIcon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
         SelectObject(item.hDC, oldPen);
         DeleteObject(pen);
         if (focused) {
@@ -769,7 +791,7 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
             popup->RepaintButtons();
         } else if (wParam == UpdateSpinnerTimer) {
             popup->RepaintButtons();
-        } else if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0) popup->OpenChild(popup->hovered, false); }
+        } else if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0 && popup->hovered != popup->suppressedHover) popup->OpenChild(popup->hovered, false); }
         else if (wParam == ChildCloseTimer) {
             KillTimer(window, ChildCloseTimer);
             if (!popup->PointerInChildMenu()) popup->CloseChild(false);

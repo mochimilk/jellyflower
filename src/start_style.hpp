@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "menu_material.hpp"
+#include "start_material.hpp"
 #ifdef GetCurrentTime
 #undef GetCurrentTime
 #endif
@@ -35,7 +35,6 @@ class StartSurface {
     };
     sx::Controls::Border border_;
     std::vector<Property> properties_;
-    sx::Media::AcrylicBrush brush_{nullptr};
     bool applied_=false, updating_=false, light_=false;
     void Save(Property& p) {
         p.local=border_.ReadLocalValue(p.key);
@@ -64,10 +63,7 @@ public:
         try {
             if(border_.Name()==L"AcrylicOverlay") Add(sx::UIElement::VisibilityProperty(),winrt::box_value(sx::Visibility::Collapsed));
             else {
-                brush_=sx::Media::AcrylicBrush();
-                brush_.BackgroundSource(sx::Media::AcrylicBackgroundSource::HostBackdrop);
-                brush_.AlwaysUseFallback(false);
-                Add(sx::Controls::Border::BackgroundProperty(),brush_);
+                Add(sx::Controls::Border::BackgroundProperty(),nullptr);
                 Add(sx::Controls::Border::BorderBrushProperty(),nullptr);
                 Add(sx::Controls::Border::BorderThicknessProperty(),winrt::box_value(sx::Thickness{1,1,1,1}));
                 Add(sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(sx::CornerRadius{8,8,8,8}));
@@ -88,12 +84,9 @@ public:
         if(applied_ && light_==light) return;
         updating_=true;
         try {
-            if(brush_) {
-                const DWORD tint=MenuTint(light); const auto ink=MenuBorder(light);
-                const winrt::Windows::UI::Color color{255,static_cast<BYTE>(tint),static_cast<BYTE>(tint>>8),static_cast<BYTE>(tint>>16)};
-                brush_.TintColor(color); brush_.TintOpacity((tint>>24)/255.0);
-                brush_.TintLuminosityOpacity(winrt::box_value((tint>>24)/255.0).as<winrt::Windows::Foundation::IReference<double>>());
-                brush_.FallbackColor(color);
+            if(border_.Name()!=L"AcrylicOverlay") {
+                const auto ink=MenuBorder(light);
+                properties_[0].custom=winrt::make<StartMaterial>(border_,light);
                 properties_[1].custom=sx::Media::SolidColorBrush(winrt::Windows::UI::Color{255,GetRValue(ink),GetGValue(ink),GetBValue(ink)});
             }
             if(!applied_) for(auto& p:properties_) Save(p);

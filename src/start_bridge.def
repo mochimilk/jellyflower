@@ -1,4 +1,4 @@
-LIBRARY "jellyflower-start-v1"
+LIBRARY "jellyflower-start-v2"
 EXPORTS
     DllGetClassObject PRIVATE
     DllCanUnloadNow PRIVATE

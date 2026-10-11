@@ -20,9 +20,11 @@ The installer and EXE are currently unsigned. The first downloadable build is x6
 | acrylic | Cycles the right-side status through `system`, `pure`, and `off`. Startup uses `system`: white tint in light mode, neutral dark tint in dark mode. Pure has no tint. |
 | date | Toggles the date in the single-line clock, with `on` or `off` at the right and the matching calendar icon. |
 | colors / cursor | Before import: `colors` with `unlock` at the right opens a text guide and your import folder; its preview cycles through colors. After import: `cursor` opens the color choices, default (system), and disable. There is no redundant unlock row. |
-| general | Opens the version/update row and exit, with the supplied settings gear. |
+| general | Opens the GitHub link, version/update row and exit, with the supplied settings gear. |
 
-Inside **general**, `v0.16.5` shows the installed version. Select it to check GitHub; when the secondary label says `download`, select it again to verify, install, and relaunch inside jellyflower. **exit** uses red text in light/dark modes, respects Windows contrast colors, restores the shell appearance and leaves login startup enabled.
+Inside **general**, **github** opens the project repository in your browser, with an external-link indicator on hover or keyboard focus. A divider separates exit from the update row. `v0.16.6` shows the installed version. Select it to check GitHub; when the secondary label says `download`, select it again to verify, install, and relaunch inside jellyflower. **exit** uses red text in light/dark modes, respects Windows contrast colors, restores the shell appearance and leaves login startup enabled.
+
+Click an open parent row (general or cursor) to collapse its submenu. It stays closed while the pointer remains over that row; move away and hover back to reopen normally. Another click or keyboard navigation can also reopen it.
 
 The clock reads `Mon Jun 22  9:41 am`, with lowercase am/pm, retaining Windows' calendar button and tooltip. The clock follows the native Windows system font. Custom fonts and the clock/font submenus have been removed; old font selections are ignored. On supported Windows 11 layouts the speaker glyph is hidden while battery and Quick Settings remain. Wi-Fi/Ethernet and offline icons use Windows' normal artwork; the former Element 2 replacement has been removed. Win+A still provides the volume slider. The show-hidden-icons chevron uses 60% opacity. An active acrylic mode hides the taskbar's top border.
 
@@ -86,7 +88,7 @@ Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CM
 
 Double-click `dist\x64\jellyflower-setup-x64.exe` to install. To build ARM64, install its C++ tools and run `Build.ps1 -Architecture ARM64`. Checked-in ICO files and native cursor geometry mean Python and SVG libraries are optional, only needed for regenerating artwork. The C++ runtime is linked statically; Windows supplies the remaining libraries.
 
-To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge.dll`, `jellyflower-start-v1.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second recovery timer complements system and shell events. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
+To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge.dll`, `jellyflower-start-v2.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second recovery timer complements system and shell events. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
 
 The GitHub workflow builds x64 and ARM64 and publishes tagged releases. `Publish.ps1` publishes the first local x64 build using the maintainer's normal GitHub CLI login. [UPDATES.md](docs/UPDATES.md) documents the release process.
 

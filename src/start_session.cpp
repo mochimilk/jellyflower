@@ -40,6 +40,26 @@ void Notify(DWORD target) {
     }
 }
 HRESULT Inject(DWORD pid) {
+    // v1 may remain pinned in Start after an in-app update. Give it time to
+    // restore its saved shell values before v2 observes and styles the tree.
+    Handle retired(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,(L"Local\\jellyflower.Start.v1."+std::to_wstring(pid)).c_str()));
+    if(retired) {
+        auto* previous=static_cast<StartState*>(MapViewOfFile(retired.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(StartState)));
+        if(previous) {
+            bool ready=false;
+            for(unsigned attempt=0;attempt<20;++attempt) {
+                if(!Read(previous->count)) {ready=true;break;}
+                HWND receiver=nullptr;
+                while((receiver=FindWindowExW(HWND_MESSAGE,receiver,L"jellyflower.StartNotify.v1",nullptr))) {
+                    DWORD owner=0;GetWindowThreadProcessId(receiver,&owner);
+                    if(owner==pid) PostMessageW(receiver,StartRefreshMessage,0,0);
+                }
+                Sleep(100);
+            }
+            UnmapViewOfFile(previous);
+            if(!ready) return HRESULT_FROM_WIN32(ERROR_BUSY);
+        }
+    }
     HRESULT result=E_FAIL;
     HMODULE xaml=LoadLibraryExW(L"Windows.UI.Xaml.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
     if(!xaml) return HRESULT_FROM_WIN32(GetLastError());
@@ -47,7 +67,7 @@ HRESULT Inject(DWORD pid) {
     const auto initialize=reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(GetProcAddress(xaml,"InitializeXamlDiagnosticsEx"));
     wchar_t file[32768]{};const DWORD length=GetModuleFileNameW(nullptr,file,32768);
     if(initialize && length && length<32768) {
-        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v1.dll";
+        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v2.dll";
         // Initialization runs on a fresh background thread. Probe existing
         // endpoint names until one accepts; never create/replace Start.
         for(unsigned index=1;index<=64;++index) {

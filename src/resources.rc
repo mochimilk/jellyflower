@@ -28,3 +28,8 @@ IDI_CALENDAR_OFF_LIGHT ICON "calendar-off-light.ico"
 IDI_CALENDAR_OFF_DARK ICON "calendar-off-dark.ico"
 IDI_SETTINGS_LIGHT ICON "settings-light.ico"
 IDI_SETTINGS_DARK ICON "settings-dark.ico"
+
+IDI_GITHUB_LIGHT ICON "github-light.ico"
+IDI_GITHUB_DARK ICON "github-dark.ico"
+IDI_EXTERNAL_LIGHT ICON "external-light.ico"
+IDI_EXTERNAL_DARK ICON "external-dark.ico"

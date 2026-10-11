@@ -1,6 +1,6 @@
 # jellyflower installer and updater checks
 
-Current release: 0.16.4. Step 24 records the retired Fluent Body experiment; use step 26 for current typography. Steps 21–23 describe retired font/network experiments; use 24–25 for current checks. Run these on the normal Windows desktop. The build environment's extract/JSON checks do not prove desktop registration or rendering.
+Current release: 0.16.6. Use steps 27–29 for general, GitHub, submenu clicks and Start material. Step 24 records the retired Fluent Body experiment; use step 26 for current typography. Steps 21–23 describe retired font/network experiments; use 24–25 for current checks. Run these on the normal Windows desktop. The build environment's extract/JSON checks do not prove desktop registration or rendering.
 
 1. Quit TranslucentTB and any other taskbar modifiers. Double-click jellyflower-setup-x64.exe on x64 Windows. Confirm installation succeeds without elevation, the flower appears under show hidden icons, and the Start menu shortcut launches the same instance.
 2. Confirm Windows Settings > Apps > Installed apps lists jellyflower with the correct version. Task Scheduler should have one enabled jellyflower-<your SID> logon task and Startup apps one jellyflower Run fallback; upgrading the earlier AcrylicTaskbar build should remove its duplicate Run registration.
@@ -88,3 +88,12 @@ The native fixtures validate the adapter on a shell-shaped XAML tree and actual 
 ## 28. Start menu acrylic (0.16.5)
 
 Follow START_MENU.md's acceptance checks for matching colors/stroke, native Start behavior, both themes, scaling, disabled transparency/high contrast, exit/controller-loss restoration, relaunch/update/uninstall, Start host recovery and battery policy. API success is not a visual blur guarantee. No Explorer/Start restart is required when updating from 0.16.4.
+
+
+## 29. GitHub row and Start material regression (0.16.6)
+
+1. Open general in both themes and at different scale factors. Check github, installed version, divider, red exit order. Only hovered/keyboard-focused github shows the supplied external-link indicator at the far right. Activate it and verify the default browser opens https://github.com/mochimilk/jellyflower once. No update check should start.
+2. Place a contrasting window or detailed wallpaper behind Start. In both themes verify visible translucency, blur and thin border. Compare against jellyflower's popup; no opaque overlay should remain. Keep native Start navigation/calendar/search behavior unchanged.
+3. Update from 0.16.5 while Start is open and while hidden. Verify v1 restores before v2 styles, without restarting Explorer or Start; Diagnose must report startAttached=1 and startSurfaces>0. Exit/force-end jellyflower and verify stock Start returns. If Start was suspended, reopen it to let its UI thread process restoration.
+4. Disable Windows transparency or enable a contrast theme: stock Start must return. Restore settings and verify styling resumes. Repeat after a Windows update, in battery saver and a remote session. Successful diagnostics alone do not prove GPU blur.
+5. Hover into general or cursor, then click its parent row. Only that submenu closes; moving within the same row must not reopen it. Move away and hover back: it reopens after the normal delay. A second click or keyboard Right/Enter can reopen without moving away. Test switching branches, outside click dismissal and the tray toggle as before.

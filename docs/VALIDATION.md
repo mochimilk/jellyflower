@@ -1,5 +1,17 @@
 # Validation results
 
+## jellyflower 0.16.6, 2026-10-11
+
+Native x64 Release app, versioned Start v2 helper, setup and relevant tests build with MSVC 19.44 / SDK 10.0.26100. General has github, installed version/update, a separator and red exit. The official GitHub Octicons mark and supplied external-link SVG have theme-aware multi-resolution ICOs. Typography, taskbar material, Explorer helper v13 and startup behavior are unchanged.
+
+MenuPresentation passes at 96/120/144/168/192 DPI in both themes. It checks the actual three-row submenu and divider, exact GitHub destination/one dispatch/menu dismissal, external indicator pixel differences only on hover or keyboard focus, all seven update states/accessibility labels/spinner frames, inherited Windows font metrics, alpha/ink alignment, contrast colors, and existing cursor/date actions. Production button-click messages collapse both general and cursor branches; repeated same-row hover and a queued hover timer cannot reopen them. Leaving/re-entering, another click and keyboard Right reopen correctly. Branch switching and nested exit pass; outside-click dismissal remains a desktop acceptance check. Theme captures including the hovered external arrow were inspected. Native popup red/blue compositor samples remain dark 0x20204d/0x621f1f and light 0xc9c9e9/0xe7c8c8.
+
+StartSurface now tests a real, visible DesktopWindowXamlSource with the production StartMaterial graph over controlled red/blue XAML backgrounds. The effect connects and rendered pixels respond in both themes: dark 0x1f1f54/0x541f1f; light 0xbcbcf1/0xf1bcbc (COLORREF order). Samples match one 184/255 tint within five levels per channel. The fixture explicitly enables per-monitor DPI awareness before measuring screen pixels; earlier failing measurements used virtualized coordinates. It also passes repeated theme/enable cycles, overlay collapse, shell updates/latest originals, unset values, bindings and destructor restoration.
+
+StartConnection ran against real StartMenuExperienceHost PID 19800, Windows build 26200: attached=1, two surfaces, HRESULT 0. Graceful shutdown and a deliberately abandoned controller both restore zero applied records. The v2 connection succeeded while the prior helper remained pinned; Start was not restarted. The existing 0.16.5 app was stopped briefly for this probe and relaunched afterward. No account installation, startup setting, cursor or system-theme setting was changed.
+
+UpdateLogic's version/origin/architecture/digest/cancellation checks and SetupRecovery's production snapshot rollback checks pass. Installer payload/extraction, portable/source archives and public updater verification are recorded with the release assets. The live Start screenshot check could not run because computer-use stopped on an unrelated browser URL-policy check. The controlled compositor test proves this material is translucent, but exact real Start/popup visual parity, all Windows layouts, ARM64, remote/HDR configurations and suspended Start timing still require desktop acceptance. See START_MENU.md and INSTALLATION_TESTS step 29.
+
 ## jellyflower 0.16.5, 2026-10-11
 
 Native x64 Release app, taskbar helper, separate Start helper, setup and relevant tests built successfully with MSVC 19.44 / SDK 10.0.26100. Menu font metrics, taskbar material and fast login path remain unchanged. General contains only the version/update and exit actions; its gear is the supplied Lucide settings artwork. Available updates read download. Exit uses theme-aware red with Windows contrast-color fallback.

@@ -58,3 +58,30 @@ THE SOFTWARE.
 ## Start-menu target research
 
 Start AcrylicBorder/AcrylicOverlay names, the overlay rule, and the diagnostics approach were reviewed in Ramen Software's [Windows 11 Start menu styling guide](https://github.com/ramensoftware/windows-11-start-menu-styling-guide) and [Windows 11 Start Menu Styler source](https://github.com/ramensoftware/windhawk-mods/blob/main/mods/windows-11-start-menu-styler.wh.cpp), authored by m417z and contributors (GPL-3.0), on 2026-10-11. Jellyflower's small independent adapter reuses its existing TAP pattern and does not bundle Windhawk's runtime, general styling engine or theme layouts. The effective-background workaround follows the documented source observation that AcrylicBorder's ReadLocalValue can return a different brush. See docs/START_MENU.md for implementation details and sources.
+
+
+## GitHub Octicons
+
+The GitHub mark SVG comes from https://github.com/primer/octicons/blob/main/icons/mark-github-16.svg. It identifies the external project repository link. GitHub is a trademark of GitHub, Inc. The icon is licensed as follows:
+
+MIT License
+
+Copyright (c) 2026 GitHub Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
