@@ -49,7 +49,7 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode mode) {
         RefreshAppBranding(owner, light);
         brandTheme_ = static_cast<int>(light);
     }
-    const int resource = light ? IDI_FLOWER_LIGHT : IDI_FLOWER_DARK;
+    const int resource = light ? IDI_TRAY_INVERTED_LIGHT : IDI_TRAY_INVERTED_DARK;
     const HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
     const UINT dpi = GetDpiForWindow(taskbar ? taskbar : owner);
     const int pixels = GetSystemMetricsForDpi(SM_CXSMICON, dpi ? dpi : 96);
@@ -83,7 +83,7 @@ void TrayIcon::CursorError(DWORD error, bool saveFailure) const {
     data.dwInfoFlags = NIIF_WARNING;
     wcscpy_s(data.szInfoTitle, saveFailure ? L"cursor preference could not be saved" : L"cursor could not be changed");
     swprintf_s(data.szInfo, error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
-        ? L"Keep Cursor Concept 3 HDPi in Downloads, or configure its new location. Windows error: %lu."
+        ? L"Choose cursor > unlock colors for ZIP download and import instructions. Windows error: %lu."
         : L"Windows denied the operation or could not load this cursor. Use your normal Windows desktop session. Windows error: %lu.", error);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }

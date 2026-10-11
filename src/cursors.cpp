@@ -36,7 +36,9 @@ DWORD LoadSet(const std::wstring& folder, bool stock, Loaded& set) {
     }
     return ERROR_SUCCESS;
 }
-std::wstring ReadFolder() {
+std::wstring ReadFolder(const std::wstring& importFolder) {
+    const auto imported = ActiveCursorFolder(importFolder);
+    if (!imported.empty()) return imported;
     DWORD bytes = 0;
     if (RegGetValueW(HKEY_CURRENT_USER, SettingsKey, L"CursorPack", RRF_RT_REG_SZ, nullptr, nullptr, &bytes) == ERROR_SUCCESS
         && bytes > sizeof(wchar_t) && bytes < 65536) {
@@ -44,11 +46,7 @@ std::wstring ReadFolder() {
         if (RegGetValueW(HKEY_CURRENT_USER, SettingsKey, L"CursorPack", RRF_RT_REG_SZ, nullptr, value.data(), &bytes) == ERROR_SUCCESS)
             return value.data();
     }
-    PWSTR downloads = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_Downloads, 0, nullptr, &downloads))) return {};
-    std::wstring folder = std::wstring(downloads) + L"\\cursor-concept-3-hdpi";
-    CoTaskMemFree(downloads);
-    return folder;
+    return {};
 }
 DWORD SaveMode(UINT mode) {
     HKEY key = nullptr;
@@ -77,14 +75,13 @@ HICON CursorManager::MenuIcon(int pixels) const {
     }
     return CreateCursorMenuIcon(path.c_str(), pixels);
 }
-CursorManager::CursorManager() : folder_(ReadFolder()) {
+CursorManager::CursorManager(std::wstring importFolder) : folder_(ReadFolder(importFolder)), importer_(std::move(importFolder)) {
+    available_ = !folder_.empty() && VerifyPack(folder_) == ERROR_SUCCESS;
     DWORD mode = CursorDefault, bytes = sizeof(mode);
     const LONG saved = RegGetValueW(HKEY_CURRENT_USER, SettingsKey, L"CursorMode", RRF_RT_REG_DWORD, nullptr, &mode, &bytes);
-    if (saved == ERROR_SUCCESS
-        && mode <= CursorDisabled) mode_ = mode;
-    else if (saved == ERROR_FILE_NOT_FOUND && GetFileAttributesW(folder_.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        // A fresh computer without the separately licensed pack keeps its
-        // configured Windows scheme and needs no startup error notification.
+    if (saved == ERROR_SUCCESS && mode <= CursorDisabled && (Available() & (1u << mode))) mode_ = mode;
+    else {
+        // Fresh installs keep Windows' configured cursor until a custom choice.
         mode_ = CursorDisabled;
         started_ = true;
     }
@@ -94,12 +91,7 @@ CursorManager::~CursorManager() {
     if (touched_) SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0);
 }
 DWORD CursorManager::VerifyPack(const std::wstring& folder) {
-    for (const auto& color : CursorColors) {
-        Loaded set;
-        const DWORD error = LoadSet(folder + L"\\cursor\\assets\\" + color.folder, false, set);
-        if (error) return error;
-    }
-    return ERROR_SUCCESS;
+    return VerifyCursorFolder(folder);
 }
 DWORD CursorManager::ConfigurePack(const wchar_t* folder) {
     if (!folder || !*folder) return ERROR_BAD_PATHNAME;
@@ -144,6 +136,15 @@ DWORD CursorManager::Apply(UINT mode, bool light) {
     return ERROR_SUCCESS;
 }
 void CursorManager::Refresh() {
+    CursorImportResult imported;
+    if (importer_.Poll(imported)) {
+        importNotice_ = true; importError_ = imported.error;
+        if (!imported.error) {
+            folder_ = std::move(imported.folder); available_ = true;
+            if (mode_ != CursorDisabled) started_ = false;
+        }
+    }
+    importer_.Scan();
     const bool light = SystemLightTheme();
     if (!started_ || (mode_ == CursorDefault && light != light_)) {
         saveFailed_ = false;
@@ -156,6 +157,7 @@ void CursorManager::Refresh() {
 }
 DWORD CursorManager::Select(UINT mode) {
     if (mode > CursorDisabled) return ERROR_INVALID_PARAMETER;
+    if (!(Available() & (1u << mode))) return ERROR_FILE_NOT_FOUND;
     saveFailed_ = false;
     error_ = Apply(mode, SystemLightTheme());
     if (error_) return error_;
@@ -164,5 +166,9 @@ DWORD CursorManager::Select(UINT mode) {
     error_ = SaveMode(mode);
     saveFailed_ = error_ != ERROR_SUCCESS;
     return error_;
+}
+bool CursorManager::TakeImportResult(DWORD& error) {
+    if (!importNotice_) return false;
+    importNotice_ = false; error = importError_; return true;
 }
 } // namespace acrylic

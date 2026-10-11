@@ -317,6 +317,14 @@ public:
         tray.Refresh(window, mode);
         const DWORD cursorBefore = cursors.Error();
         cursors.Refresh();
+        DWORD importError = 0;
+        if (cursors.TakeImportResult(importError)) {
+            Log(L"Cursor ZIP import error=" + std::to_wstring(importError));
+            if (importError) tray.UpdateNotice(L"cursor zip could not be imported",
+                L"Use the original, complete Cursor Concept 3 HDPi ZIP. Choose cursor > unlock colors for instructions. Your current cursor is unchanged.", true);
+            else tray.UpdateNotice(L"cursor colors unlocked", L"Your pack is ready. Open cursor to choose a color or follow Windows light/dark mode.");
+            RefreshCursorMenu(window);
+        }
         if (cursors.Error() != cursorBefore && cursors.Error()) {
             Log(L"Cursor error=" + std::to_wstring(cursors.Error()));
             tray.CursorError(cursors.Error(), cursors.SaveFailed());
@@ -387,7 +395,7 @@ public:
         const auto available = updates.Result();
         if (available.status == UpdateStatus::Available) {
             const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", available.download.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-            if (result <= 32) tray.UpdateNotice(L"download could not be opened", L"Open github.com/mochimilk/jellyflower/releases in your browser.", true);
+            if (result <= 32) { updates.DownloadFailed(static_cast<DWORD>(result)); Log(L"Update download could not be opened: " + std::to_wstring(result)); }
             return;
         }
         updates.Start();
@@ -399,12 +407,6 @@ public:
         KillTimer(window, UpdateTimer);
         RefreshUpdateMenu(window);
         Log(L"Update check status=" + std::to_wstring(static_cast<UINT>(result.status)) + L" error=" + std::to_wstring(result.error));
-        if (result.status == UpdateStatus::Available) {
-            const auto text = L"jellyflower " + result.version + L" is available. Choose check for updates again to download its installer.";
-            tray.UpdateNotice(L"update available", text.c_str());
-        } else if (result.status == UpdateStatus::Current) tray.UpdateNotice(L"you're up to date", (std::wstring(L"jellyflower ") + AppVersion + L" is the latest stable release.").c_str());
-        else if (result.status == UpdateStatus::NoRelease) tray.UpdateNotice(L"no release yet", L"No public stable release has been published. Try again later.");
-        else tray.UpdateNotice(L"could not check for updates", L"Check your connection and try again. GitHub may be temporarily unavailable or rate limited.", true);
     }
     UINT ChangeClock(UINT command) {
         DWORD error = ERROR_SUCCESS;
@@ -475,6 +477,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayMessage) {
         const UINT event = LOWORD(lParam);
         if (event == NIN_SELECT || event == NIN_KEYSELECT || event == WM_CONTEXTMENU) {
+            self->cursors.Refresh();
             const UINT selected = self->tray.Menu(self->mode, self->cursors.Mode());
             if (selected == TrayExitCommand) PostMessageW(window, WM_CLOSE, 0, 0);
         }
@@ -485,9 +488,16 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return self->clock.Packed();
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
+    } else if (message == TrayCursorQueryMessage) {
+        return wParam == 1 ? self->cursors.Mode() : self->cursors.Available();
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors.MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
+        if (wParam == TrayCursorUnlockCommand) {
+            const DWORD error = OpenCursorGuide();
+            if (error) self->tray.UpdateNotice(L"cursor guide could not be opened", L"The cursor files folder could not be created or opened. Check your account's folder permissions.", true);
+            return self->cursors.Mode();
+        }
         if (wParam == TrayUpdateCommand) {
             self->UpdateAction();
             return static_cast<UINT>(self->updates.Status());
@@ -563,6 +573,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         } else if (argc == 2 && wcscmp(argv[1], L"--stop") == 0) commandResult = Stop();
         else if (argc == 3 && wcscmp(argv[1], L"--cursor-pack") == 0) commandResult = CursorManager::ConfigurePack(argv[2]);
         else if (argc == 3 && wcscmp(argv[1], L"--verify-cursors") == 0) commandResult = CursorManager::VerifyPack(argv[2]);
+        else if (argc == 3 && wcscmp(argv[1], L"--import-cursors") == 0) {
+            std::wstring installed;
+            commandResult = ImportCursorArchive(argv[2], CursorDataFolder(), installed);
+        }
         else if (argc == 2 && wcscmp(argv[1], L"--restore-cursors") == 0)
             commandResult = SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0) ? ERROR_SUCCESS : GetLastError();
         else if (argc == 3 && wcscmp(argv[1], L"--diagnose") == 0) commandResult = Diagnose(argv[2]);

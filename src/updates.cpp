@@ -142,6 +142,10 @@ bool UpdateChecker::Poll(UpdateResult& result) {
     if (!state_->pending) return false;
     result = state_->result; state_->pending = false; return true;
 }
+void UpdateChecker::DownloadFailed(DWORD error) {
+    std::lock_guard<std::mutex> lock(state_->lock);
+    state_->result = Error(error);
+}
 UpdateResult UpdateChecker::Result() const { std::lock_guard<std::mutex> lock(state_->lock); return state_->result; }
 UpdateStatus UpdateChecker::Status() const { return Result().status; }
 }

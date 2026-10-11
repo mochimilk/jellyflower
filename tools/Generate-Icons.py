@@ -42,6 +42,9 @@ def shapes(svg):
         kind = element.tag.rsplit('}', 1)[-1]
         if kind == 'path':
             paths = list(polylines(element.attrib['d']))
+        elif kind == 'polyline':
+            numbers = [float(value) for value in element.attrib['points'].replace(',', ' ').split()]
+            paths = [list(zip(numbers[::2], numbers[1::2]))]
         elif kind == 'circle':
             cx, cy, radius = (float(element.attrib[key]) for key in ('cx', 'cy', 'r'))
             paths = [[(cx + radius * cos(tau * i / 256), cy + radius * sin(tau * i / 256)) for i in range(257)]]
@@ -90,7 +93,7 @@ def render(elements, size, color):
     return image.resize((size, size), sampling)
 
 
-def app_icon(svg, size, light):
+def inverted_tray_icon(svg, size, light):
     """Render the supplied 28x28 icon's luminance mask and outside stroke.
 
     Its mask is white minus a compound black flower, not an alpha-only mask.
@@ -126,8 +129,26 @@ def app_icon(svg, size, light):
     return image.resize((size,size), Image.Resampling.BOX)
 
 
+def app_icon(svg, size, light):
+    """Keep the supplied rounded tile, filled flower, and compound-path hole."""
+    root = svg.getroot()
+    scale = size * 8 / float(root.attrib['viewBox'].split()[2])
+    canvas = (size * 8, size * 8)
+    paper, ink = ((0,0,0,255),(255,255,255,255)) if light else ((255,255,255,255),(0,0,0,255))
+    image = Image.new('RGBA', canvas)
+    radius = float(root.find('{*}rect').attrib['rx'])
+    ImageDraw.Draw(image).rounded_rectangle((0,0,canvas[0]-1,canvas[1]-1), radius=radius*scale, fill=paper)
+    mask = Image.new('L', canvas)
+    for contour in polylines(root.find('{*}path').attrib['d']):
+        part = Image.new('L', canvas)
+        ImageDraw.Draw(part).polygon([(x*scale,y*scale) for x,y in contour], fill=255)
+        mask = ImageChops.difference(mask, part)
+    image.paste(ink, (0,0,*canvas), mask)
+    return image.resize((size,size), Image.Resampling.BOX)
+
+
 if __name__ == '__main__':
-    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'clock', 'flower', 'update'):
+    for name in ('acrylic-system', 'acrylic-pure', 'acrylic-off', 'sun', 'moon', 'clock', 'flower', 'update', 'package', 'package-open'):
         svg = ET.parse(assets / f'{name}.svg')
         elements = list(shapes(svg))
         if name == 'flower':
@@ -147,3 +168,9 @@ if __name__ == '__main__':
         destination = assets / f'app-{theme}.ico'
         frames[-1].save(destination, sizes=[(size,size) for size in app_sizes], append_images=frames[:-1])
         print(f'Generated {destination.name}: {len(app_sizes)} sizes')
+    svg = ET.parse(assets / 'tray-inverted.svg')
+    for theme in ('dark','light'):
+        frames = [inverted_tray_icon(svg, size, theme == 'light') for size in sizes]
+        destination = assets / f'tray-inverted-{theme}.ico'
+        frames[-1].save(destination, sizes=[(size,size) for size in sizes], append_images=frames[:-1])
+        print(f'Generated {destination.name}: {len(sizes)} sizes')

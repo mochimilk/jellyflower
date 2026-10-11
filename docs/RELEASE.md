@@ -1,15 +1,11 @@
-jellyflower is a small native Windows taskbar utility.
+jellyflower 0.14.0
 
-- Acrylic with system, pure, and off modes.
-- A flower tray icon and lowercase menus that follow Windows light/dark mode.
-- Cursor colors and a single-line clock with date and font choices.
-- A normal per-user Windows installer, login startup, and an uninstall entry.
-- “check for updates” compares this version with the latest public GitHub release.
+- Fresh installs keep the Windows cursor. Custom cursor choices are grey until you import your own complete Cursor Concept 3 HDPi ZIP.
+- Cursor > unlock colors opens a text guide with the creator's download link and the exact import folder. Drop in the original ZIP; no extraction or installer scripts needed. Import unlocks the choices without changing your selected cursor.
+- Failed imports preserve the active pack and cursor. Imported files stay on your computer and survive app updates.
+- The tray button uses the older inverted flower. The app and Start shortcut use the newly supplied rounded flower icon with inverse light/dark variants.
+- Check for updates uses a closed package, a spinning refresh icon while checking, and an open package when an update is available. Update results appear only in the menu; no system notifications.
 
-Download **jellyflower-setup-x64.exe**, then double-click it. You do not need Visual Studio, PowerShell, or administrator rights. Quit TranslucentTB first. Use Windows Settings > Apps > Installed apps to uninstall jellyflower.
+Download **jellyflower-setup-x64.exe** and double-click it. No compiler, PowerShell, or administrator rights required. Quit TranslucentTB first. Existing preferences are retained. The separately licensed cursor pack and optional Playground/Pangaia fonts are not included.
 
-The first download is x64. The build workflow supports native ARM64 releases too. The cursor pack and optional Playground/Pangaia fonts are licensed separately and are not included. On another computer, these options require your own local files; Windows cursors and Segoe remain available.
-
-Windows can use a solid acrylic fallback during battery saver even while jellyflower stays running. The Explorer helper uses internal Windows taskbar structure, so shell updates can affect compatibility. If upgrading the helper's behavior, sign out or restart Explorer to unload the previous helper.
-
-The installer is currently unsigned. The source for this release is included and licensed GPL-3.0-or-later.
+The Windows 11 taskbar helper is unchanged in this release. Windows can still use a solid acrylic fallback under battery saver while jellyflower remains running. The installer is unsigned. Corresponding GPL-3.0-or-later source is included.

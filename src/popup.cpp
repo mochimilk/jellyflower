@@ -12,6 +12,8 @@
 #include <cmath>
 #include <memory>
 #include <vector>
+#include <objidl.h>
+#include <gdiplus.h>
 
 namespace acrylic {
 namespace {
@@ -23,12 +25,47 @@ constexpr int MenuIconSize = 20, MenuIconInset = 8;
 constexpr int MenuGlyphSize = 16;
 constexpr UINT_PTR HoverTimer = 1;
 constexpr UINT_PTR ChildCloseTimer = 2, TrayDeactivateTimer = 3;
+constexpr UINT_PTR UpdateSpinnerTimer = 4;
 // Documented Windows 11 DWM values; compatible with Windows 10 SDK headers.
 constexpr auto CornerPreference = static_cast<DWMWINDOWATTRIBUTE>(33);
 constexpr auto ImmersiveDarkMode = static_cast<DWMWINDOWATTRIBUTE>(20);
 constexpr auto BorderColor = static_cast<DWMWINDOWATTRIBUTE>(34);
 constexpr DWORD RoundCorners = 2;
-struct Row { UINT command; std::wstring label; bool divider = false, checked = false; std::wstring secondary; };
+struct Row { UINT command; std::wstring label; bool divider = false, checked = false; std::wstring secondary; bool enabled = true; };
+std::vector<Row> CursorRows(UINT mask, UINT selected) {
+    std::vector<Row> rows{{CursorCommandBase, L"default (system)", false, selected == CursorDefault, L"", (mask & 1) != 0}};
+    for (size_t i = 0; i < CursorColors.size(); ++i)
+        rows.push_back({CursorCommandBase + static_cast<UINT>(i) + 1, CursorColors[i].label, i == 0, selected == i + 1, L"", (mask & (1u << (i + 1))) != 0});
+    rows.push_back({CursorCommandBase + CursorDisabled, L"disable", true, selected == CursorDisabled});
+    rows.push_back({TrayCursorUnlockCommand, L"unlock colors", true});
+    return rows;
+}
+std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
+    // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
+    // Copy the icon's premultiplied 32-bit surface explicitly instead.
+    ICONINFO source{};
+    if (!GetIconInfo(icon, &source)) return {};
+    BITMAP size{};
+    const bool valid = source.hbmColor && GetObjectW(source.hbmColor, sizeof(size), &size)
+        && size.bmWidth > 0 && size.bmHeight > 0 && size.bmBitsPixel == 32;
+    BITMAPINFO info{};
+    info.bmiHeader = {sizeof(BITMAPINFOHEADER), size.bmWidth, -size.bmHeight, 1, 32};
+    std::vector<BYTE> pixels(valid ? static_cast<size_t>(size.bmWidth) * size.bmHeight * 4 : 0);
+    const HDC dc = GetDC(nullptr);
+    const bool copied = valid && dc && GetDIBits(dc, source.hbmColor, 0, size.bmHeight, pixels.data(), &info, DIB_RGB_COLORS);
+    if (dc) ReleaseDC(nullptr, dc);
+    if (source.hbmColor) DeleteObject(source.hbmColor);
+    if (source.hbmMask) DeleteObject(source.hbmMask);
+    if (!copied) return {};
+    auto result = std::make_unique<Gdiplus::Bitmap>(size.bmWidth, size.bmHeight, PixelFormat32bppPARGB);
+    const Gdiplus::Rect bounds(0, 0, size.bmWidth, size.bmHeight);
+    Gdiplus::BitmapData target{};
+    if (result->LockBits(&bounds, Gdiplus::ImageLockModeWrite, PixelFormat32bppPARGB, &target) != Gdiplus::Ok) return {};
+    for (int y = 0; y < size.bmHeight; ++y)
+        memcpy(static_cast<BYTE*>(target.Scan0) + y * target.Stride, pixels.data() + static_cast<size_t>(y) * size.bmWidth * 4, static_cast<size_t>(size.bmWidth) * 4);
+    result->UnlockBits(&target);
+    return result;
+}
 bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayClockCommand || command == TrayFontCommand; }
 struct Popup;
 Popup* activePopup = nullptr;
@@ -128,6 +165,11 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     std::unique_ptr<FontPreview> fontPreviews[2];
     HICON acrylicIcons[3]{}, cursorIcon = nullptr, themeIcon = nullptr, clockIcon = nullptr, updateIcon = nullptr;
+    HICON packageIcon = nullptr, packageOpenIcon = nullptr;
+    ULONG_PTR graphicsToken = 0;
+    std::unique_ptr<Gdiplus::Bitmap> spinnerBitmap;
+    UpdateStatus updateStatus = UpdateStatus::Idle;
+    ULONGLONG updateStarted = 0;
     HBRUSH background = nullptr, highlight = nullptr, separator = nullptr;
     COLORREF text = 0, highlightedText = 0, border = 0;
     UINT dpi = 96, result = 0, cursorMode = 0, hoverDelay = 400;
@@ -137,6 +179,10 @@ struct Popup {
     bool clockDate = true;
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
+    Popup() {
+        Gdiplus::GdiplusStartupInput input;
+        if (Gdiplus::GdiplusStartup(&graphicsToken, &input, nullptr) != Gdiplus::Ok) graphicsToken = 0;
+    }
     ~Popup() {
         if (mouseHook) UnhookWindowsHookEx(mouseHook);
         child.reset();
@@ -147,9 +193,13 @@ struct Popup {
         if (themeIcon) DestroyIcon(themeIcon);
         if (clockIcon) DestroyIcon(clockIcon);
         if (updateIcon) DestroyIcon(updateIcon);
+        if (packageIcon) DestroyIcon(packageIcon);
+        if (packageOpenIcon) DestroyIcon(packageOpenIcon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
         if (separator) DeleteObject(separator);
+        spinnerBitmap.reset();
+        if (graphicsToken) Gdiplus::GdiplusShutdown(graphicsToken);
     }
     int Px(int dip) const { return MulDiv(dip, static_cast<int>(dpi), 96); }
     Popup* Root() { return parent ? parent->Root() : this; }
@@ -210,11 +260,33 @@ struct Popup {
     }
     void RefreshUpdate() {
         const auto state = static_cast<UpdateStatus>(SendMessageW(controller, TrayUpdateQueryMessage, 0, 0));
+        if (state == UpdateStatus::Checking && updateStatus != state) updateStarted = GetTickCount64();
+        updateStatus = state;
+        if (window) {
+            if (state == UpdateStatus::Checking) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
+            else KillTimer(window, UpdateSpinnerTimer);
+        }
         for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayUpdateCommand) {
             rows[i].secondary = UpdateStatusLabel(state);
             if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
         }
         RepaintButtons();
+    }
+    void RefreshCursors() {
+        auto* root = Root();
+        root->cursorMode = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 1, 0));
+        const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            auto& row = rows[i];
+            if (row.command < CursorCommandBase || row.command > CursorCommandBase + CursorDisabled) continue;
+            const auto cursorChoice = row.command - CursorCommandBase;
+            row.enabled = (mask & (1u << cursorChoice)) != 0;
+            row.checked = cursorChoice == root->cursorMode;
+            if (i < buttons.size()) EnableWindow(buttons[i], row.enabled);
+        }
+        if (!parent) RefreshCursorIcon();
+        RepaintButtons();
+        if (child) child->RefreshCursors();
     }
     bool UpdateTheme(bool systemMode) {
         systemLight = systemMode;
@@ -247,13 +319,16 @@ struct Popup {
                 darkInk ? IDI_ACRYLIC_PURE_LIGHT : IDI_ACRYLIC_PURE_DARK,
                 systemLight ? (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK) : (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK),
                 darkInk ? IDI_CLOCK_LIGHT : IDI_CLOCK_DARK,
-                darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK};
-            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &clockIcon, &updateIcon};
-            for (size_t i = 0; i < 6; ++i) {
+                darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
+                darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
+                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK};
+            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &clockIcon, &updateIcon, &packageIcon, &packageOpenIcon};
+            for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
                 if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
             }
+            if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
             RefreshCursorIcon();
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayThemeCommand) {
                 rows[i].label = systemLight ? L"dark mode" : L"light mode";
@@ -270,7 +345,11 @@ struct Popup {
         if (child) child->UpdateTheme(systemMode);
         return true;
     }
-    void Focus(int index) {
+    void Focus(int index, int direction = 1) {
+        if (buttons.empty()) return;
+        const auto count = static_cast<int>(buttons.size());
+        for (int tried = 0; tried < count && !rows[static_cast<size_t>(index)].enabled; ++tried)
+            index = (index + direction + count) % count;
         for (auto* level = this; level; level = level->parent) KillTimer(level->window, ChildCloseTimer);
         if (child && index != childIndex) child->HideBranch();
         keyboard = true;
@@ -303,10 +382,8 @@ struct Popup {
             child->hoverDelay = hoverDelay;
             auto* root = Root();
             if (command == TrayCursorCommand) {
-                child->rows.push_back({CursorCommandBase, L"default (system)", false, root->cursorMode == CursorDefault});
-                for (size_t i = 0; i < CursorColors.size(); ++i)
-                    child->rows.push_back({CursorCommandBase + static_cast<UINT>(i) + 1, CursorColors[i].label, i == 0, root->cursorMode == i + 1});
-                child->rows.push_back({CursorCommandBase + CursorDisabled, L"disable", true, root->cursorMode == CursorDisabled});
+                const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
+                child->rows = CursorRows(mask, root->cursorMode);
             } else if (command == TrayClockCommand) {
                 child->rows = {{TrayDateCommand, L"date", false, false, root->clockDate ? L"on" : L"off"}, {TrayFontCommand, L"font"}};
             } else {
@@ -326,11 +403,12 @@ struct Popup {
         SetForegroundWindow(child->window);
         const UINT selected = command == TrayCursorCommand ? std::min(Root()->cursorMode, CursorDisabled)
             : command == TrayFontCommand ? std::min(Root()->clockFont, 2u) : 0;
-        SetFocus(child->buttons[selected]);
+        child->Focus(static_cast<int>(selected));
         child->keyboard = fromKeyboard;
         child->RepaintButtons();
     }
     void Hover(int index) {
+        if (index >= 0 && !rows[static_cast<size_t>(index)].enabled) index = -1;
         for (auto* level = parent; level; level = level->parent) {
             if (index >= 0) KillTimer(level->window, ChildCloseTimer);
             else if (level->child && IsWindowVisible(level->child->window))
@@ -356,6 +434,7 @@ struct Popup {
         return childIndex >= 0 && GetWindowRect(buttons[static_cast<size_t>(childIndex)], &bounds) && PtInRect(&bounds, point);
     }
     void Activate(int index, bool fromKeyboard) {
+        if (index < 0 || index >= static_cast<int>(rows.size()) || !rows[static_cast<size_t>(index)].enabled) return;
         const UINT command = rows[static_cast<size_t>(index)].command;
         if (HasSubmenu(command)) OpenChild(index, fromKeyboard);
         else if (command == TrayExitCommand) Finish(command);
@@ -395,11 +474,11 @@ struct Popup {
         case VK_RIGHT:
             if (HasSubmenu(rows[static_cast<size_t>(current)].command)) OpenChild(current, true);
             return true;
-        case VK_UP: Focus((current + count - 1) % count); return true;
+        case VK_UP: Focus((current + count - 1) % count, -1); return true;
         case VK_DOWN: Focus((current + 1) % count); return true;
-        case VK_TAB: Focus((current + ((GetKeyState(VK_SHIFT) & 0x8000) ? count - 1 : 1)) % count); return true;
+        case VK_TAB: { const int step = (GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1; Focus((current + count + step) % count, step); return true; }
         case VK_HOME: Focus(0); return true;
-        case VK_END: Focus(count - 1); return true;
+        case VK_END: Focus(count - 1, -1); return true;
         case VK_RETURN: case VK_SPACE: Activate(current, true); return true;
         }
         return false;
@@ -411,7 +490,7 @@ struct Popup {
         const auto& row = rows[static_cast<size_t>(index)];
         FillRect(item.hDC, &item.rcItem, background);
         const bool focused = keyboard && (item.itemState & ODS_FOCUS);
-        const bool highlighted = hovered == index || focused || (item.itemState & ODS_SELECTED);
+        const bool highlighted = row.enabled && (hovered == index || focused || (item.itemState & ODS_SELECTED));
         if (highlighted) {
             const auto oldBrush = SelectObject(item.hDC, highlight);
             const auto oldPen = SelectObject(item.hDC, GetStockObject(NULL_PEN));
@@ -420,7 +499,7 @@ struct Popup {
             SelectObject(item.hDC, oldBrush);
         }
         const auto oldFont = SelectObject(item.hDC, font);
-        const COLORREF ink = highlighted ? highlightedText : text;
+        const COLORREF ink = !row.enabled ? GetSysColor(COLOR_GRAYTEXT) : highlighted ? highlightedText : text;
         SetBkMode(item.hDC, TRANSPARENT);
         SetTextColor(item.hDC, ink);
         RECT bounds = item.rcItem;
@@ -449,7 +528,8 @@ struct Popup {
         const int cy = LabelCenter(item.hDC, row.label, bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayThemeCommand ? themeIcon
-            : row.command == TrayClockCommand ? clockIcon : row.command == TrayUpdateCommand ? updateIcon : nullptr;
+            : row.command == TrayClockCommand ? clockIcon : row.command == TrayUpdateCommand
+                ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : updateStatus == UpdateStatus::Checking ? updateIcon : packageIcon) : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
@@ -457,7 +537,14 @@ struct Popup {
         const int iconCenter = row.command == TrayCursorCommand ? (item.rcItem.top + item.rcItem.bottom) / 2 + Px(1) : cy;
         const int iconTop = iconCenter - iconSize / 2;
         const int iconLeft = item.rcItem.left + Px(MenuIconInset) + (Px(MenuIconSize) - iconSize) / 2;
-        if (icon) DrawIconEx(item.hDC, iconLeft, iconTop, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
+        if (row.command == TrayUpdateCommand && updateStatus == UpdateStatus::Checking && spinnerBitmap && spinnerBitmap->GetLastStatus() == Gdiplus::Ok) {
+            Gdiplus::Graphics graphics(item.hDC);
+            graphics.SetInterpolationMode(Gdiplus::InterpolationModeHighQualityBicubic);
+            graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHighQuality);
+            graphics.TranslateTransform(static_cast<Gdiplus::REAL>(iconLeft) + iconSize / 2.0f, static_cast<Gdiplus::REAL>(iconTop) + iconSize / 2.0f);
+            graphics.RotateTransform(static_cast<Gdiplus::REAL>((GetTickCount64() - updateStarted) % 1000) * .36f);
+            graphics.DrawImage(spinnerBitmap.get(), -iconSize / 2.0f, -iconSize / 2.0f, static_cast<Gdiplus::REAL>(iconSize), static_cast<Gdiplus::REAL>(iconSize));
+        } else if (icon) DrawIconEx(item.hDC, iconLeft, iconTop, icon, iconSize, iconSize, 0, nullptr, DI_NORMAL);
         if (row.checked) {
             POINT mark[]{{Px(12), cy}, {Px(16), cy + Px(4)}, {Px(23), cy - Px(4)}};
             Polyline(item.hDC, mark, 3);
@@ -540,10 +627,12 @@ struct Popup {
                 GetModuleHandleW(nullptr), nullptr);
             if (!button) return false;
             buttons.push_back(button);
+            EnableWindow(button, rows[i].enabled);
             SendMessageW(button, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
             if (!SetWindowSubclass(button, ButtonProc, i, reinterpret_cast<DWORD_PTR>(this))) return false;
             top += rowHeight;
         }
+        if (!parent && updateStatus == UpdateStatus::Checking) SetTimer(window, UpdateSpinnerTimer, 40, nullptr);
         return true;
     }
 };
@@ -608,7 +697,10 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     }
     case WM_MOUSELEAVE: popup->Hover(-1); return 0;
     case WM_TIMER:
-        if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0) popup->OpenChild(popup->hovered, false); }
+        if (wParam == UpdateSpinnerTimer) {
+            for (size_t i = 0; i < popup->rows.size(); ++i) if (popup->rows[i].command == TrayUpdateCommand)
+                InvalidateRect(popup->buttons[i], nullptr, FALSE);
+        } else if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0) popup->OpenChild(popup->hovered, false); }
         else if (wParam == ChildCloseTimer) {
             KillTimer(window, ChildCloseTimer);
             if (!popup->PointerInChildMenu()) popup->CloseChild(false);
@@ -652,6 +744,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
 
 void RefreshUpdateMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshUpdate();
+}
+void RefreshCursorMenu(HWND owner) {
+    if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshCursors();
 }
 UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode, const RECT& trayBounds) {
     if (activePopup) { activePopup->Finish(); return 0; }

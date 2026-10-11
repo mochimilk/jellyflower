@@ -24,8 +24,35 @@ The chevron glyph hierarchy was reviewed in the same guide's [Plasma theme](http
 
 The acrylic menu icons use the user's supplied panel SVGs: `panel-bottom` for pure, a half-filled lower panel for system, and a crossed-out panel for off. These are Lucide shapes or supplied derivatives. The Windows mode row uses Lucide `sun` and `moon`; the clock row uses Lucide `clock`. The generator retains the supplied system icon's 50% fill opacity and creates monochrome light/dark Windows icons at multiple sizes. Lucide Icons and Contributors license their icons under the ISC License. The full notice is included in `assets/LICENSE-LUCIDE.txt` in source and `LICENSE-LUCIDE.txt` in the distribution. See <https://lucide.dev/license>. The cursor menu geometry is the SVG supplied directly by the user, stored in assets/cursor-menu.svg and represented as the same native cubic path. Runtime body/border colors are read from the user's external cursor files; no cursor-pack image or outline trace is embedded.
 
-Cursor Concept 3 HDPi is an external cursor pack by **JepriCreations**, [website](https://jepricreations.com), [DeviantArt](https://www.deviantart.com/jepricreations). Its supplied Agreement.txt permits personal use and modification but prohibits distributing the pack files. This project references the user's existing local installation; it does not include, relicense, modify, copy, or redistribute those files in its source or binary packages. The cursor names identify the original pack's variants. The supplied install.inf files informed the mapping of file names to the 17 Windows cursor roles; they are not executed or bundled.
+Cursor Concept 3 HDPi is an external cursor pack by **JepriCreations**, [website](https://jepricreations.com), [DeviantArt](https://www.deviantart.com/jepricreations). Its supplied Agreement.txt permits personal use and modification but prohibits distributing the pack files. This project imports the user's own complete ZIP into their private jellyflower data folder, or references an explicitly configured local pack. It does not include, relicense, modify, or redistribute cursor files in its source or binary packages. The cursor names identify the original pack's variants. The supplied install.inf files informed the mapping of file names to the 17 Windows cursor roles; they are not executed or bundled.
 
 PP Playground Light and PP Pangaia Ultralight are external font files supplied by the user from Pangram Pangram's free-for-personal-use packs. They retain their original licenses and are not bundled or relicensed in this project's source or binary packages. The utility reads the user's existing OTF files through a private Windows DirectWrite collection. It does not register them globally or copy them into Windows' Fonts directory. The menu label `pangia` follows the user's requested wording and selects the supplied Pangaia file.
 
-The notification-area and application icons are the jellyflower SVG artwork supplied directly by the user. Their original paths are retained in assets/flower.svg and assets/app.svg, with light/dark icon variants generated at multiple sizes. The previous Y2K Element 48 artwork is no longer included. The update row uses Lucide's refresh-cw icon under the included ISC notice.
+The notification-area and application icons are the jellyflower SVG artwork supplied directly by the user. Their original paths are retained in assets/tray-inverted.svg and assets/app.svg, with light/dark icon variants generated at multiple sizes. The previous Y2K Element 48 artwork is no longer included. The update row uses Lucide's package, package-open, and refresh-cw icons under the included ISC notice.
+
+## miniz
+
+The ZIP reader/inflate sources are miniz 3.1.2 from https://github.com/richgel999/miniz/tree/3.1.2, statically linked with writing/deflate and zlib compatibility APIs disabled. `miniz_export.h` is a local static-link definition. Upstream sources retain their MIT license:
+
+Copyright 2013-2014 RAD Game Tools and Valve Software
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
+
+All Rights Reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

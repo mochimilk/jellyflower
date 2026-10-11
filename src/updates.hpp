@@ -19,6 +19,7 @@ class UpdateChecker {
 public:
     UpdateChecker();
     void Start();
+    void DownloadFailed(DWORD error);
     bool Poll(UpdateResult& result);
     UpdateStatus Status() const;
     UpdateResult Result() const;

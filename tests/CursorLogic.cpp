@@ -78,7 +78,15 @@ int wmain(int argc, wchar_t** argv) {
     if (argc != 2) return 87;
     pack = argv[1];
     {
-        acrylic::CursorManager manager;
+        noSavedMode = true;
+        const int before = calls, beforeRestore = restores;
+        acrylic::CursorManager fresh(L""); fresh.Refresh();
+        Check(fresh.Mode() == acrylic::CursorDisabled && fresh.Available() == (1u << 11) - 1
+            && calls == before && restores == beforeRestore, "fresh install with an available pack still preserves Windows cursor");
+        noSavedMode = false;
+    }
+    {
+        acrylic::CursorManager manager(L"");
         manager.Refresh();
         Check(manager.Applied() && arrow == FilePixels(pack + L"\\cursor\\assets\\dark\\arrow.cur"), "default resolves dark");
         testLight = true; manager.Refresh();
@@ -96,7 +104,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     Check(restores > 0, "exit reloads Windows scheme");
     {
-        acrylic::CursorManager manager;
+        acrylic::CursorManager manager(L"");
         Check(manager.Mode() == acrylic::CursorDisabled, "saved selection read on next launch");
         manager.Refresh();
         const int beforeReset = restores;
@@ -112,16 +120,17 @@ int wmain(int argc, wchar_t** argv) {
     {
         noSavedMode = true;
         const int before = calls, beforeRestore = restores;
-        acrylic::CursorManager fresh;
+        acrylic::CursorManager fresh(L"");
         fresh.Refresh();
         Check(fresh.Mode() == acrylic::CursorDisabled && !fresh.Applied() && fresh.Error() == ERROR_SUCCESS
             && calls == before && restores == beforeRestore, "fresh computer without optional pack preserves configured Windows cursors quietly");
         noSavedMode = false;
     }
     {
-        acrylic::CursorManager manager;
+        acrylic::CursorManager manager(L"");
         const int before = calls;
         Check(manager.Select(3) != 0 && calls == before, "missing variant makes no partial system changes");
+        Check(manager.Available() == (1u << acrylic::CursorDisabled), "missing pack locks every custom mode but leaves disable available");
     }
     printf("%s: real file/bitmap loading; simulated system writes for theme, nine colors, stock disable, preferences, cleanup, and failure rollback.\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;

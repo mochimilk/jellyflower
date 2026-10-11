@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <string>
 #include <array>
+#include "cursor_pack.hpp"
 
 namespace acrylic {
 inline constexpr UINT CursorDefault = 0, CursorDisabled = 10;
@@ -15,7 +16,7 @@ inline constexpr std::array<CursorColor, 9> CursorColors{{
 class CursorManager {
 public:
     HICON MenuIcon(int pixels) const;
-    CursorManager();
+    explicit CursorManager(std::wstring importFolder = CursorDataFolder());
     ~CursorManager();
     void Refresh();
     DWORD Select(UINT mode);
@@ -23,14 +24,19 @@ public:
     DWORD Error() const { return error_; }
     bool Applied() const { return applied_; }
     bool SaveFailed() const { return saveFailed_; }
+    UINT Available() const { return (available_ ? (1u << CursorDisabled) - 1 : 0) | (1u << CursorDisabled); }
+    bool TakeImportResult(DWORD& error);
     static DWORD ConfigurePack(const wchar_t* folder);
     static DWORD VerifyPack(const std::wstring& folder);
     static const wchar_t* Name(UINT mode);
 private:
     DWORD Apply(UINT mode, bool light);
     std::wstring folder_;
+    CursorPackImporter importer_;
     UINT mode_ = CursorDefault;
     DWORD error_ = 0;
     bool applied_ = false, touched_ = false, started_ = false, light_ = false, saveFailed_ = false;
+    bool available_ = false, importNotice_ = false;
+    DWORD importError_ = 0;
 };
 } // namespace acrylic

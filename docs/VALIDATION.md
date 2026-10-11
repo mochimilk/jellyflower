@@ -1,5 +1,19 @@
 # Validation results
 
+## jellyflower 0.14.0, 2026-10-10
+
+The x64 Release build with MSVC 19.44 / SDK 26100 passed without warnings. The native installer is approximately 1.35 MB. Both EXEs have version 0.14.0.0, normal-user execution, and PerMonitorV2 manifests. Its non-installing extract path passed exact byte comparisons for the controller, helper, README, licenses/notices, and new app icon files. No cursor/font files are bundled.
+
+The original full Cursor Concept 3 HDPi ZIP imported into a Unicode workspace path. All 153 extracted cursor files matched their original bytes; no CMD, INF, or other archive files were extracted. The free ZIP, missing roles, traversal/absolute names, duplicate roles, symlinks, oversized archives/cursors, malformed ZIPs, corrupt CRCs, and invalid cursor payloads were rejected while preserving the prior active manifest and pack. Tests caught and fixed a failed-import cleanup issue in path canonicalization; cleanup now verifies the generated direct-child path lexically, rejects reparse points, and removes only fixed cursor filenames/directories. The actual drop-folder worker imported a ZIP and skipped the unchanged archive before and after restart.
+
+CursorLogic passed real cursor/bitmap loading with simulated desktop writes: fresh installs preserve the configured Windows cursor even when a pack is available, missing packs lock every custom choice, all nine colors and 17 roles apply correctly, system mode follows theme changes, disable selects stock cursors, and failures/exit restore the saved scheme. These tests do not alter the user's desktop cursor.
+
+Native production menu client rendering passed at 96/144/192 DPI in both themes. Tests confirmed regular fonts, locked native buttons, blocked disabled actions, keyboard skipping, live unlocking without closing the submenu or changing selection, update status/accessibility labels, and text fit. Six before/after checking-frame pairs differed only in the icon region. Visual inspection caught a GDI+ FromHICON alpha problem; copying the premultiplied icon surface explicitly fixed it, and transparent-corner checks passed. Final captures show the correct refresh, closed-package, and open-package icons. All new app/tray/update icon sizes have identical light/dark alpha geometry and inverse colors.
+
+UpdateLogic passed numeric ordering, stable release/architecture/origin checks, and malformed/oversized response cases. The real WinHTTP request returned the current public release v0.13.0 before this release was published. Update result notifications were removed from the controller; browser-open errors return the menu's try-again state. The Explorer helper code and shared-state version are unchanged.
+
+Normal-desktop setup/upgrade/uninstall registration, opening the TXT/Explorer guide, real shell interaction, and visible cursor/taskbar changes still need the installation checklist. The current command session cannot use the normal PowerShell GitHub credential store, so publication uses the existing Publish-Jellyflower.ps1 wrapper in the maintainer's signed-in PowerShell. ARM64 is checked by GitHub Actions; no local ARM64 build is claimed.
+
 ## jellyflower 0.13.0, 2026-10-10
 
 The application is now branded jellyflower. A clean x64 Release build with MSVC 19.44 / SDK 26100 passed without warnings, including the native setup EXE. The installer is approximately 1.2 MB and embeds the exact compiled controller/helper, corresponding README/license/notices, and both app ICOs. Its non-installing `--extract` path was exercised in a fresh workspace folder and every extracted file was compared with the build/source inputs. Both compiled EXEs have normal-user execution and PerMonitorV2 manifests at version 0.13.0.0, and include both application icon resources.
