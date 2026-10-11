@@ -57,6 +57,14 @@ jobs:
           if ($files.Count -ne 2) { throw 'Both native installers are required.' }
           $hashes = $files | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
           [IO.File]::WriteAllLines((Join-Path $PWD 'release/SHA256SUMS.txt'), $hashes)
+          # A first release may already be published from a local tested build.
+          # Preserve its immutable assets when the new tag also triggers Actions.
+          $existing = gh release view $env:GITHUB_REF_NAME --json isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            if (($existing | ConvertFrom-Json).isDraft) { throw 'A draft already exists; finish or remove it before retrying.' }
+            Write-Host 'This version is already published; keeping its existing downloads.'
+            exit 0
+          }
           gh release create $env:GITHUB_REF_NAME --verify-tag --title "jellyflower $env:GITHUB_REF_NAME" --notes-file docs/RELEASE.md --draft
           if ($LASTEXITCODE -ne 0) { throw 'Could not create the release.' }
           gh release upload $env:GITHUB_REF_NAME @($files.FullName) release/SHA256SUMS.txt
