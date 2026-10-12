@@ -1,5 +1,15 @@
 # Validation results
 
+## jellyflower 0.16.15, 2026-10-12
+
+Light-mode system taskbar acrylic now uses white TintOpacity 0.48 and TintLuminosityOpacity 0.48, with legacy alpha 122/255. The previous 0.58 tint/0.72 brightness/184 alpha obscured too much wallpaper. The new values target roughly 52% transparency while retaining a white brightness layer. This percentage describes the configured material/legacy overlay; Windows' layered blur output is not a flat linear-alpha measurement. Dark mode, pure/off, fallback colors, Start/Search and menu material recipes retain their previous values.
+
+The x64 native app/helper/installer build with MSVC 19.44 and SDK 10.0.26100. AcrylicMaterial passes the actual production setter on a live XAML brush, theme/pure transitions, explicit luminosity, neutral tint, modeled black/white backdrop contrast of at least 4.5:1, legacy overlay contrast and opaque fallback. This is a stated contrast model rather than a GPU screenshot measurement. BridgeNotify passes the new Explorer v14 mapping/receiver compatibility path, rejection of pinned v13, prompt dispatch to two owning UI threads, unchanged-state suppression, reconnect, rapid mode changes and exit notification. Native notification dispatch measured below one millisecond in this run.
+
+The taskbar implementation is pinned inside Explorer, so v14 has a new class identity, mapping magic/name and receiver name. The existing incompatible-helper guard requires one sign-out/sign-in or Windows restart after an upgrade; it keeps taskbar customization inactive until then. No Explorer restart, sign-out, account installation or Windows preference change was forced for validation. The new generation was not injected into the development Explorer alongside its pinned v13 helper. Its real post-login appearance, wallpaper-dependent legibility and compositor/energy-saver fallback remain desktop acceptance checks in INSTALLATION_TESTS. Start/Search v13's behavior and protocol are unchanged.
+
+Payload verification passes normal-user/PerMonitorV2 manifests, both icons, exact embedded EXE/helper/docs bytes and native extraction without installation. Final source/portable consistency, asset hashes, setup recovery and production updater download validation accompany publication.
+
 ## jellyflower 0.16.14, 2026-10-12
 
 Cursor previews previously loaded and replaced all 17 Windows cursor roles for each new hovered choice. They now load one caller-owned arrow lazily per submenu choice, use SetCursor locally over the menu, and reuse that private handle on later visits. Closing clears owned handles; clicking applies the complete scheme once. CursorLogic passes real file/pixel checks for all nine colors, system default and stock disable, with zero simulated system replacements, resets or preference writes during hover, followed by one 17-role selection. Fresh Windows scheme preservation and failure/cleanup checks pass.

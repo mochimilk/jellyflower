@@ -1,9 +1,7 @@
-jellyflower 0.16.14
+jellyflower 0.16.15
 
-Cursor hover previews now load just the hovered arrow and reuse it within the submenu, instead of repeatedly replacing all 17 Windows cursor roles. Clicking still applies the full set. Menu hover redraws cover only the changed rows, text layouts are reused, and unused cursor-color artwork and spinner initialization are skipped when opening the main menu. The existing appearance and interactions remain.
+Light-mode system taskbar acrylic is more transparent. Its white tint and brightness layer both use 48% opacity, targeting roughly 52% transparency; the legacy overlay uses 122/255 alpha. Lowering the brightness layer as well as the tint lets more wallpaper through while retaining white behind dark text. Windows acrylic combines blur and material layers, so the visible result is not a flat, exact transparency percentage.
 
-Start now refreshes its cached pinned/recommended header measurement when the page returns onscreen or its content changes. This addresses the intermittent blank gap below search without resetting the scroll position or adding an idle layout loop.
+Update through general's version/download row, then sign out and back in once (or restart Windows). This loads the new Explorer v14 helper; the taskbar returns to its normal appearance until that step. Setup does not restart Explorer or sign you out automatically. Fresh installations need no extra sign-out. Dark-mode taskbar acrylic, pure/off modes, Start/Search and menu materials retain their previous values.
 
-The separate Windows Search results menu now has the same 20px outer corners as Start, with matching inset background and shadow corners. Its filter tabs have 12px more room below the search divider. Native typography, acrylic, editing and results stay intact.
-
-Update through general's version/download row. The x64 installer, portable build and matching source are included. The native reopening/resize/restoration fixtures cover the new behavior; intermittent issues in private Windows shell layouts still need desktop acceptance checks.
+The x64 installer, portable build and matching source are included. Native brush/contrast-model, helper-generation and package/update verification accompany this release. Compositor fallback and wallpaper-dependent appearance still need visual checking on the target desktop.

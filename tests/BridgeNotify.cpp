@@ -38,7 +38,7 @@ int main() {
     {
         acrylic::Handle current(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, acrylic::MappingName(pid).c_str()));
         Check(current && !acrylic::OlderBridgePresent(pid), "current helper remains compatible");
-        const auto name = L"Local\\AcrylicTaskbar.Bridge.v12." + std::to_wstring(pid);
+        const auto name = L"Local\\AcrylicTaskbar.Bridge.v13." + std::to_wstring(pid);
         acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, name.c_str()));
         Check(old && acrylic::OlderBridgePresent(pid), "old pinned material requires Explorer reload");
     }
