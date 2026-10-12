@@ -530,10 +530,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayCursorQueryMessage) {
         return wParam == 1 ? self->cursors->Mode() : self->cursors->Available();
     } else if (message == TrayCursorPreviewMessage) {
-        const DWORD error = wParam == CursorPreviewNone ? self->cursors->EndPreview()
-            : self->cursors->Preview(static_cast<UINT>(wParam));
-        if (error) Log(L"Cursor preview error=" + std::to_wstring(error));
-        return error;
+        return wParam==CursorPreviewNone?0:reinterpret_cast<LRESULT>(self->cursors->LoadPreview(static_cast<UINT>(wParam)));
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {

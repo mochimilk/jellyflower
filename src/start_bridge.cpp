@@ -8,6 +8,7 @@
 #include "search_input.hpp"
 #include "start_spacing.hpp"
 #include "start_grid.hpp"
+#include "start_header.hpp"
 #include "start_pinned.hpp"
 #include "start_corners.hpp"
 #include <shobjidl.h>
@@ -146,6 +147,9 @@ void Refresh() noexcept {
         std::vector<std::shared_ptr<LayoutStyle<StartGrid>>> grids;
         for(const auto& item:Layouts<StartGrid>())grids.push_back(item.second);
         for(const auto& item:grids)item->Refresh();
+        std::vector<std::shared_ptr<LayoutStyle<StartHeader>>> headers;
+        for(const auto& item:Layouts<StartHeader>())headers.push_back(item.second);
+        for(const auto& item:headers)item->Refresh();
         std::vector<std::shared_ptr<LayoutStyle<StartPinned>>> pins;
         for(const auto& item:Layouts<StartPinned>())pins.push_back(item.second);
         for(const auto& item:pins)item->Refresh();
@@ -171,7 +175,7 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
     explicit Watcher(IUnknown* site) { winrt::check_hresult(site->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void())); }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation,VisualElement element,VisualMutationType mutation) noexcept override {
         try {
-            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches<StartSearch>().erase(element.Handle);Searches<SearchInput>().erase(element.Handle); Spacings().erase(element.Handle); PendingGrids().Remove(element.Handle);Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);Layouts<StartPinned>().erase(element.Handle);return S_OK; }
+            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches<StartSearch>().erase(element.Handle);Searches<SearchInput>().erase(element.Handle); Spacings().erase(element.Handle); PendingGrids().Remove(element.Handle);Layouts<StartGrid>().erase(element.Handle);Layouts<StartHeader>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);Layouts<StartPinned>().erase(element.Handle);return S_OK; }
             // Only Handle is valid for Remove. Add strings use the same BSTR
             // ownership contract as the taskbar diagnostics callback.
             struct Strings { VisualElement& e; ~Strings(){SysFreeString(e.Type);SysFreeString(e.Name);} } strings{element};
@@ -210,6 +214,9 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
             if(spacing) {
                 const auto framework=object.try_as<sx::FrameworkElement>();
                 const auto rule=StartSpacingFor(framework);
+                if(rule==StartSpacingRule::SectionTop && framework.Name()==L"TopLevelHeader" && !Layouts<StartHeader>().count(element.Handle)) {
+                    EnsureReceiver();auto item=std::make_shared<LayoutStyle<StartHeader>>(framework);Layouts<StartHeader>().emplace(element.Handle,item);item->Refresh();
+                }
                 if(rule!=StartSpacingRule::None && !Spacings().count(element.Handle)) {
                     EnsureReceiver();const auto item=std::make_shared<Spacing>(framework,rule);
                     Spacings().emplace(element.Handle,item);item->Refresh();
@@ -265,7 +272,7 @@ struct Site:winrt::implements<Site,IObjectWithSite,winrt::non_agile> {
                 BSTR data=nullptr;winrt::check_hresult(diagnostics->GetInitializationData(&data));
                 struct String {BSTR value;~String(){SysFreeString(value);}} string{data};
                 unsigned long long handle=0;int end=0;
-                if(!data || swscanf_s(data,L"JFStart12 %llx%n",&handle,&end)!=1 || data[end] || !handle)return E_INVALIDARG;
+                if(!data || swscanf_s(data,L"JFStart13 %llx%n",&handle,&end)!=1 || data[end] || !handle)return E_INVALIDARG;
                 // The controller owns the supplied handle until it exits.
                 // Keep a private copy so failed/late initialization cannot
                 // double-close a transferred handle or leak one per retry.

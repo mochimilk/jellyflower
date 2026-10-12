@@ -5,6 +5,7 @@
 #include <dwrite.h>
 #include <wrl/client.h>
 #include <cmath>
+#include <vector>
 
 namespace acrylic {
 // DirectWrite lays out and rasterizes text directly into premultiplied alpha.
@@ -16,6 +17,8 @@ class MenuText {
     ComPtr<ID2D1DCRenderTarget> target_;
     ComPtr<ID2D1SolidColorBrush> brush_;
     ComPtr<IDWriteTextFormat> format_;
+    struct CachedLayout {std::wstring text;float width,height;UINT flags;ComPtr<IDWriteTextLayout> value;};
+    mutable std::vector<CachedLayout> layouts_;
     bool Target() {
         if(target_) return true;
         const auto properties=D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_SOFTWARE,
@@ -26,16 +29,21 @@ class MenuText {
         return true;
     }
     ComPtr<IDWriteTextLayout> Layout(const std::wstring& text, float width, float height, UINT flags) const {
+        flags&=DT_RIGHT|DT_VCENTER;
+        for(const auto& cached:layouts_)if(cached.width==width && cached.height==height && cached.flags==flags && cached.text==text)return cached.value;
         ComPtr<IDWriteTextLayout> layout;
         if(!format_ || FAILED(write_->CreateTextLayout(text.c_str(),static_cast<UINT32>(text.size()),
             format_.Get(),width,height,&layout))) return {};
         layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
         layout->SetTextAlignment(flags&DT_RIGHT?DWRITE_TEXT_ALIGNMENT_TRAILING:DWRITE_TEXT_ALIGNMENT_LEADING);
         layout->SetParagraphAlignment(flags&DT_VCENTER?DWRITE_PARAGRAPH_ALIGNMENT_CENTER:DWRITE_PARAGRAPH_ALIGNMENT_NEAR);
+        if(layouts_.size()>=64)layouts_.clear();
+        layouts_.push_back({text,width,height,flags,layout});
         return layout;
     }
 public:
     bool Initialize(HFONT font) {
+        layouts_.clear();
         LOGFONTW native{};
         if(!GetObjectW(font,sizeof(native),&native)) return false;
         if(FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,__uuidof(IDWriteFactory),

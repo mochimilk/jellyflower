@@ -194,7 +194,7 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
     if (message == TraySettingMessage && parameter == TrayDateCommand) { dateEnabled = !dateEnabled; return dateEnabled; }
     if (message == TrayUpdateQueryMessage) return static_cast<UINT>(state);
     if (message == TrayCursorQueryMessage) return parameter ? cursorChoice : cursorMask;
-    if (message == TrayCursorPreviewMessage) { cursorPreviews.push_back(static_cast<UINT>(parameter)); return 0; }
+    if (message == TrayCursorPreviewMessage) { cursorPreviews.push_back(static_cast<UINT>(parameter)); return parameter==CursorPreviewNone?0:reinterpret_cast<LRESULT>(CopyImage(LoadCursorW(nullptr,IDC_ARROW),IMAGE_CURSOR,0,0,0)); }
     if (message == TrayCursorIconMessage) {
         wchar_t windows[MAX_PATH]{};GetWindowsDirectoryW(windows,MAX_PATH);
         return reinterpret_cast<LRESULT>(CreateCursorMenuIcon((std::wstring(windows)+L"\\Cursors\\aero_arrow.cur").c_str(),static_cast<int>(parameter)));
@@ -206,6 +206,23 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
         return cursorChoice;
     }
     return DefWindowProcW(window,message,parameter,other);
+}
+void PartialPaintChecks(Popup& popup) {
+    RECT bounds{};GetClientRect(popup.window,&bounds);
+    BITMAPINFO info{};info.bmiHeader={sizeof(BITMAPINFOHEADER),bounds.right,-bounds.bottom,1,32};
+    HDC dc[2]{CreateCompatibleDC(nullptr),CreateCompatibleDC(nullptr)};void* bits[2]{};HBITMAP bitmap[2]{};HGDIOBJ old[2]{};
+    for(int i=0;i<2;++i){bitmap[i]=CreateDIBSection(dc[i],&info,DIB_RGB_COLORS,&bits[i],nullptr,0);old[i]=SelectObject(dc[i],bitmap[i]);}
+    popup.Hover(1);popup.Paint(dc[0]);ValidateRect(popup.window,nullptr);popup.Hover(2);
+    RECT dirty{};Check(GetUpdateRect(popup.window,&dirty,FALSE) && dirty.bottom-dirty.top<=popup.rowHeight*2+1,"hover invalidates only the old and new row bounds");
+    IntersectClipRect(dc[0],dirty.left,dirty.top,dirty.right,dirty.bottom);popup.Paint(dc[0]);SelectClipRgn(dc[0],nullptr);popup.Paint(dc[1]);GdiFlush();
+    Check(memcmp(bits[0],bits[1],static_cast<size_t>(bounds.right)*bounds.bottom*4)==0,"partial glass redraw is pixel-identical to a complete menu redraw");
+    LARGE_INTEGER frequency{},start{},end{};QueryPerformanceFrequency(&frequency);double elapsed[2]{};
+    for(int clipped=0;clipped<2;++clipped){if(clipped)IntersectClipRect(dc[0],dirty.left,dirty.top,dirty.right,dirty.bottom);
+        QueryPerformanceCounter(&start);for(int n=0;n<40;++n)popup.Paint(dc[0]);GdiFlush();QueryPerformanceCounter(&end);
+        elapsed[clipped]=1000.0*(end.QuadPart-start.QuadPart)/frequency.QuadPart/40;SelectClipRgn(dc[0],nullptr);}
+    std::cout<<"Menu paint dpi="<<popup.dpi<<" full="<<elapsed[0]<<"ms hover="<<elapsed[1]<<"ms\n";
+    popup.Hover(-1);popup.ClearPreviewCursors();ValidateRect(popup.window,nullptr);
+    for(int i=0;i<2;++i){SelectObject(dc[i],old[i]);DeleteObject(bitmap[i]);DeleteDC(dc[i]);}
 }
 void Capture(Popup& popup, const std::filesystem::path& path) {
     RECT bounds{}; GetClientRect(popup.window,&bounds);
@@ -393,11 +410,13 @@ int wmain(int argc,wchar_t** argv) {
             popup.RefreshCursors();Check(popup.rows[3].label==L"cursor" && popup.rows[3].secondary.empty() && HasSubmenu(popup.rows[3].command),"import replaces unlock action with cursor submenu in place");
             for(size_t i=0;i<10;++i) Check(IsWindowEnabled(cursors.buttons[i]),"import enables custom choices");
             Check(cursors.window==submenu && !cursors.done && cursors.rows[10].checked,"import keeps submenu and Windows selection");
+            PartialPaintChecks(cursors);cursorPreviews.clear();
             const UINT beforeHover = settings;
             cursors.Hover(2);cursors.Hover(2);
             Check(cursorPreviews.size()==1 && cursorPreviews.back()==2 && settings==beforeHover && cursorChoice==CursorDisabled && cursors.rows[10].checked,
                 "hover sends one transient color preview and keeps selected checkmark");
             cursors.Hover(4);Check(cursorPreviews.size()==2 && cursorPreviews.back()==4,"moving directly to another row previews that color");
+            {const auto loads=cursorPreviews.size();cursors.Hover(2);cursors.Hover(4);Check(cursorPreviews.size()==loads && cursors.previewCursor,"revisiting rows reuses native pointers without another controller/file load");}
             cursors.Hover(-1);Check(cursorPreviews.back()==CursorPreviewNone && cursorChoice==CursorDisabled,"leaving restores committed choice");
             cursors.Hover(5);cursors.Activate(5,false);cursors.Hover(-1);
             Check(cursorChoice==5 && popup.cursorMode==5 && cursors.rows[5].checked && !popup.done && IsWindowVisible(submenu),"click commits preview in place and leave retains new selection");

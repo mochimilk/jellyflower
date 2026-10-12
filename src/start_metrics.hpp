@@ -12,4 +12,6 @@ inline constexpr double PinnedHeight = 64;
 inline constexpr double PinnedRowGap = 12;
 inline constexpr double SearchIcon = 20;
 inline constexpr double SearchGap = 8;
+inline constexpr double SearchResultsGap = 12;
+inline constexpr double SurfaceRadius = 20;
 }

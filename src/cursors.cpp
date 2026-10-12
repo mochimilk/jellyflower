@@ -146,10 +146,6 @@ void CursorManager::Refresh() {
     }
     importer_.Scan();
     const bool light = SystemLightTheme();
-    if (previewing_) {
-        if (previewMode_ == CursorDefault && light != light_) Preview(previewMode_);
-        return;
-    }
     if (!started_ || (mode_ == CursorDefault && light != light_)) {
         saveFailed_ = false;
         error_ = Apply(mode_, light);
@@ -160,52 +156,29 @@ void CursorManager::Refresh() {
     }
 }
 DWORD CursorManager::Select(UINT mode) {
-    if (mode > CursorDisabled) { EndPreview(); return ERROR_INVALID_PARAMETER; }
-    if (!(Available() & (1u << mode))) { EndPreview(); return ERROR_FILE_NOT_FOUND; }
-    const bool preview = previewing_;
-    const bool alreadyApplied = preview && previewMode_ == mode && applied_
-        && (mode != CursorDefault || light_ == SystemLightTheme());
-    previewing_ = false;
+    if (mode > CursorDisabled) return ERROR_INVALID_PARAMETER;
+    if (!(Available() & (1u << mode))) return ERROR_FILE_NOT_FOUND;
     saveFailed_ = false;
-    error_ = alreadyApplied ? ERROR_SUCCESS : Apply(mode, SystemLightTheme());
-    if (error_) { if (preview) RestoreSelection(); return error_; }
+    error_ = Apply(mode, SystemLightTheme());
+    if (error_) return error_;
     mode_ = mode;
     started_ = true;
     error_ = SaveMode(mode);
     saveFailed_ = error_ != ERROR_SUCCESS;
     return error_;
 }
-DWORD CursorManager::RestoreSelection() {
-    if (previewWindows_) {
-        // A fresh install may use a Windows accessibility/custom scheme.
-        // Return to that configured scheme rather than forcing aero_arrow.
-        const bool restored = SystemParametersInfoW(SPI_SETCURSORS, 0, nullptr, 0) != FALSE;
-        applied_ = false;
-        return restored ? ERROR_SUCCESS : GetLastError();
+HCURSOR CursorManager::LoadPreview(UINT mode) const {
+    if(mode>CursorDisabled || !(Available() & (1u<<mode)))return nullptr;
+    std::wstring path;
+    if(mode==CursorDisabled) {
+        wchar_t windows[MAX_PATH]{};if(!GetWindowsDirectoryW(windows,MAX_PATH))return nullptr;
+        path=std::wstring(windows)+L"\\Cursors\\aero_arrow.cur";
+    } else {
+        const UINT color=mode==CursorDefault?(SystemLightTheme()?1:2):mode;
+        path=folder_+L"\\cursor\\assets\\"+CursorColors[color-1].folder+L"\\arrow.cur";
     }
-    return Apply(mode_, SystemLightTheme());
-}
-DWORD CursorManager::Preview(UINT mode) {
-    if (mode > CursorDisabled) return ERROR_INVALID_PARAMETER;
-    if (!(Available() & (1u << mode))) return ERROR_FILE_NOT_FOUND;
-    const bool light = SystemLightTheme();
-    if (previewing_ && previewMode_ == mode && (mode != CursorDefault || light_ == light)) return ERROR_SUCCESS;
-    if (!previewing_) previewWindows_ = mode_ == CursorDisabled && !applied_;
-    const bool same = !previewing_ && mode == mode_ && started_ && (applied_ || previewWindows_)
-        && (mode != CursorDefault || light_ == light);
-    previewing_ = true; previewMode_ = mode;
-    const DWORD error = same ? ERROR_SUCCESS : mode == CursorDisabled && previewWindows_
-        ? RestoreSelection() : Apply(mode, light);
-    if (error) { previewing_ = false; RestoreSelection(); }
-    return error;
-}
-DWORD CursorManager::EndPreview() {
-    if (!previewing_) return ERROR_SUCCESS;
-    previewing_ = false;
-    if (!previewWindows_ && previewMode_ == mode_ && (mode_ != CursorDefault || light_ == SystemLightTheme())) return ERROR_SUCCESS;
-    const DWORD error = RestoreSelection();
-    if (error) error_ = error;
-    return error;
+    // No system cursor replacement, registry write or animated-role decoding.
+    return LoadCursorFromFileW(path.c_str());
 }
 bool CursorManager::TakeImportResult(DWORD& error) {
     if (!importNotice_) return false;

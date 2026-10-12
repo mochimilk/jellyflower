@@ -167,7 +167,10 @@ struct Popup {
     RECT trayBounds{};
     int hovered = -1, childIndex = -1, suppressedHover = -1, rowHeight = 40;
     UINT kind = 0;
-    UINT previewMode = CursorPreviewNone;
+    UINT previewMode = CursorPreviewNone, previewAttempted = 0;
+    std::array<HCURSOR,CursorDisabled+1> previewCursors{};
+    HCURSOR previewCursor = nullptr;
+    UINT iconCursorMode = CursorPreviewNone;int iconPixels = 0;bool iconLight = false;
     bool clockDate = true;
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
@@ -175,12 +178,9 @@ struct Popup {
     RECT restingBounds{};
     ULONGLONG entranceStarted = 0;
     bool entering = false;
-    Popup() {
-        Gdiplus::GdiplusStartupInput input;
-        if (Gdiplus::GdiplusStartup(&graphicsToken, &input, nullptr) != Gdiplus::Ok) graphicsToken = 0;
-    }
     ~Popup() {
         PreviewCursor(-1);
+        ClearPreviewCursors();
         if (mouseHook) UnhookWindowsHookEx(mouseHook);
         child.reset();
         if (window) DestroyWindow(window);
@@ -269,14 +269,23 @@ struct Popup {
             PostMessageW(window, WM_NULL, 0, 0); // Wake GetMessage after a sent activation message.
         }
     }
+    void RepaintRow(int index) const {
+        if(index<0 || index>=static_cast<int>(buttons.size()) || !window)return;
+        RECT r{};GetWindowRect(buttons[index],&r);MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&r),2);InvalidateRect(window,&r,FALSE);
+    }
+    void RepaintCommand(UINT command) const {
+        for(size_t i=0;i<rows.size();++i)if(rows[i].command==command){RepaintRow(static_cast<int>(i));break;}
+    }
     void RepaintButtons() const {
         if (window) InvalidateRect(window, nullptr, FALSE);
     }
     void RefreshCursorIcon() {
+        const int pixels=Px(MenuGlyphSize);
+        if(cursorIcon && iconCursorMode==cursorMode && iconPixels==pixels && (cursorMode!=CursorDefault || iconLight==systemLight))return;
         const HICON replacement = reinterpret_cast<HICON>(SendMessageW(controller, TrayCursorIconMessage, Px(MenuGlyphSize), 0));
         if (replacement) {
             if (cursorIcon) DestroyIcon(cursorIcon);
-            cursorIcon = replacement;
+            cursorIcon = replacement;iconCursorMode=cursorMode;iconPixels=pixels;iconLight=systemLight;
             RepaintButtons();
         }
     }
@@ -296,6 +305,7 @@ struct Popup {
         if (child) child->RefreshUpdate();
     }
     void RefreshCursors() {
+        if(parent)ClearPreviewCursors();
         auto* root = Root();
         root->cursorMode = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 1, 0));
         const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
@@ -339,6 +349,7 @@ struct Popup {
             && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
     }
     bool UpdateTheme(bool systemMode) {
+        if(parent && systemLight!=systemMode)ClearPreviewCursors();
         systemLight = systemMode;
         light = systemMode;
         HIGHCONTRASTW contrast{sizeof(contrast)};
@@ -392,6 +403,7 @@ struct Popup {
             }
             if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1] || !generalIcon) return false;
         } else if (kind == TrayGeneralCommand) {
+            if(!graphicsToken){Gdiplus::GdiplusStartupInput input;if(Gdiplus::GdiplusStartup(&graphicsToken,&input,nullptr)!=Gdiplus::Ok)graphicsToken=0;}
             const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
             const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
                 darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
@@ -506,6 +518,11 @@ struct Popup {
         child->keyboard = fromKeyboard;
         child->RepaintButtons();
     }
+    void ClearPreviewCursors() {
+        PreviewCursor(-1);
+        for(auto& cursor:previewCursors){if(cursor)DestroyCursor(cursor);cursor=nullptr;}
+        previewAttempted=0;previewCursor=nullptr;
+    }
     void PreviewCursor(int index) {
         if (kind != TrayCursorCommand) return;
         // Hiding a window can queue WM_MOUSELEAVE while its old button bounds
@@ -515,7 +532,17 @@ struct Popup {
             ? rows[static_cast<size_t>(index)].command - CursorCommandBase : CursorPreviewNone;
         if (next == previewMode) return;
         previewMode = next;
-        SendMessageW(controller, TrayCursorPreviewMessage, next, 0);
+        if(next==CursorPreviewNone) {
+            previewCursor=nullptr;SendMessageW(controller,TrayCursorPreviewMessage,next,0);
+        } else {
+            const UINT bit=1u<<next;
+            if(!(previewAttempted & bit)) {
+                previewAttempted|=bit;
+                previewCursors[next]=reinterpret_cast<HCURSOR>(SendMessageW(controller,TrayCursorPreviewMessage,next,0));
+            }
+            previewCursor=previewCursors[next];
+        }
+        SetCursor(previewCursor?previewCursor:LoadCursorW(nullptr,IDC_ARROW));
     }
     void LeaveRow() {
         // WM_MOUSELEAVE can be queued after entering the next child button.
@@ -541,9 +568,9 @@ struct Popup {
             else SetTimer(window, ChildCloseTimer, std::max(1u, hoverDelay), nullptr);
         }
         if (hovered == index && !keyboard) return;
-        hovered = index;
+        const int previous=hovered;hovered = index;
         keyboard = false;
-        RepaintButtons();
+        RepaintRow(previous);RepaintRow(index);
         KillTimer(window, HoverTimer);
         if (index >= 0 && index != suppressedHover && HasSubmenu(rows[static_cast<size_t>(index)].command)
             && (!child || childIndex != index || !IsWindowVisible(child->window)))
@@ -592,9 +619,9 @@ struct Popup {
             } else if (command == TrayDateCommand) {
                 root->UpdateDate((state & 1) != 0);
             } else if (parent && command >= CursorCommandBase && command <= CursorCommandBase + CursorDisabled) {
-                // The controller commits the preview. A later hover/leave now
-                // starts from this new saved choice, without closing menus.
-                previewMode = CursorPreviewNone;
+                // Selection applies the full scheme once. End the local
+                // preview without closing the menus.
+                PreviewCursor(-1);
                 root->cursorMode = state;
                 root->RefreshCursorIcon();
                 for (auto& row : rows) row.checked = row.command == CursorCommandBase + state;
@@ -702,17 +729,18 @@ struct Popup {
         SelectObject(item.hDC, oldFont);
     }
     void Paint(HDC dc) {
-        RECT bounds{};
+        RECT bounds{},dirty{};
         GetClientRect(window, &bounds);
+        if(GetClipBox(dc,&dirty)==ERROR || !IntersectRect(&dirty,&dirty,&bounds))return;
         const auto frameTime = GetTickCount64();
         if (acrylic) {
-            if (MenuSurface::Paint(dc, bounds, [&](HDC layer) { PaintContent(layer, bounds, false, frameTime); })) return;
+            if (MenuSurface::Paint(dc, dirty, [&](HDC layer) { PaintContent(layer, bounds, false, frameTime,dirty); })) return;
             DisableBackdrop();
         }
-        PaintContent(dc, bounds, true, frameTime);
+        PaintContent(dc, bounds, true, frameTime,dirty);
     }
-    void PaintContent(HDC dc, const RECT& bounds, bool opaque, ULONGLONG frameTime) {
-        if (opaque) FillRect(dc, &bounds, background);
+    void PaintContent(HDC dc, const RECT& bounds, bool opaque, ULONGLONG frameTime,const RECT& dirty) {
+        if (opaque) FillRect(dc, &dirty, background);
         int y = Px(Padding);
         for (const auto& row : rows) {
             if (row.divider) {
@@ -729,7 +757,8 @@ struct Popup {
         for (size_t i=0; i<buttons.size(); ++i) {
             RECT position{}; GetWindowRect(buttons[i], &position);
             MapWindowPoints(nullptr,window,reinterpret_cast<POINT*>(&position),2);
-            const int saved=SaveDC(dc);SetViewportOrgEx(dc,position.left-bounds.left,position.top-bounds.top,nullptr);
+            RECT intersection{};if(!IntersectRect(&intersection,&position,&dirty))continue;
+            const int saved=SaveDC(dc);OffsetViewportOrgEx(dc,position.left,position.top,nullptr);
             DRAWITEMSTRUCT item{};item.hwndItem=buttons[i];item.CtlID=rows[i].command;item.hDC=dc;
             if(GetFocus()==buttons[i]) item.itemState|=ODS_FOCUS;
             GetClientRect(buttons[i],&item.rcItem);DrawButtonContent(item,frameTime);RestoreDC(dc,saved);
@@ -786,7 +815,7 @@ struct Popup {
         RefreshUpdate();
         if (!parent) {
             constexpr COLORREF fills[]{RGB(250,250,250), RGB(40,40,40), RGB(145,170,240), RGB(148,182,104), RGB(129,216,184), RGB(244,143,167), RGB(230,170,100), RGB(245,229,179), RGB(231,194,218)};
-            for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));
+            if(!HasCursorPack(static_cast<UINT>(SendMessageW(controller,TrayCursorQueryMessage,0,0))))for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));
             RefreshCursors();
         }
         return true;
@@ -832,6 +861,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     switch (message) {
     case WM_NCCALCSIZE: return 0;
     case WM_NCHITTEST: return HTCLIENT;
+    case WM_SETCURSOR:
+        if(LOWORD(lParam)==HTCLIENT && popup->previewCursor){SetCursor(popup->previewCursor);return TRUE;}
+        break;
     case WM_DWMCOMPOSITIONCHANGED:
         popup->ConfigureBackdrop();
         RedrawWindow(window, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
@@ -864,9 +896,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
             popup->AdvanceEntrance(GetTickCount64());
         } else if (wParam == ColorPreviewTimer) {
             ++popup->colorFrame;
-            popup->RepaintButtons();
+            popup->RepaintCommand(TrayCursorUnlockCommand);
         } else if (wParam == UpdateSpinnerTimer) {
-            popup->RepaintButtons();
+            popup->RepaintCommand(TrayUpdateCommand);
         } else if (wParam == HoverTimer) { KillTimer(window, HoverTimer); if (popup->hovered >= 0 && popup->hovered != popup->suppressedHover) popup->OpenChild(popup->hovered, false); }
         else if (wParam == ChildCloseTimer) {
             KillTimer(window, ChildCloseTimer);

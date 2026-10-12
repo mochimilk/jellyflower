@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/start_grid.hpp"
 #include "../src/start_pinned.hpp"
+#include "../src/start_header.hpp"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
@@ -70,6 +71,30 @@ int main(){try{
         discovery.Add(2,replacement);pane.Children().Append(replacement);Layout(pane);discovery.Discover(adopt,Supported);Check(adopted==2,"a replacement React list is adopted independently");
         sx::Controls::GridView removed;removed.Name(L"RecommendedList");discovery.Add(3,removed);discovery.Remove(3);pane.Children().Append(removed);discovery.Discover(adopt,Supported);Check(adopted==2,"removed pending lists cannot be adopted later");
         pane.Children().Clear();
+    }
+    {
+        // A native virtualized list header survives Start's offscreen animation.
+        // Its invalidation must be event-driven, bounded, and scroll-neutral.
+        ShowWindow(window,SW_SHOWNOACTIVATE);
+        host.Content(nullptr);sx::Controls::ScrollViewer viewport;viewport.Content(pane);host.Content(viewport);
+        sx::Controls::GridView view;view.Height(500);view.Name(L"AllAppsGrid");
+        sx::Controls::Grid header;header.Name(L"TopLevelHeader");header.Height(240);view.Header(header);
+        for(unsigned i=0;i<100;++i){sx::Controls::GridViewItem row;row.Width(150);row.Height(64);view.Items().Append(row);}
+        pane.Children().Append(view);Layout(pane);
+        auto scroll=FindStartElement(view,L"ScrollViewer").as<sx::Controls::ScrollViewer>();
+        StartHeader style(header);style.Refresh(true);Layout(pane);Check(style.LayoutPasses()>0,"connected native header receives one deferred cache refresh");
+        const auto before=style.LayoutPasses();header.Height(180);Layout(pane);Check(style.LayoutPasses()>before,"pinned/recommended header height changes invalidate the native presenter cache");
+        const auto idle=style.LayoutPasses();Layout(pane);Check(style.LayoutPasses()==idle,"stable header has no repeated measure work");
+        scroll.ChangeView(nullptr,winrt::box_value(48.0).as<winrt::Windows::Foundation::IReference<double>>(),nullptr,true);Layout(pane);
+        const auto offset=scroll.VerticalOffset();Check(offset>0,"native list was scrolled for reopening test");
+        sx::Media::TranslateTransform shift;view.RenderTransform(shift);shift.Y(2000);Layout(pane);style.Refresh(true);
+        const auto hidden=style.LayoutPasses();shift.Y(0);Layout(pane);style.Refresh(true);Layout(pane);
+        Check(style.LayoutPasses()>hidden,"returning from an offscreen Start animation refreshes the header before scrolling");
+        Check(std::abs(scroll.VerticalOffset()-offset)<.01,"header refresh preserves the native scroll position");
+        const auto open=style.LayoutPasses();Layout(pane);Check(style.LayoutPasses()==open,"reopening refresh converges without an idle loop");
+        style.Restore();header.Height(170);Layout(pane);Check(style.LayoutPasses()==open,"disabled header has no remaining layout callbacks");
+        style.Refresh(true);style.Restore();Layout(pane);Check(style.LayoutPasses()==open,"disabling cancels a queued cache refresh");
+        pane.Children().Clear();Layout(pane);host.Content(nullptr);viewport.Content(nullptr);host.Content(pane);Layout(pane);
     }
     struct Variation{const wchar_t* name;unsigned kind;int maximum;double parentInset;double pager;};
     unsigned cases=0;

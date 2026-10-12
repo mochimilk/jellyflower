@@ -119,44 +119,25 @@ int wmain(int argc, wchar_t** argv) {
     {
         savedMode = 3; testLight = false;
         acrylic::CursorManager manager(L""); manager.Refresh();
-        const auto selected = FilePixels(pack + L"\\cursor\\assets\\blueberry\\arrow.cur");
-        const auto beforeSave = saves;
-        for (UINT mode = 0; mode <= acrylic::CursorDisabled; ++mode) {
-            Check(manager.Preview(mode) == 0 && manager.Mode() == 3 && savedMode == 3 && saves == beforeSave,
-                "every hover previews without changing selected or stored mode");
-            const auto path = mode == acrylic::CursorDisabled ? std::wstring(L"C:\\Windows\\Cursors\\aero_arrow.cur")
-                : pack + L"\\cursor\\assets\\" + acrylic::CursorColors[(mode ? mode : 2) - 1].folder + L"\\arrow.cur";
-            Check(arrow == FilePixels(path), "hover loads actual cursor artwork, including default and disable");
-            const int before = calls; manager.Preview(mode); manager.Refresh();
-            Check(calls == before, "same hover and periodic refresh do not reload the preview");
+        const auto selected=arrow;const auto beforeSave=saves;const auto before=calls;const auto beforeRestore=restores;
+        for(UINT mode=0;mode<=acrylic::CursorDisabled;++mode) {
+            const auto preview=manager.LoadPreview(mode);
+            const auto path=mode==acrylic::CursorDisabled?std::wstring(L"C:\\Windows\\Cursors\\aero_arrow.cur")
+                :pack+L"\\cursor\\assets\\"+acrylic::CursorColors[(mode?mode:2)-1].folder+L"\\arrow.cur";
+            Check(preview && Pixels(preview)==FilePixels(path),"local preview loads actual arrow artwork for every color/default/disable");
+            if(preview)DestroyCursor(preview);
         }
-        Check(manager.EndPreview() == 0 && arrow == selected && manager.Mode() == 3 && saves == beforeSave,
-            "leaving restores selected cursor without saving");
-        const int before = calls; manager.EndPreview(); Check(calls == before, "preview cleanup is idempotent");
-        manager.Preview(5); const int beforeCommit = calls; manager.Select(5);
-        Check(manager.Mode() == 5 && savedMode == 5 && calls == beforeCommit && saves == beforeSave + 1,
-            "click commits the already displayed preview once");
-        const auto committed = arrow; manager.EndPreview(); Check(arrow == committed && calls == beforeCommit,
-            "leaving after click retains newly selected cursor");
-        manager.Preview(6); failAt = calls + 2;
-        Check(manager.Preview(7) == ERROR_INVALID_PARAMETER && manager.Mode() == 5 && arrow == committed,
-            "partial hover failure rolls back to committed cursor");
-        failAt = -1;
-        manager.Select(acrylic::CursorDefault); manager.Preview(4); testLight = true; manager.Refresh();
-        Check(arrow == FilePixels(pack + L"\\cursor\\assets\\greentea\\arrow.cur"), "theme refresh retains explicit hover preview");
-        manager.EndPreview(); Check(arrow == FilePixels(pack + L"\\cursor\\assets\\light\\arrow.cur"),
-            "leaving restores default using current theme");
-        manager.Select(3); manager.Preview(acrylic::CursorDefault); testLight = false; manager.Refresh();
-        Check(arrow == FilePixels(pack + L"\\cursor\\assets\\dark\\arrow.cur"), "default hover follows a theme change while open");
-        manager.EndPreview(); Check(arrow == selected && manager.Mode() == 3, "default hover still restores explicit selected color");
+        Check(calls==before && restores==beforeRestore && saves==beforeSave && arrow==selected && manager.Mode()==3,
+            "all hover previews leave system roles, stored preference and committed selection untouched");
+        manager.Select(5);Check(calls==before+17 && saves==beforeSave+1 && savedMode==5,"only clicking applies and saves all cursor roles once");
+        testLight=true;auto preview=manager.LoadPreview(acrylic::CursorDefault);
+        Check(preview && Pixels(preview)==FilePixels(pack+L"\\cursor\\assets\\light\\arrow.cur"),"default local preview follows current theme");if(preview)DestroyCursor(preview);
+        Check(!manager.LoadPreview(acrylic::CursorDisabled+1),"invalid preview is rejected without system changes");
     }
     {
-        noSavedMode = true;
-        acrylic::CursorManager fresh(L""); fresh.Refresh(); const int before = restores;
-        fresh.Preview(4); fresh.EndPreview();
-        Check(fresh.Mode() == acrylic::CursorDisabled && !fresh.Applied() && restores == before + 1,
-            "hover from fresh Windows cursor restores the configured Windows scheme");
-        noSavedMode = false;
+        noSavedMode=true;acrylic::CursorManager fresh(L"");fresh.Refresh();const auto before=calls;const auto oldRestores=restores;
+        auto preview=fresh.LoadPreview(4);Check(preview!=nullptr,"fresh Windows selection supports a local preview");if(preview)DestroyCursor(preview);
+        Check(fresh.Mode()==acrylic::CursorDisabled && !fresh.Applied() && calls==before && restores==oldRestores,"local preview needs no global rollback or Windows scheme reload");noSavedMode=false;
     }
     pack += L"\\does-not-exist";
     {
@@ -174,6 +155,6 @@ int wmain(int argc, wchar_t** argv) {
         Check(manager.Select(3) != 0 && calls == before, "missing variant makes no partial system changes");
         Check(manager.Available() == (1u << acrylic::CursorDisabled), "missing pack locks every custom mode but leaves disable available");
     }
-    printf("%s: real file/bitmap loading; simulated system writes for theme, nine colors, stock disable, preferences, transient hover/leave/commit, cleanup, and failure rollback.\n", failures ? "FAIL" : "PASS");
+    printf("%s: real file/bitmap loading; simulated system writes for theme, nine colors, stock disable, preferences, local hover without global writes, click commit, cleanup, and failure rollback.\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;
 }

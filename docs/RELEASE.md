@@ -1,9 +1,9 @@
-jellyflower 0.16.13
+jellyflower 0.16.14
 
-Recommended keeps its columns, with each tile filling its column. Replacement views created while navigating are now picked up after their parents attach, and their native fixed width limits are removed.
+Cursor hover previews now load just the hovered arrow and reuse it within the submenu, instead of repeatedly replacing all 17 Windows cursor roles. Clicking still applies the full set. Menu hover redraws cover only the changed rows, text layouts are reused, and unused cursor-color artwork and spinner initialization are skipped when opening the main menu. The existing appearance and interactions remain.
 
-Windows Search results now use jellyflower's borderless search header: a primary-color 20px Lucide magnifier, aligned native input and a bottom divider. Typing, caret, selection, native text rendering and search results stay intact. Search opens normally; no forced launch or shell restart is needed.
+Start now refreshes its cached pinned/recommended header measurement when the page returns onscreen or its content changes. This addresses the intermittent blank gap below search without resetting the scroll position or adding an idle layout loop.
 
-The flower's hover tooltip is now exactly "ur cute :3".
+The separate Windows Search results menu now has the same 20px outer corners as Start, with matching inset background and shadow corners. Its filter tabs have 12px more room below the search divider. Native typography, acrylic, editing and results stay intact.
 
-Update through general's version/download row. The installer, portable x64 build and matching source are included. Search styling grants its Windows package read/execute access only to jellyflower's helper DLL. Native fixtures cover resizing and restoration; private Windows layouts and suspended Search may apply styling only when their UI runs.
+Update through general's version/download row. The x64 installer, portable build and matching source are included. The native reopening/resize/restoration fixtures cover the new behavior; intermittent issues in private Windows shell layouts still need desktop acceptance checks.

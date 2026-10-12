@@ -61,7 +61,13 @@ int main(){const char* step="initialize";try{
     pane.Padding({12,12,12,0});pane.Width(858);outer.Margin({33,17,33,10});
     sx::Controls::Border viewport;viewport.Name(L"LayerBorder");viewport.Margin({1,1,1,1});pane.Children().InsertAt(0,viewport);
     sx::Controls::Border pill;pill.Name(L"TaskbarSearchBackground");pill.Background(fill);pill.Margin(outer.Margin());pill.Height(32);pill.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().InsertAt(1,pill);Layout(pane);
+    sx::Controls::Border frame;frame.Name(L"AppBorder");frame.CornerRadius({8,8,8,8});pane.Children().InsertAt(0,frame);
+    viewport.CornerRadius({7,7,7,7});
+    sx::Controls::Grid results;results.Name(L"QueryFormulationRoot");results.Margin({3,0,4,5});results.Height(100);results.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(results);
     {SearchInput style(outer,Supported);style.Refresh(true,false);Layout(pane);
+        Check(frame.CornerRadius().TopLeft==20 && viewport.CornerRadius().BottomRight==19,"Search outer and inset background layers share the main Start corner recipe");
+        Check(results.Margin().Top==12 && results.Margin().Left==3 && results.Margin().Bottom==5,"results tabs receive their own spacing below the header divider");
+        results.Margin({6,2,7,8});Check(results.Margin().Top==12 && results.Margin().Left==6,"native result margin updates preserve the tab gap");
         const auto vp=viewport.TransformToVisual(pane).TransformPoint({0,0});
         auto layer=FindStartElement(outer,L"JellyflowerResultsSearchIcon").as<sx::Controls::Canvas>();auto icon=layer.Children().GetAt(0).as<sx::Controls::Canvas>();
         Check(std::abs(icon.TransformToVisual(pane).TransformPoint({0,0}).X-(vp.X+32))<1,"real padded page aligns artwork to the inset content viewport");
@@ -71,7 +77,9 @@ int main(){const char* step="initialize";try{
         const auto lp=line.TransformToVisual(pane).TransformPoint({0,0}),cp=outer.TransformToVisual(pane).TransformPoint({0,0});
         Check(std::abs(lp.X-vp.X)<1 && line.Width()==viewport.ActualWidth(),"padded page divider uses its own layer origin and spans the actual viewport");
         Check(std::abs(lp.Y-(cp.Y+outer.ActualHeight()+outer.Margin().Bottom-1))<1,"padded page divider sits directly below the native input header");
-        style.Restore();Layout(pane);Check(pill.Background()==fill && outer.Margin().Left==33 && outer.Margin().Bottom==10,"separate native pill and native page margins restore");
+        style.Restore();Layout(pane);
+        Check(frame.CornerRadius().TopLeft==8 && viewport.CornerRadius().BottomRight==7 && results.Margin().Top==2 && results.Margin().Left==6,"Search frame and latest native results margins restore on exit");
+        Check(pill.Background()==fill && outer.Margin().Left==33 && outer.Margin().Bottom==10,"separate native pill and native page margins restore");
     }
     text.TextChanged(token);host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();std::puts("PASS: native editable Search template, text/selection/events, unchanged typography, borderless header, shared artwork/primary ink, responsive margins/divider, retemplating and restoration.");return 0;
 }catch(const winrt::hresult_error& e){std::printf("FAIL %s HRESULT %08lx %s\n",step,static_cast<unsigned long>(e.code()),winrt::to_string(e.message()).c_str());}catch(const std::exception& e){std::printf("FAIL %s: %s\n",step,e.what());}return 1;}

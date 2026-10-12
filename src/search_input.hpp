@@ -109,6 +109,17 @@ public:
             values_.Set(control_,sx::FrameworkElement::MinWidthProperty(),winrt::box_value(0.0));values_.Set(control_,sx::FrameworkElement::MaxWidthProperty(),winrt::box_value(std::numeric_limits<double>::infinity()));
             values_.Set(control_,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(sx::HorizontalAlignment::Stretch));
             values_.Set(control_,sx::FrameworkElement::MarginProperty(),nullptr,[](const auto& value){auto m=winrt::unbox_value<sx::Thickness>(value);m.Bottom=16;return winrt::box_value(m);});
+            // Search is a separate native page. Round all of its painted frame
+            // layers together, while leaving Windows' compositor clips intact.
+            for(const auto id:{L"AppBorder",L"AccentAppBorder",L"LayerBorder",L"AccentLayerBorder",L"dropshadow",L"HCBorder"})
+                if(auto border=FindStartElement(pane_,id).try_as<sx::Controls::Border>()) {
+                    const double radius=(id==std::wstring_view(L"LayerBorder") || id==std::wstring_view(L"AccentLayerBorder"))?StartMetrics::SurfaceRadius-1:StartMetrics::SurfaceRadius;
+                    values_.Set(border,sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(sx::CornerRadius{radius,radius,radius,radius}));
+                }
+            // Keep the divider at the end of the search header, then inset the
+            // native results region so its web-hosted tabs have breathing room.
+            if(auto results=FindStartElement(pane_,L"QueryFormulationRoot"))
+                values_.Set(results,sx::FrameworkElement::MarginProperty(),nullptr,[](const auto& value){auto m=winrt::unbox_value<sx::Thickness>(value);m.Top=StartMetrics::SearchResultsGap;return winrt::box_value(m);});
             ClearGrid(root_,clear);values_.Set(textBox_,sx::Controls::Control::BackgroundProperty(),clear);
             values_.Set(textBox_,sx::Controls::Control::BorderBrushProperty(),clear);values_.Set(textBox_,sx::Controls::Control::BorderThicknessProperty(),winrt::box_value(sx::Thickness{}));
             if(sx::Media::VisualTreeHelper::GetChildrenCount(textBox_)==1)if(auto grid=sx::Media::VisualTreeHelper::GetChild(textBox_,0).try_as<sx::Controls::Grid>())ClearGrid(grid,clear);
