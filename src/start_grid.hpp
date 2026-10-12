@@ -21,6 +21,22 @@ inline bool IsStartGrid(const sx::Controls::GridView& view,StartClassName name=n
     }
     return false;
 }
+class DeferredStartGrids {
+    std::unordered_map<uint64_t,sx::Controls::GridView> pending_;
+public:
+    void Add(uint64_t handle,const sx::Controls::GridView& view) {
+        if(view && (view.Name()==L"RecommendedList" || view.Name()==L"AllAppsGrid" || view.Name()==L"PinnedList"))pending_.insert_or_assign(handle,view);
+    }
+    void Remove(uint64_t handle){pending_.erase(handle);}
+    template<class Adopt> void Discover(Adopt&& adopt,StartClassName name=nullptr){
+        std::vector<std::pair<uint64_t,sx::Controls::GridView>> snapshot(pending_.begin(),pending_.end());
+        for(const auto& item:snapshot)if(IsStartGrid(item.second,name)){
+            auto current=pending_.find(item.first);
+            if(current==pending_.end() || current->second!=item.second)continue;
+            pending_.erase(current);adopt(item.first,item.second);
+        }
+    }
+};
 inline unsigned StartColumns(double width,double nativeCell,int maximum) noexcept {
     if(!std::isfinite(width) || !std::isfinite(nativeCell) || width<=0 || nativeCell<=0) return 0;
     unsigned columns=static_cast<unsigned>(std::clamp(std::round(width/nativeCell),1.0,64.0));

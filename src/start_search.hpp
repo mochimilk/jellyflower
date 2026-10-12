@@ -2,6 +2,7 @@
 #pragma once
 #include "start_properties.hpp"
 #include "start_metrics.hpp"
+#include "search_art.hpp"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
@@ -133,7 +134,7 @@ public:
                 textShift_ = Shift(presenter_);
                 caret_ = FindStartElement(template_, L"TextCaret");
                 if (caret_) caretShift_ = Shift(caret_);
-                icon_ = sx::Markup::XamlReader::Load(LR"(<Canvas xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Width="20" Height="20"><Path Data="M17.5,17.5 L13.8833333333,13.8833333333" StrokeThickness="1.6666666667" StrokeStartLineCap="Round" StrokeEndLineCap="Round"/><Ellipse Canvas.Left="2.5" Canvas.Top="2.5" Width="13.3333333333" Height="13.3333333333" StrokeThickness="1.6666666667"/></Canvas>)").as<sx::Controls::Canvas>();
+                icon_ = SearchMagnifier();
                 iconLayer_ = Layer(); iconLayer_.Name(L"JellyflowerSearchIcon"); iconLayer_.Children().Append(icon_);
                 dividerLayer_ = Layer(); dividerLayer_.Name(L"JellyflowerSearchDivider");
                 divider_ = sx::Controls::Border(); divider_.Height(1); sx::Controls::Canvas::SetLeft(divider_,0); dividerLayer_.Children().Append(divider_);

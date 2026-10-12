@@ -17,7 +17,8 @@ inline constexpr UINT QueryMessage = WM_APP + 42;
 enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, EnabledQuery, TrayQuery,
     CursorModeQuery, CursorAppliedQuery, CursorErrorQuery, BorderQuery, LightQuery, AcrylicModeQuery,
     ClockQuery, ClockResultQuery, VolumeQuery, VolumeResultQuery, IslandsQuery, RetainedQuery,
-    ClockDateQuery, StartCountQuery, StartAttachedQuery, StartResultQuery, StartSearchQuery, StartSpacingQuery };
+    ClockDateQuery, StartCountQuery, StartAttachedQuery, StartResultQuery, StartSearchQuery, StartSpacingQuery,
+    SearchAttachedQuery,SearchInputQuery,SearchResultQuery };
 enum Backend : LONG { Waiting, Legacy, Modern, Unsupported };
 enum BridgeState : LONG { Idle, Starting, Attached, Failed };
 

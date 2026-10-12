@@ -5,6 +5,7 @@
 #include "start_shared.hpp"
 #include "start_style.hpp"
 #include "start_search.hpp"
+#include "search_input.hpp"
 #include "start_spacing.hpp"
 #include "start_grid.hpp"
 #include "start_pinned.hpp"
@@ -14,6 +15,7 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include <mutex>
 
 using namespace acrylic;
 namespace {
@@ -22,18 +24,19 @@ StartState* state=nullptr;
 HMODULE module=nullptr;
 void Result(HRESULT result) noexcept { if(state) InterlockedExchange(&state->result,result); }
 struct Owner {
-    LONG epoch=-1;
+    std::mutex mutex;
     Handle process;
     bool Alive() noexcept {
+        std::lock_guard<std::mutex> lock(mutex);
         if(!state || Read(state->magic)!=StartMagic || !Read(state->running)) return false;
-        if(epoch!=Read(state->epoch) || !process) {
-            epoch=Read(state->epoch);
-            process.reset(OpenProcess(SYNCHRONIZE,FALSE,Read(state->controllerPid)));
-        }
+        // One shared owner for all XAML threads consumes each transferred
+        // handle once. Rebinding never closes a newer owner's handle because
+        // epoch and handle publication happened on different threads.
+        if(const auto next=InterlockedExchange64(&state->ownerHandle,0))process.reset(reinterpret_cast<HANDLE>(static_cast<uintptr_t>(next)));
         return process && WaitForSingleObject(process.get(),0)==WAIT_TIMEOUT;
     }
 };
-thread_local Owner owner;
+Owner owner;
 struct Surface {
     StartSurface view;
     bool counted=false;
@@ -48,10 +51,10 @@ struct Surface {
     }
     ~Surface() { if(counted && state) InterlockedDecrement(&state->count); }
 };
-struct Search {
-    StartSearch view;
+template<class View> struct SearchStyle {
+    View view;
     bool counted=false;
-    explicit Search(const sx::Controls::Control& control):view(control) {}
+    explicit SearchStyle(const sx::Controls::Control& control):view(control) {}
     void Refresh() noexcept {
         try { view.Refresh(owner.Alive() && Read(state->enabled),state && Read(state->light)); }
         catch(...) { Result(winrt::to_hresult()); view.Restore(); }
@@ -60,10 +63,10 @@ struct Search {
             if(counted) InterlockedIncrement(&state->searches); else InterlockedDecrement(&state->searches);
         }
     }
-    ~Search() { if(counted && state) InterlockedDecrement(&state->searches); }
+    ~SearchStyle() { if(counted && state) InterlockedDecrement(&state->searches); }
 };
-auto& Searches() {
-    thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Search>>;
+template<class View> auto& Searches() {
+    thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<SearchStyle<View>>>;
     return *items;
 }
 struct Spacing {
@@ -105,6 +108,21 @@ template<class View> auto& Layouts() {
     thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<LayoutStyle<View>>>;
     return *items;
 }
+auto& PendingGrids() {
+    thread_local auto* items=new DeferredStartGrids;
+    return *items;
+}
+void DiscoverGrids() {
+    // React can publish a replacement GridView before its Start ancestors are
+    // connected. Keep recognized names pending until a later template/layout
+    // event establishes the guarded shell context.
+    PendingGrids().Discover([](auto handle,const auto& view) {
+        if(!Layouts<StartGrid>().count(handle)) {
+            auto style=std::make_shared<LayoutStyle<StartGrid>>(view);
+            Layouts<StartGrid>().emplace(handle,style);style->Refresh();
+        }
+    });
+}
 auto& Surfaces() {
     // XAML objects must be released on their UI thread, never in DLL teardown.
     thread_local auto* items=new std::unordered_map<InstanceHandle,std::shared_ptr<Surface>>;
@@ -112,12 +130,16 @@ auto& Surfaces() {
 }
 void Refresh() noexcept {
     try {
+        DiscoverGrids();
         std::vector<std::shared_ptr<Surface>> snapshot;
         for(const auto& item:Surfaces()) snapshot.push_back(item.second);
         for(const auto& item:snapshot) item->Refresh();
-        std::vector<std::shared_ptr<Search>> searches;
-        for(const auto& item:Searches()) searches.push_back(item.second);
+        std::vector<std::shared_ptr<SearchStyle<StartSearch>>> searches;
+        for(const auto& item:Searches<StartSearch>()) searches.push_back(item.second);
         for(const auto& item:searches) item->Refresh();
+        std::vector<std::shared_ptr<SearchStyle<SearchInput>>> inputs;
+        for(const auto& item:Searches<SearchInput>()) inputs.push_back(item.second);
+        for(const auto& item:inputs) item->Refresh();
         std::vector<std::shared_ptr<Spacing>> spacing;
         for(const auto& item:Spacings()) spacing.push_back(item.second);
         for(const auto& item:spacing) item->Refresh();
@@ -149,12 +171,13 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
     explicit Watcher(IUnknown* site) { winrt::check_hresult(site->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void())); }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation,VisualElement element,VisualMutationType mutation) noexcept override {
         try {
-            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches().erase(element.Handle); Spacings().erase(element.Handle); Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);Layouts<StartPinned>().erase(element.Handle);return S_OK; }
+            if(mutation==Remove) { Surfaces().erase(element.Handle); Searches<StartSearch>().erase(element.Handle);Searches<SearchInput>().erase(element.Handle); Spacings().erase(element.Handle); PendingGrids().Remove(element.Handle);Layouts<StartGrid>().erase(element.Handle);Layouts<StartCorners>().erase(element.Handle);Layouts<StartPinned>().erase(element.Handle);return S_OK; }
             // Only Handle is valid for Remove. Add strings use the same BSTR
             // ownership contract as the taskbar diagnostics callback.
             struct Strings { VisualElement& e; ~Strings(){SysFreeString(e.Type);SysFreeString(e.Name);} } strings{element};
             if(mutation!=Add || !element.Type) return S_OK;
             const bool search=std::wstring_view(element.Type)==L"StartMenu.SearchBoxToggleButton" || std::wstring_view(element.Type)==L"StartDocked.SearchBoxToggleButton";
+            const bool input=std::wstring_view(element.Type)==L"Cortana.UI.Views.RichSearchBoxControl" || std::wstring_view(element.Type)==L"Cortana.UI.Views.RichComposerBoxControl";
             const bool surface=element.Name && std::wstring_view(element.Type)==L"Windows.UI.Xaml.Controls.Border"
                 && (std::wstring_view(element.Name)==L"AcrylicBorder" || std::wstring_view(element.Name)==L"AcrylicOverlay");
             const std::wstring_view type(element.Type);
@@ -163,7 +186,7 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
             const bool corner=element.Name && (type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Windows.UI.Xaml.Controls.Border");
             const bool spacing=type==L"Windows.UI.Xaml.Controls.ItemsWrapGrid" || type==L"Windows.UI.Xaml.Controls.Button"
                 || (element.Name && (type==L"Windows.UI.Xaml.Controls.TextBlock" || type==L"Windows.UI.Xaml.Controls.Grid" || type==L"Microsoft.UI.Xaml.Controls.DropDownButton"));
-            if(!search && !surface && !spacing && !grid && !corner && !pinned) return S_OK;
+            if(!search && !input && !surface && !spacing && !grid && !corner && !pinned) return S_OK;
             winrt::Windows::Foundation::IInspectable object{nullptr};
             winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
             if(pinned) {
@@ -174,8 +197,8 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
             }
             if(grid) {
                 auto view=object.try_as<sx::Controls::GridView>();
-                if(IsStartGrid(view) && !Layouts<StartGrid>().count(element.Handle)) {
-                    EnsureReceiver();auto item=std::make_shared<LayoutStyle<StartGrid>>(view);Layouts<StartGrid>().emplace(element.Handle,item);item->Refresh();
+                if(view && (view.Name()==L"RecommendedList" || view.Name()==L"AllAppsGrid" || view.Name()==L"PinnedList") && !Layouts<StartGrid>().count(element.Handle)) {
+                    EnsureReceiver();PendingGrids().Add(element.Handle,view);DiscoverGrids();
                 }
             }
             if(corner) {
@@ -196,6 +219,7 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
                 (std::wstring_view(element.Name)==L"RootGrid" || std::wstring_view(element.Name)==L"DisplayName"
                 || std::wstring_view(element.Name)==L"LogoContainer" || std::wstring_view(element.Name)==L"LogosContainer"
                 || std::wstring_view(element.Name)==L"SeeAllButton"))) {
+                DiscoverGrids();
                 auto ancestor=object.try_as<sx::DependencyObject>();
                 for(unsigned depth=0;ancestor && depth<64;++depth) {
                     for(const auto& item:Layouts<StartGrid>())if(item.second->view.Element()==ancestor)item.second->view.Invalidate();
@@ -204,12 +228,19 @@ struct Watcher:winrt::implements<Watcher,IVisualTreeServiceCallback2,winrt::non_
                     ancestor=sx::Media::VisualTreeHelper::GetParent(ancestor);
                 }
             }
+            if(input){
+                auto control=object.try_as<sx::Controls::Control>();
+                if(IsSearchInput(control) && !Searches<SearchInput>().count(element.Handle)){
+                    EnsureReceiver();auto item=std::make_shared<SearchStyle<SearchInput>>(control);Searches<SearchInput>().emplace(element.Handle,item);item->Refresh();
+                }
+                return S_OK;
+            }
             if(!search && !surface) return S_OK;
             if(search) {
                 const auto control=object.try_as<sx::Controls::Control>();
-                if(!IsStartSearch(control) || Searches().count(element.Handle)) return S_OK;
+                if(!IsStartSearch(control) || Searches<StartSearch>().count(element.Handle)) return S_OK;
                 EnsureReceiver();
-                const auto item=std::make_shared<Search>(control);Searches().emplace(element.Handle,item);item->Refresh();
+                const auto item=std::make_shared<SearchStyle<StartSearch>>(control);Searches<StartSearch>().emplace(element.Handle,item);item->Refresh();
                 return S_OK;
             }
             const auto border=object.try_as<sx::Controls::Border>();
@@ -230,9 +261,20 @@ struct Site:winrt::implements<Site,IObjectWithSite,winrt::non_agile> {
             if(!value) { site=nullptr;return S_OK; }
             if(watcher) return E_UNEXPECTED;
             if(!state) {
-                mapping.reset(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,StartMappingName(GetCurrentProcessId()).c_str()));
-                if(!mapping) winrt::throw_last_error();
+                winrt::com_ptr<IXamlDiagnostics> diagnostics;winrt::check_hresult(value->QueryInterface(__uuidof(IXamlDiagnostics),diagnostics.put_void()));
+                BSTR data=nullptr;winrt::check_hresult(diagnostics->GetInitializationData(&data));
+                struct String {BSTR value;~String(){SysFreeString(value);}} string{data};
+                unsigned long long handle=0;int end=0;
+                if(!data || swscanf_s(data,L"JFStart12 %llx%n",&handle,&end)!=1 || data[end] || !handle)return E_INVALIDARG;
+                // The controller owns the supplied handle until it exits.
+                // Keep a private copy so failed/late initialization cannot
+                // double-close a transferred handle or leak one per retry.
+                HANDLE local=nullptr;
+                if(!DuplicateHandle(GetCurrentProcess(),reinterpret_cast<HANDLE>(static_cast<uintptr_t>(handle)),
+                    GetCurrentProcess(),&local,0,FALSE,DUPLICATE_SAME_ACCESS))winrt::throw_last_error();
+                mapping.reset(local);
                 state=static_cast<StartState*>(MapViewOfFile(mapping.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(StartState)));
+                if(state)InterlockedExchange(&state->mappingClaimed,1);
             }
             if(!state || Read(state->magic)!=StartMagic || !Read(state->running)) return E_ABORT;
             if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,

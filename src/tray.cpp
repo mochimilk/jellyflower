@@ -42,7 +42,7 @@ void TrayIcon::Remove() noexcept {
         present_ = false;
     }
 }
-void TrayIcon::Refresh(HWND owner, AcrylicMode mode) {
+void TrayIcon::Refresh(HWND owner, AcrylicMode) {
     window_ = owner;
     const bool light = LightTaskbar();
     if (brandTheme_ != static_cast<int>(light)) {
@@ -66,7 +66,7 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode mode) {
     data.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = TrayMessage;
     data.hIcon = icon_;
-    swprintf_s(data.szTip, L"jellyflower - %ls (click for menu)", AcrylicLabel(mode));
+    wcscpy_s(data.szTip, L"ur cute :3");
     if (Shell_NotifyIconW(NIM_MODIFY, &data)) {
         present_ = true;
         return;

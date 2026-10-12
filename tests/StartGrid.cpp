@@ -45,6 +45,12 @@ Item Make(unsigned kind){
         i.logo=sx::Controls::Grid();i.logo.Width(32);i.logo.Height(32);i.logo.Margin({12,0,0,0});i.logo.HorizontalAlignment(sx::HorizontalAlignment::Left);i.root.Children().Append(i.logo);
         i.label=sx::Controls::TextBlock();i.label.Text(L"native app name");sx::Controls::Grid::SetColumn(i.label,1);i.root.Children().Append(i.label);i.cell.Height(rows?40:84);
     }
+    if(kind==7){
+        // Current React Recommended containers arrive with these constraints,
+        // unlike the unconstrained app-grid wrappers used above.
+        i.root.Width(std::numeric_limits<double>::quiet_NaN());i.root.MinWidth(212);i.root.MaxWidth(212);
+        i.cell.MinWidth(236);i.cell.MaxWidth(236);i.cell.Padding({12,0,12,0});i.cell.Margin({0,0,20,0});
+    }
     i.cell.Content(i.root);return i;
 }
 int main(){try{
@@ -54,10 +60,21 @@ int main(){try{
     auto window=CreateWindowExW(WS_EX_NOACTIVATE,wc.lpszClassName,L"jellyflower grid fixture",WS_POPUP,100,100,1200,1200,nullptr,nullptr,wc.hInstance,nullptr);
     sx::Hosting::DesktopWindowXamlSource host;auto native=host.as<IDesktopWindowXamlSourceNative>();winrt::check_hresult(native->AttachToWindow(window));HWND child=nullptr;native->get_WindowHandle(&child);SetWindowPos(child,nullptr,0,0,1200,1200,SWP_SHOWWINDOW);
     sx::Controls::Grid pane;pane.Name(L"MainContent");pane.Width(832);host.Content(pane);
+    {
+        DeferredStartGrids discovery;unsigned adopted=0;
+        auto adopt=[&](auto,const auto&){++adopted;};
+        sx::Controls::GridView first;first.Name(L"RecommendedList");
+        discovery.Add(1,first);discovery.Discover(adopt,Supported);Check(adopted==0,"a list published before its ancestors waits for a recognized Start context");
+        pane.Children().Append(first);Layout(pane);discovery.Discover(adopt,Supported);discovery.Discover(adopt,Supported);Check(adopted==1,"late-connected Recommended list is adopted exactly once");
+        pane.Children().Clear();sx::Controls::GridView replacement;replacement.Name(L"RecommendedList");
+        discovery.Add(2,replacement);pane.Children().Append(replacement);Layout(pane);discovery.Discover(adopt,Supported);Check(adopted==2,"a replacement React list is adopted independently");
+        sx::Controls::GridView removed;removed.Name(L"RecommendedList");discovery.Add(3,removed);discovery.Remove(3);pane.Children().Append(removed);discovery.Discover(adopt,Supported);Check(adopted==2,"removed pending lists cannot be adopted later");
+        pane.Children().Clear();
+    }
     struct Variation{const wchar_t* name;unsigned kind;int maximum;double parentInset;double pager;};
     unsigned cases=0;
     for(const auto v:{Variation{L"AllAppsGrid",0,4,0,0},Variation{L"PinnedList",1,-1,0,24},Variation{L"PinnedList",2,-1,0,0},
-        Variation{L"AllAppsGrid",3,4,0,0},Variation{L"AllAppsGrid",4,1,0,0},Variation{L"RecommendedList",5,3,12,0},Variation{L"RecommendedList",6,1,52,0}}){
+        Variation{L"AllAppsGrid",3,4,0,0},Variation{L"AllAppsGrid",4,1,0,0},Variation{L"RecommendedList",5,3,12,0},Variation{L"RecommendedList",6,1,52,0},Variation{L"RecommendedList",7,-1,20,0}}){
         sx::Controls::Grid parent;parent.Margin({v.parentInset,0,v.parentInset,0});
         if(v.pager){sx::Controls::ColumnDefinition main,indicator;indicator.Width({v.pager,sx::GridUnitType::Pixel});parent.ColumnDefinitions().Append(main);parent.ColumnDefinitions().Append(indicator);}
         pane.Children().Append(parent);
@@ -68,7 +85,7 @@ int main(){try{
         if(v.kind==5)panel.ItemWidth(236);
         if(v.kind==0){auto body=FindStartElement(items[0].tile,L"RootGrid").as<sx::Controls::Grid>();items[0].square=body.Children().GetAt(0).as<sx::Controls::Border>();}
         const double originalNative=items[0].cell.ActualWidth();const auto originalPanel=panel.Margin();const auto originalWidth=view.Width();
-        Check(std::isnan(items[0].cell.Width()) && items[0].cell.MinWidth()==0 && !std::isfinite(items[0].cell.MaxWidth()),"real-shell wrapper has no fixed width constraints");
+        if(v.kind!=7)Check(std::isnan(items[0].cell.Width()) && items[0].cell.MinWidth()==0 && !std::isfinite(items[0].cell.MaxWidth()),"real-shell wrapper has no fixed width constraints");
         std::vector<std::unique_ptr<StartPinned>> pins;
         {
             StartGrid style(view,Supported);style.Refresh(true);style.Restore();style.Refresh(true);
@@ -81,7 +98,7 @@ int main(){try{
                 const double left=X(first,pane),right=pane.ActualWidth()-X(last,pane)-last.ActualWidth();
                 std::printf("view=%ls kind=%u width=%.3f columns=%u gaps=%.3f/%.3f cell=%.3f\n",v.name,v.kind,width,n,left,right,panel.ItemWidth());
                 Check(std::abs(left-edge)<1.5 && std::abs(right-edge)<1.5,"actual realized cells fill the viewport with the same side inset");
-                Check(std::abs(items[0].root.ActualWidth()-first.ActualWidth())<1.5,"inner data-template root fills the resized item, not its old fixed width");
+                Check(std::abs(items[0].root.ActualWidth()+first.Padding().Left+first.Padding().Right-first.ActualWidth())<1.5,"inner data-template root fills the resized item's content area");
                 for(unsigned j=1;j<n;++j)Check(std::abs((X(items[j].cell,pane)-X(items[j-1].cell,pane))-panel.ItemWidth())<1.5,"equal horizontal pitch across every complete row");
                 if(v.kind==0){
                     Check(std::abs(items[0].square.ActualWidth()-first.ActualWidth())<1.5 && std::abs(items[0].square.ActualHeight()-first.ActualWidth())<1.5,"category card remains square and fills its responsive cell");
@@ -106,6 +123,7 @@ int main(){try{
         Check(panel.Margin().Left==originalPanel.Left && panel.Margin().Right==originalPanel.Right,"stock panel margins restored");
         if(v.kind==1 || v.kind==2)Check(items[1].label.Visibility()==sx::Visibility::Visible && items[1].root.Width()==96 && items[1].root.Height()==84,"pinned captions and original template dimensions restore");
         if(v.kind==4 || v.kind==6)Check(items[1].root.Width()==728,"stock list's nested fixed width restored");
+        if(v.kind==7)Check(items[1].cell.MinWidth()==236 && items[1].cell.MaxWidth()==236 && items[1].root.MaxWidth()==212 && items[1].cell.Margin().Right==20,"React Recommended native wrapper/content constraints restore");
         Check(originalNative>0,"native template provided a real starting width");pane.Children().Clear();pane.Width(832);Layout(pane);
     }
     host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();
