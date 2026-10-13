@@ -1,7 +1,5 @@
-jellyflower 0.16.20
+jellyflower 0.16.21
 
-Start's account badge has two DIP less padding on the top and bottom only. The original side padding, 28-DIP avatar and 10-DIP corners remain. The native presenter, avatar and label center vertically, including when Windows adds extra minimum height. The account tooltip stays hidden.
+Start's account badge loses another two DIP of padding from the top and bottom only. Its visible vertical gaps are now eight DIP on the inspected native template, down from ten. Side spacing, vertical centering, the 28-DIP avatar, 10-DIP corners and hidden account tooltip are retained. The badge naturally measures about 44 DIP high. Search text and all other settings are unchanged.
 
-Start and Windows Search now capitalize the placeholder as `Search <PC name>`, including the plain `Search` fallback. Device-name casing, typed queries, native fonts and all other settings are unchanged. Original native alignment, padding, sizing and tooltip values/bindings restore on exit.
-
-Update through general's version/download row. Start/Search v16 waits for older helpers through v15 to restore before connecting. Explorer remains v15; users already running 0.16.17 or newer need no additional sign-out. The x64 installer, portable build and matching source are included.
+Update through general's version/download row and reopen Start. Start/Search v17 waits for older helpers through v16 to restore before connecting; Explorer stays v15. Users already running 0.16.17 or newer need no additional sign-out. Native badge layout/restoration, installer payload and update-download checks accompany the x64 installer, portable build and matching source.

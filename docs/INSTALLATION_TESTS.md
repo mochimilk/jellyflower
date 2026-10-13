@@ -190,3 +190,7 @@ Upgrade an existing installation through general, then sign out/back in once or 
 1. Update from 0.16.19 and reopen Start. The account badge's left/right inset must match before; top and bottom should each be two DIP smaller and visually balanced. Check avatar/name centering, hover hitbox, account actions, absent tooltip, both themes and 100/125/150/175/200% scaling. Keep the 28-DIP avatar and 10-DIP corners.
 2. Empty Start and Windows Search inputs should show `Search <PC name>` with capital S and native device-name case. Type/select a query and change theme; neither query nor selection should change.
 3. Exit and verify restoration of native padding, vertical alignment, heights, tooltip and search placeholder, including later native values and bindings. Start/Search v16 should attach after v15 restoration without restarting the shell; taskbar acrylic remains unchanged.
+
+## 0.16.21 eight-DIP vertical badge acceptance
+
+Update from 0.16.20 and reopen Start. Verify another two-DIP reduction on top/bottom only, with visible vertical gaps around eight DIP on the inspected template. Side position, centered 28-DIP avatar/name, 10-DIP corners, account actions, hidden tooltip and `Search <PC name>` should retain prior behavior. Check both themes, photo/default avatar and 100/125/150/175/200% scaling. Exit to verify original padding, alignments, heights, bindings and tooltip restore. Start/Search v17 must wait for older generation restoration without forcing a shell restart.

@@ -45,7 +45,7 @@ public:
             values_.Set(icon,sx::FrameworkElement::MinHeightProperty(),winrt::box_value(0.0));
             values_.Set(icon,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(sx::HorizontalAlignment::Center));
             values_.Set(icon,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
-            // Keep the native side padding; use two DIP less vertically.
+            // Keep the native side padding; use four DIP less vertically.
             // Center the native content even when a shell minimum adds space.
             values_.Set(button_,sx::Controls::Control::PaddingProperty(),nullptr,[](const auto& original){
                 auto p=winrt::unbox_value<sx::Thickness>(original);

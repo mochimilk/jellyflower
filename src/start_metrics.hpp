@@ -17,5 +17,5 @@ inline constexpr double SurfaceRadius = 20;
 inline constexpr double UserAvatar = 28;
 inline constexpr double UserBadgeHeight = 40;
 inline constexpr double UserBadgeRadius = 10;
-inline constexpr double UserBadgeVerticalReduction = 2;
+inline constexpr double UserBadgeVerticalReduction = 4;
 }

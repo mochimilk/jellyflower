@@ -1,5 +1,13 @@
 # Validation results
 
+## jellyflower 0.16.21, 2026-10-13
+
+UserBadgeVerticalReduction increases from two to four DIP relative to the original native side values. This removes another two DIP from top/bottom only. Native side padding, centering, the 28-DIP avatar, 10-DIP radius, tooltip suppression and the capitalized PC-name placeholder are unchanged. On the inspected template, 11/7/11/7-DIP control padding and the original border produce an approximately 44-DIP natural target.
+
+StartSpacing's live native XAML fixture measures avatar 28x28 in a 159x44 target, with left/top/right/bottom edges 12/8/12.8076/8 DIP. The side anchor is unchanged, both vertical gaps are eight DIP, and the existing larger-native-MinHeight centering, later padding changes, invocation, tooltip suppression and latest/local/binding/template restoration checks pass. Search logic is unchanged from the passing 0.16.20 tests. Start/Search v17 uses a new pinned-helper identity and waits for generations through v16 to restore; Explorer stays v15.
+
+App/helper/installer build, production setup recovery/updater checks, exact embedded payload/extraction and complete source/portable hashes accompany publication. Tests use app-owned native XAML fixtures and workspace-only setup extraction without a real installation, shell restart, preference change or account modification. Actual hover appearance on private Windows templates, all display scales, suspended-host upgrade timing and ARM64 remain desktop acceptance checks.
+
 ## jellyflower 0.16.20, 2026-10-13
 
 The account badge's side padding remains native. Only the top/bottom shrink, using a shared two-DIP reduction from their corresponding side values with a zero floor. On the inspected template this is 11-DIP horizontal and 9-DIP vertical control padding. The 28-DIP avatar, 10-DIP radius, tooltip suppression and auto footer sizing remain. Button/presenter/label vertical alignment is explicitly centered; no render translation or font/baseline changes are introduced. All original and later native padding, alignment, height and binding values restore.
