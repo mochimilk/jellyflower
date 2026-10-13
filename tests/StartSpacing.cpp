@@ -28,26 +28,30 @@ void UserChecks(const sx::Hosting::DesktopWindowXamlSource& host){
     Check(!IsStartUserButton(button) && IsStartUserButton(button,UserType),"profile styles reject unrelated same-named controls");
     auto icon=FindStartElement(button,L"UserTileIcon");auto background=FindStartElement(button,L"BackgroundBorder").as<sx::Controls::Border>();auto label=FindStartElement(button,L"UserTileNameText").as<sx::Controls::TextBlock>();
     const auto originalFont=label.FontFamily().Source();const auto originalSize=label.FontSize();const auto nativeLeft=icon.TransformToVisual(button).TransformPoint({0,0}).X;
+    const auto originalAlignment=button.VerticalAlignment();const auto originalContentAlignment=button.VerticalContentAlignment();
     sx::Controls::ToolTipService::SetToolTip(label,winrt::box_value(L"Fixture account"));
     StartUser user(button);user.Refresh(true);Layout(root);
-    Check(user.Applied() && icon.ActualWidth()==28 && icon.ActualHeight()==28 && std::abs(button.ActualHeight()-52)<1,"smaller avatar gets a taller natural target for original horizontal padding");
+    Check(user.Applied() && icon.ActualWidth()==28 && icon.ActualHeight()==28 && std::abs(button.ActualHeight()-48)<1,"reduced vertical padding sizes the native badge to 48 DIP");
     const auto position=icon.TransformToVisual(button).TransformPoint({0,0});const auto text=label.TransformToVisual(button).TransformPoint({0,0});
     const auto bottom=button.ActualHeight()-position.Y-icon.ActualHeight();const auto right=button.ActualWidth()-(text.X+label.ActualWidth());
     std::printf("Badge avatar=%g,%g target=%g,%g edge=%g,%g,%g,%g\n",icon.ActualWidth(),icon.ActualHeight(),button.ActualWidth(),button.ActualHeight(),position.X,position.Y,right,bottom);
-    Check(std::abs(position.X-nativeLeft)<.1 && std::abs(position.X-12)<1 && std::abs(position.Y-position.X)<1 && std::abs(right-position.X)<1 && std::abs(bottom-position.X)<1,"original horizontal anchor and matching vertical padding within native pixel rounding");
+    Check(std::abs(position.X-nativeLeft)<.1 && std::abs(position.X-12)<1 && std::abs(position.Y-10)<1 && std::abs(right-position.X)<1 && std::abs(bottom-position.Y)<1,"unchanged horizontal anchor and equal ten-DIP vertical edges within native pixel rounding");
     Check(std::abs(footer.ActualHeight()-button.ActualHeight())<1 && std::abs(userHost.ActualHeight()-button.ActualHeight())<1,"fixed native footer hosts expand without clipping the padded account button");
-    Check(button.Padding().Left==11 && button.Padding().Top==11 && button.Padding().Right==11 && button.Padding().Bottom==11,"native horizontal padding is preserved and mirrored vertically");
+    Check(button.Padding().Left==11 && button.Padding().Top==9 && button.Padding().Right==11 && button.Padding().Bottom==9,"native side padding is retained with two DIP less on top and bottom");
     Check(background.CornerRadius().TopLeft==10 && button.Template()==nativeTemplate && button.IsTabStop(),"larger radius retains native template and keyboard target");
     Check(label.FontFamily().Source()==originalFont && label.FontSize()==originalSize,"native account typography retained");
     for(const auto& part:{button.as<sx::DependencyObject>(),label.as<sx::DependencyObject>(),icon.as<sx::DependencyObject>(),userHost.as<sx::DependencyObject>()})Check(!sx::Controls::ToolTipService::GetToolTip(part),"redundant account tooltip removed at each native attachment point");
     auto peer=sx::Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(button);peer.GetPattern(sx::Automation::Peers::PatternInterface::Invoke).as<sx::Automation::Provider::IInvokeProvider>().Invoke();Pump();Check(clicked,"native account invocation still reaches its handler");
-    button.Padding({16,2,16,2});Layout(root);Check(button.Padding().Left==16 && button.Padding().Top==16 && button.ActualHeight()>60,"later native horizontal padding updates propagate vertically through auto footer sizing");
+    button.MinHeight(60);Layout(root);const auto tallIcon=icon.TransformToVisual(button).TransformPoint({0,0});const auto tallText=label.TransformToVisual(button).TransformPoint({0,0});
+    Check(std::abs(tallIcon.Y+icon.ActualHeight()/2-button.ActualHeight()/2)<1 && std::abs(tallText.Y+label.ActualHeight()/2-button.ActualHeight()/2)<1,"avatar and account label center when native minimum height adds extra room");
+    button.MinHeight(0);Layout(root);
+    button.Padding({16,2,16,2});Layout(root);Check(button.Padding().Left==16 && button.Padding().Top==14 && button.ActualHeight()>56,"later native horizontal padding updates propagate vertically through auto footer sizing");
     sx::Controls::ToolTipService::SetToolTip(label,winrt::box_value(L"Updated native name"));Check(!sx::Controls::ToolTipService::GetToolTip(label),"later native tooltip remains suppressed");user.Restore();Layout(root);
-    Check(icon.Width()==32 && icon.Height()==32 && background.CornerRadius().TopLeft==4 && button.Padding().Left==16 && button.Padding().Top==2 && footer.Height()==40 && userHost.Height()==40,"latest native sizes, padding and both fixed footer heights restore");
+    Check(icon.Width()==32 && icon.Height()==32 && background.CornerRadius().TopLeft==4 && button.Padding().Left==16 && button.Padding().Top==2 && footer.Height()==40 && userHost.Height()==40 && button.VerticalAlignment()==originalAlignment && button.VerticalContentAlignment()==originalContentAlignment,"latest native sizes, padding, alignments and both fixed footer heights restore");
     Check(winrt::unbox_value<winrt::hstring>(sx::Controls::ToolTipService::GetToolTip(button))==L"Fixture account" && winrt::unbox_value<winrt::hstring>(sx::Controls::ToolTipService::GetToolTip(label))==L"Updated native name","native tooltip and latest updated name restore on exit");
     sx::Data::Binding binding;binding.Source(winrt::box_value(32.0));icon.SetBinding(sx::FrameworkElement::WidthProperty(),binding);sx::Data::Binding heightBinding;heightBinding.Source(winrt::box_value(40.0));footer.SetBinding(sx::FrameworkElement::HeightProperty(),heightBinding);
     user.Refresh(true);user.Restore();Check(icon.GetBindingExpression(sx::FrameworkElement::WidthProperty()).ParentBinding()==binding && footer.GetBindingExpression(sx::FrameworkElement::HeightProperty()).ParentBinding()==heightBinding,"avatar width and footer height bindings restore");
-    user.Refresh(true);button.Template(UserTemplate());Layout(root);user.Refresh(true);Layout(root);Check(FindStartElement(button,L"UserTileIcon").Width()==28 && button.Padding().Top==16,"replacement profile template is restyled");
+    user.Refresh(true);button.Template(UserTemplate());Layout(root);user.Refresh(true);Layout(root);Check(FindStartElement(button,L"UserTileIcon").Width()==28 && button.Padding().Top==14,"replacement profile template is restyled");
     user.Refresh(false);Check(FindStartElement(button,L"UserTileIcon").Width()==32 && sx::Controls::ToolTipService::GetToolTip(button),"disabled adapter restores replacement template and tooltip");button.Click(token);
 }
 int main(){try{

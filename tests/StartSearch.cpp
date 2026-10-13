@@ -45,8 +45,8 @@ void RenderChecks(const sx::Controls::Grid& pane,const sx::Controls::Canvas& ico
 }
 int main(){
     try{
-        Check(SearchPlaceholder(L"jelly-PC")==L"search jelly-PC" && SearchPlaceholder(L"名-PC")==L"search 名-PC" && SearchPlaceholder({})==L"search","PC names retain case and Unicode with an empty-name fallback");
-        wchar_t pc[256]{};DWORD pcSize=256;if(GetComputerNameExW(ComputerNamePhysicalDnsHostname,pc,&pcSize))Check(DeviceSearchPlaceholder()==std::wstring(L"search ")+pc,"cached controller label matches the current Windows device name");
+        Check(SearchPlaceholder(L"jelly-PC")==L"Search jelly-PC" && SearchPlaceholder(L"名-PC")==L"Search 名-PC" && SearchPlaceholder({})==L"Search","PC names retain case and Unicode with an empty-name fallback");
+        wchar_t pc[256]{};DWORD pcSize=256;if(GetComputerNameExW(ComputerNamePhysicalDnsHostname,pc,&pcSize))Check(DeviceSearchPlaceholder()==std::wstring(L"Search ")+pc,"cached controller label matches the current Windows device name");
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         winrt::init_apartment(winrt::apartment_type::single_threaded);auto manager=sx::Hosting::WindowsXamlManager::InitializeForCurrentThread();
         WNDCLASSW wc{};wc.lpszClassName=L"jellyflower.StartSearchFixture";wc.hInstance=GetModuleHandleW(nullptr);wc.lpfnWndProc=DefWindowProcW;RegisterClassW(&wc);
@@ -110,7 +110,7 @@ int main(){
             Check(header.Margin().Left==32 && header.Margin().Right==32 && std::abs(compactIcon.TransformToVisual(pane).TransformPoint({0,0}).X-32)<.1,"compact header has symmetric margins and 32-DIP shared alignment");
             search.Restore();heading.Name(L"PinnedListHeaderText");Layout(pane);Check(header.Margin().Left==32 && header.Margin().Right==28,"native asymmetric header margins restore");
             search.Refresh(true,false);search.Refresh(true,true);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"device name stays unchanged in light mode");search.Refresh(true,false);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"device name stays unchanged in dark mode");nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
-            search.Refresh(true,false,L"search jelly-PC");Check(nativePlaceholder.Text()==L"search jelly-PC","controller-supplied device name updates the placeholder");search.Refresh(true,false);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"native device label can be restored without replacing the header");search.Restore();
+            search.Refresh(true,false,L"Search jelly-PC");Check(nativePlaceholder.Text()==L"Search jelly-PC","controller-supplied device name updates the placeholder");search.Refresh(true,false);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"native device label can be restored without replacing the header");search.Restore();
             sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true);search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");
             search.Refresh(true,false);button.Template(Template());Layout(pane);search.Refresh(true,false);Layout(pane);Check(search.Applied() && FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>().Text()==DeviceSearchPlaceholder(),"replacement native templates are rediscovered without duplicate overlays");
         }

@@ -6,7 +6,7 @@
 namespace acrylic {
 inline constexpr size_t SearchPlaceholderCapacity=264;
 inline std::wstring SearchPlaceholder(std::wstring_view computerName) {
-    std::wstring text=L"search";
+    std::wstring text=L"Search";
     if(!computerName.empty()){text+=L' ';text+=computerName;}
     return text;
 }

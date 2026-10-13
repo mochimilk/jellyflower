@@ -45,12 +45,19 @@ public:
             values_.Set(icon,sx::FrameworkElement::MinHeightProperty(),winrt::box_value(0.0));
             values_.Set(icon,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(sx::HorizontalAlignment::Center));
             values_.Set(icon,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
-            // Preserve the native horizontal anchor and use the same padding
-            // vertically. Auto-sized native footer hosts make room for it.
+            // Keep the native side padding; use two DIP less vertically.
+            // Center the native content even when a shell minimum adds space.
             values_.Set(button_,sx::Controls::Control::PaddingProperty(),nullptr,[](const auto& original){
-                auto p=winrt::unbox_value<sx::Thickness>(original);p.Top=p.Left;p.Bottom=p.Right;return winrt::box_value(p);
+                auto p=winrt::unbox_value<sx::Thickness>(original);
+                p.Top=std::max(0.0,p.Left-StartMetrics::UserBadgeVerticalReduction);
+                p.Bottom=std::max(0.0,p.Right-StartMetrics::UserBadgeVerticalReduction);return winrt::box_value(p);
             });
             values_.Set(button_,sx::FrameworkElement::MinHeightProperty(),nullptr,[](const auto& original){return winrt::box_value(std::max(StartMetrics::UserBadgeHeight,winrt::unbox_value<double>(original)));});
+            values_.Set(button_,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
+            values_.Set(button_,sx::Controls::Control::VerticalContentAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
+            values_.Set(label,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
+            if(auto presenter=FindStartElement(root,L"ContentPresenter").try_as<sx::Controls::ContentPresenter>())
+                values_.Set(presenter,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
             for(const auto& part:{button_.as<sx::FrameworkElement>(),icon.as<sx::FrameworkElement>(),label.as<sx::FrameworkElement>()})
                 values_.Set(part,sx::Controls::ToolTipService::ToolTipProperty(),nullptr);
             auto parent=sx::Media::VisualTreeHelper::GetParent(button_);
