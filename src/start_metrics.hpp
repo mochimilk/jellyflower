@@ -15,7 +15,6 @@ inline constexpr double SearchGap = 8;
 inline constexpr double SearchResultsGap = 12;
 inline constexpr double SurfaceRadius = 20;
 inline constexpr double UserAvatar = 28;
-inline constexpr double UserBadgePadding = 6;
 inline constexpr double UserBadgeHeight = 40;
 inline constexpr double UserBadgeRadius = 10;
 }

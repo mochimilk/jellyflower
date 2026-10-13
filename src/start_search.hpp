@@ -33,6 +33,7 @@ class StartSearch {
     winrt::event_token layout_{};
     bool applied_ = false, positioning_ = false;
     bool light_ = false;
+    winrt::hstring placeholderText_;
     static void Remove(const sx::Controls::Grid& parent, const sx::UIElement& child) noexcept {
         try { uint32_t index = 0; if (parent && child && parent.Children().IndexOf(child, index)) parent.Children().RemoveAt(index); } catch (...) {}
     }
@@ -111,11 +112,12 @@ public:
     StartSearch(const StartSearch&) = delete;
     StartSearch& operator=(const StartSearch&) = delete;
     ~StartSearch() { Restore(); }
-    void Refresh(bool enabled, bool light) {
+    void Refresh(bool enabled, bool light, std::wstring_view text=DeviceSearchPlaceholder()) {
         if (!enabled) { Restore(); return; }
         if (!Discover()) { if (applied_) Restore(); return; }
         if (!heading_.get()) heading_ = FindStartElement(pane_, L"PinnedListHeaderText");
-        const bool themeChanged=light_!=light;
+        const bool textChanged=std::wstring_view(placeholderText_)!=text;
+        if(textChanged)placeholderText_=winrt::hstring(text);
         light_ = light;
         if (!applied_) {
             try {
@@ -129,7 +131,7 @@ public:
                 values_.Set(outline_, sx::Controls::Border::BackgroundProperty(), clear);
                 values_.Set(outline_, sx::Controls::Border::BorderBrushProperty(), clear);
                 values_.Set(outline_, sx::Controls::Border::BorderThicknessProperty(), winrt::box_value(sx::Thickness{}));
-                values_.Set(placeholder_, sx::Controls::TextBlock::TextProperty(), winrt::box_value(SearchPlaceholder(light_)));
+                values_.Set(placeholder_, sx::Controls::TextBlock::TextProperty(), winrt::box_value(placeholderText_));
                 values_.Set(button_, sx::Automation::AutomationProperties::NameProperty(), winrt::box_value(L"search"));
                 for (const auto name : {L"SearchGlyph",L"SearchIconOff",L"SearchIconOn",L"UnderlineContainer",L"BorderUnderline"})
                     if (const auto element = FindStartElement(template_, name)) values_.Set(element, sx::UIElement::OpacityProperty(), winrt::box_value(0.0));
@@ -145,7 +147,7 @@ public:
                 layout_ = button_.LayoutUpdated([this](auto&&, auto&&) { Position(); });
             } catch (...) { Restore(); throw; }
         }
-        if(themeChanged)values_.Update(placeholder_,sx::Controls::TextBlock::TextProperty(),winrt::box_value(SearchPlaceholder(light_)));
+        if(textChanged)values_.Update(placeholder_,sx::Controls::TextBlock::TextProperty(),winrt::box_value(placeholderText_));
         Ink(); Position();
     }
     void Restore() noexcept {

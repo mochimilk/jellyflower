@@ -3,6 +3,7 @@
 #include "start_properties.hpp"
 #include "start_metrics.hpp"
 #include <algorithm>
+#include <limits>
 namespace acrylic {
 inline bool IsStartUserButton(const sx::Controls::Control& button, StartClassName name=nullptr) {
     if(!button || button.Name()!=L"UserTileButton") return false;
@@ -44,12 +45,22 @@ public:
             values_.Set(icon,sx::FrameworkElement::MinHeightProperty(),winrt::box_value(0.0));
             values_.Set(icon,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(sx::HorizontalAlignment::Center));
             values_.Set(icon,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
-            // Native templates include the control border around the padding.
-            // Keep six DIP total on every edge and the existing 40-DIP target.
-            const auto border=button_.BorderThickness();
-            const auto edge=[](double thickness){return std::max(0.0,StartMetrics::UserBadgePadding-thickness);};
-            values_.Set(button_,sx::Controls::Control::PaddingProperty(),winrt::box_value(sx::Thickness{edge(border.Left),edge(border.Top),edge(border.Right),edge(border.Bottom)}));
+            // Preserve the native horizontal anchor and use the same padding
+            // vertically. Auto-sized native footer hosts make room for it.
+            values_.Set(button_,sx::Controls::Control::PaddingProperty(),nullptr,[](const auto& original){
+                auto p=winrt::unbox_value<sx::Thickness>(original);p.Top=p.Left;p.Bottom=p.Right;return winrt::box_value(p);
+            });
             values_.Set(button_,sx::FrameworkElement::MinHeightProperty(),nullptr,[](const auto& original){return winrt::box_value(std::max(StartMetrics::UserBadgeHeight,winrt::unbox_value<double>(original)));});
+            for(const auto& part:{button_.as<sx::FrameworkElement>(),icon.as<sx::FrameworkElement>(),label.as<sx::FrameworkElement>()})
+                values_.Set(part,sx::Controls::ToolTipService::ToolTipProperty(),nullptr);
+            auto parent=sx::Media::VisualTreeHelper::GetParent(button_);
+            for(unsigned depth=0;parent && depth<12;++depth) {
+                if(auto host=parent.try_as<sx::FrameworkElement>();host && (host.Name()==L"UserTile" || host.Name()==L"NavPanePlaceholder")) {
+                    values_.Set(host,sx::FrameworkElement::HeightProperty(),winrt::box_value(std::numeric_limits<double>::quiet_NaN()));
+                    if(host.Name()==L"UserTile")values_.Set(host,sx::Controls::ToolTipService::ToolTipProperty(),nullptr);
+                }
+                parent=sx::Media::VisualTreeHelper::GetParent(parent);
+            }
             constexpr double radius=StartMetrics::UserBadgeRadius;
             values_.Set(background,sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(sx::CornerRadius{radius,radius,radius,radius}));
             applied_=true;

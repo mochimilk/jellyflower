@@ -58,7 +58,7 @@ template<class View> struct SearchStyle {
     bool counted=false;
     explicit SearchStyle(const sx::Controls::Control& control):view(control) {}
     void Refresh() noexcept {
-        try { view.Refresh(owner.Alive() && Read(state->enabled),state && Read(state->light)); }
+        try { view.Refresh(owner.Alive() && Read(state->enabled),state && Read(state->light),state && state->placeholder[0]?state->placeholder:L"search"); }
         catch(...) { Result(winrt::to_hresult()); view.Restore(); }
         if(state && counted!=view.Applied()) {
             counted=view.Applied();
@@ -283,7 +283,7 @@ struct Site:winrt::implements<Site,IObjectWithSite,winrt::non_agile> {
                 BSTR data=nullptr;winrt::check_hresult(diagnostics->GetInitializationData(&data));
                 struct String {BSTR value;~String(){SysFreeString(value);}} string{data};
                 unsigned long long handle=0;int end=0;
-                if(!data || swscanf_s(data,L"JFStart14 %llx%n",&handle,&end)!=1 || data[end] || !handle)return E_INVALIDARG;
+                if(!data || swscanf_s(data,L"JFStart15 %llx%n",&handle,&end)!=1 || data[end] || !handle)return E_INVALIDARG;
                 // The controller owns the supplied handle until it exits.
                 // Keep a private copy so failed/late initialization cannot
                 // double-close a transferred handle or leak one per retry.
