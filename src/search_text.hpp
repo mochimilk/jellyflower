@@ -16,5 +16,8 @@ inline std::wstring SearchGreeting(std::wstring_view firstName,unsigned period) 
     text+=L' ';text+=icons[period];return text;
 }
 std::wstring SearchFirstName(std::wstring_view displayName);
-const std::wstring& UserSearchFirstName();
+std::wstring SearchGivenName(std::wstring_view givenName);
+inline constexpr UINT SearchIdentityReadyMessage=WM_APP+84;
+// Null while the one-time background lookup is pending; empty when unavailable.
+const std::wstring* UserSearchFirstName(HWND notify=nullptr);
 }

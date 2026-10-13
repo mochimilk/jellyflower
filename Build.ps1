@@ -20,7 +20,7 @@ if ($cmakeCommand) {
     }
 }
 if (-not $cmakePath) {
-    throw 'Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CMake tools, and Windows SDK 10.0.19041 or newer. No C++ compiler/SDK is bundled in this project.'
+    throw 'Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CMake tools, and Windows SDK 10.0.20348 or newer. No C++ compiler/SDK is bundled in this project.'
 }
 $buildPath = Join-Path $projectRoot "build-$Architecture"
 $distribution = Join-Path $projectRoot "dist\$Architecture"

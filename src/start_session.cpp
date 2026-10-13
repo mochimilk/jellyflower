@@ -43,9 +43,9 @@ void Notify(DWORD target) {
 }
 HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     // Earlier helpers stay pinned after an in-app update. Wait for their
-    // restorations before v18 saves original shell properties; never unload them.
+    // restorations before v19 saves original shell properties; never unload them.
     struct LegacyState { volatile LONG magic,pid,epoch,running,enabled,light,attached,count,result,searches,spacing; };
-    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17"}) {
+    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17",L"v18"}) {
         Handle retired(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,(L"Local\\jellyflower.Start."+std::wstring(version)+L"."+std::to_wstring(pid)).c_str()));
         if(!retired) continue;
         const std::wstring_view generation(version);
@@ -75,11 +75,11 @@ HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     const auto initialize=reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(GetProcAddress(xaml,"InitializeXamlDiagnosticsEx"));
     wchar_t file[32768]{};const DWORD length=GetModuleFileNameW(nullptr,file,32768);
     if(initialize && length && length<32768) {
-        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v18.dll";
+        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v19.dll";
         if(host==ShellHost::Search) {
             result=SearchHelperAccess(process,path.c_str());if(FAILED(result))return result;
         }
-        wchar_t data[64]{};swprintf_s(data,L"JFStart18 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
+        wchar_t data[64]{};swprintf_s(data,L"JFStart19 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
         // Initialization runs on a fresh background thread. Probe existing
         // endpoint names until one accepts; never create/replace Start.
         for(unsigned index=1;index<=64;++index) {
@@ -103,11 +103,12 @@ void StartSession::Release() {
     mapping_.reset();process_.reset();pid_=0;lastAttempt_=0;
 }
 StartSession::~StartSession() {Release();}
-void StartSession::Refresh(bool light) {
+void StartSession::Refresh(bool light,HWND notify) {
     if(worker_.joinable() && finished_) worker_.join();
     if(process_ && WaitForSingleObject(process_.get(),0)!=WAIT_TIMEOUT) Release();
     bool newOwner=false;
     if(!pid_) {
+        const auto first=UserSearchFirstName(notify);if(!first)return;
         pid_=StartPid(host_);if(!pid_) return;
         process_.reset(OpenProcess(SYNCHRONIZE|PROCESS_DUP_HANDLE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid_));
         mapping_.reset(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(StartState),StartMappingName(pid_).c_str()));
@@ -115,7 +116,7 @@ void StartSession::Refresh(bool light) {
         if(process_ && mapping_) state_=static_cast<StartState*>(MapViewOfFile(mapping_.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(StartState)));
         if(!state_) {Release();return;}
         if(!existingMapping)for(unsigned period=0;period<3;++period)
-            wcsncpy_s(state_->greetings[period],SearchGreeting(UserSearchFirstName(),period).c_str(),_TRUNCATE);
+            wcsncpy_s(state_->greetings[period],SearchGreeting(*first,period).c_str(),_TRUNCATE);
         const auto lifetime=DuplicateTo(GetCurrentProcess(),process_.get(),SYNCHRONIZE);
         if(!lifetime){Release();return;}
         CloseRemote(process_.get(),reinterpret_cast<HANDLE>(static_cast<uintptr_t>(InterlockedExchange64(&state_->ownerHandle,reinterpret_cast<LONG64>(lifetime)))));

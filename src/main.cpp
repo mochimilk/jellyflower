@@ -327,8 +327,8 @@ public:
     }
     void Refresh() {
         RefreshTaskbar();
-        start.Refresh(SystemLightTheme());
-        search.Refresh(SystemLightTheme());
+        start.Refresh(SystemLightTheme(),window);
+        search.Refresh(SystemLightTheme(),window);
         tray.Refresh(window, mode);
         const DWORD cursorBefore = cursors->Error();
         cursors->Refresh();
@@ -586,6 +586,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             if (error) { Log(L"Cursor selection error=" + std::to_wstring(error)); self->tray.CursorError(error, self->cursors->SaveFailed()); }
         }
         return self->cursors->Mode();
+    } else if (message == SearchIdentityReadyMessage) {
+        self->Refresh();
+        return 0;
     } else if (message == AutoThemeChangedMessage || message == WM_TIMECHANGE) {
         self->RefreshAutoTheme(message == WM_TIMECHANGE);
         self->Refresh();

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "start_spacing.hpp"
+#include <cmath>
 namespace acrylic {
 inline bool IsStartFooter(const sx::FrameworkElement& element,StartClassName name=nullptr) {
     return element && element.Name()==L"NavPanePlaceholder" && StartSpacingFor(element,name)==StartSpacingRule::Both;
@@ -65,15 +66,38 @@ class StartFooterPart {
     sx::FrameworkElement element_;
     StartFooterKind kind_;
     sx::DependencyObject template_{nullptr};
+    sx::FrameworkElement powerHost_{nullptr};
     StartSearchValues values_,parts_;
+    StartClassName name_;
+    int64_t widthToken_=0;
+    winrt::event_token sizeToken_{};
     bool applied_=false,complete_=false;
+    double Side()const {const double width=element_.Width();return std::isfinite(width) && width>0?width:element_.ActualWidth();}
+    void Square()noexcept{
+        try{const double side=Side();if(side<=0 || !std::isfinite(side))return;
+            for(const auto& target:{element_,powerHost_})if(target && target.Height()!=side)values_.Update(target,sx::FrameworkElement::HeightProperty(),winrt::box_value(side));
+        }catch(...){}
+    }
 public:
-    StartFooterPart(const sx::FrameworkElement& element,StartFooterKind kind):element_(element),kind_(kind){}
+    StartFooterPart(const sx::FrameworkElement& element,StartFooterKind kind,StartClassName name=nullptr):element_(element),kind_(kind),name_(name){}
     ~StartFooterPart(){Restore();}
     void Refresh(bool enabled){
         if(!enabled){Restore();return;}
         if(!applied_){values_.Set(element_,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
             if(kind_==StartFooterKind::Action)if(auto control=element_.try_as<sx::Controls::Control>())values_.Set(control,sx::Controls::Control::VerticalContentAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Center));
+            if(kind_==StartFooterKind::Action && element_.Name()==L"PowerButton"){
+                auto parent=sx::Media::VisualTreeHelper::GetParent(element_);
+                for(unsigned depth=0;parent && depth<8;++depth){
+                    const auto type=name_?name_(parent):winrt::get_class_name(parent);
+                    if(type==L"StartMenu.PowerOptionsView" || type==L"StartDocked.PowerOptionsView"){powerHost_=parent.try_as<sx::FrameworkElement>();break;}
+                    parent=sx::Media::VisualTreeHelper::GetParent(parent);
+                }
+                // Native power is Width=40, Height=Auto. Center alignment must
+                // not reduce its hit/hover target to the glyph's desired height.
+                for(const auto& target:{element_,powerHost_})if(target)values_.Set(target,sx::FrameworkElement::HeightProperty(),nullptr,[this](const auto& original){const auto side=Side();return side>0 && std::isfinite(side)?winrt::box_value(side):original;});
+                widthToken_=element_.RegisterPropertyChangedCallback(sx::FrameworkElement::WidthProperty(),[this](auto&&,auto&&){Square();});
+                sizeToken_=element_.SizeChanged([this](auto&&,auto&&){Square();});
+            }
             applied_=true;}
         if(kind_!=StartFooterKind::Action || !sx::Media::VisualTreeHelper::GetChildrenCount(element_))return;
         const auto root=sx::Media::VisualTreeHelper::GetChild(element_,0);
@@ -83,7 +107,10 @@ public:
         for(const auto id:{L"BackgroundBorder",L"HighContrastBorder"})if(auto border=FindStartElement(root,id).try_as<sx::Controls::Border>()){
             parts_.Set(border,sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(radius));if(std::wstring_view(id)==L"BackgroundBorder")complete_=true;}
     }
-    void Restore()noexcept{parts_.Clear();values_.Clear();template_=nullptr;complete_=applied_=false;}
+    void Restore()noexcept{
+        try{if(widthToken_)element_.UnregisterPropertyChangedCallback(sx::FrameworkElement::WidthProperty(),widthToken_);if(sizeToken_.value)element_.SizeChanged(sizeToken_);}catch(...){}
+        widthToken_=0;sizeToken_={};parts_.Clear();values_.Clear();template_=nullptr;powerHost_=nullptr;complete_=applied_=false;
+    }
     bool Applied()const noexcept{return applied_;}
 };
 }

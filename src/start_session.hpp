@@ -18,7 +18,7 @@ class StartSession {
 public:
     explicit StartSession(ShellHost host=ShellHost::Start):host_(host){}
     ~StartSession();
-    void Refresh(bool light);
+    void Refresh(bool light,HWND notify=nullptr);
     LONG Count() const {return state_ ? Read(state_->count):0;}
     LONG SearchCount() const {return state_ ? Read(state_->searches):0;}
     LONG SpacingCount() const {return state_ ? Read(state_->spacing):0;}

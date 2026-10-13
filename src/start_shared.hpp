@@ -3,9 +3,9 @@
 #include "shared.hpp"
 #include "search_text.hpp"
 namespace acrylic {
-inline constexpr GUID StartTapClass={0x947e31b2,0x47ac,0x4a86,{0x9b,0x6e,0x67,0xcb,0x86,0xa5,0x68,0xb1}};
-inline constexpr LONG StartMagic=0x4a465312;
-inline constexpr wchar_t StartNotifyClass[]=L"jellyflower.StartNotify.v18";
+inline constexpr GUID StartTapClass={0xbd8630a9,0x47ac,0x4a86,{0x9b,0x6e,0x67,0xcb,0x86,0xa5,0x68,0xb1}};
+inline constexpr LONG StartMagic=0x4a465313;
+inline constexpr wchar_t StartNotifyClass[]=L"jellyflower.StartNotify.v19";
 inline constexpr UINT StartRefreshMessage=WM_APP+73;
 struct StartState {
     volatile LONG magic,controllerPid,epoch,running,enabled,light,attached,count,result,searches,spacing;
@@ -19,5 +19,5 @@ struct StartState {
     volatile LONG greetingPeriod;
     wchar_t greetings[3][SearchPlaceholderCapacity];
 };
-inline std::wstring StartMappingName(DWORD pid) { return L"Local\\jellyflower.Start.v18."+std::to_wstring(pid); }
+inline std::wstring StartMappingName(DWORD pid) { return L"Local\\jellyflower.Start.v19."+std::to_wstring(pid); }
 }
