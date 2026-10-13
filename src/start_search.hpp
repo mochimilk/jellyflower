@@ -3,6 +3,7 @@
 #include "start_properties.hpp"
 #include "start_metrics.hpp"
 #include "search_art.hpp"
+#include "search_text.hpp"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
@@ -114,6 +115,7 @@ public:
         if (!enabled) { Restore(); return; }
         if (!Discover()) { if (applied_) Restore(); return; }
         if (!heading_.get()) heading_ = FindStartElement(pane_, L"PinnedListHeaderText");
+        const bool themeChanged=light_!=light;
         light_ = light;
         if (!applied_) {
             try {
@@ -127,7 +129,7 @@ public:
                 values_.Set(outline_, sx::Controls::Border::BackgroundProperty(), clear);
                 values_.Set(outline_, sx::Controls::Border::BorderBrushProperty(), clear);
                 values_.Set(outline_, sx::Controls::Border::BorderThicknessProperty(), winrt::box_value(sx::Thickness{}));
-                values_.Set(placeholder_, sx::Controls::TextBlock::TextProperty(), winrt::box_value(L"search"));
+                values_.Set(placeholder_, sx::Controls::TextBlock::TextProperty(), winrt::box_value(SearchPlaceholder(light_)));
                 values_.Set(button_, sx::Automation::AutomationProperties::NameProperty(), winrt::box_value(L"search"));
                 for (const auto name : {L"SearchGlyph",L"SearchIconOff",L"SearchIconOn",L"UnderlineContainer",L"BorderUnderline"})
                     if (const auto element = FindStartElement(template_, name)) values_.Set(element, sx::UIElement::OpacityProperty(), winrt::box_value(0.0));
@@ -143,6 +145,7 @@ public:
                 layout_ = button_.LayoutUpdated([this](auto&&, auto&&) { Position(); });
             } catch (...) { Restore(); throw; }
         }
+        if(themeChanged)values_.Update(placeholder_,sx::Controls::TextBlock::TextProperty(),winrt::box_value(SearchPlaceholder(light_)));
         Ink(); Position();
     }
     void Restore() noexcept {

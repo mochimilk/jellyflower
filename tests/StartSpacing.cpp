@@ -1,16 +1,45 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/start_spacing.hpp"
+#include "../src/start_user.hpp"
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
+#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Xaml.Automation.Peers.h>
+#include <winrt/Windows.UI.Xaml.Automation.Provider.h>
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
 #include <cstdio>
 #include <stdexcept>
 #include <memory>
+#include <cmath>
 using namespace acrylic;
 void Check(bool good,const char* text){if(!good)throw std::runtime_error(text);}
 void Pump(){MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}}
 void Layout(const sx::Controls::Grid& root){for(unsigned i=0;i<8;++i){root.UpdateLayout();Pump();Sleep(10);}}
 winrt::hstring Supported(const sx::DependencyObject& element){auto f=element.try_as<sx::FrameworkElement>();return f && f.Name()==L"MainContent" ? L"StartMenu.StartHome" : winrt::get_class_name(element);}
+winrt::hstring UserType(const sx::DependencyObject& element){auto f=element.try_as<sx::FrameworkElement>();if(f && f.Name()==L"UserTileButton")return L"StartDocked.NavigationPaneButton";if(f && f.Name()==L"UserTile")return L"StartDocked.UserTileView";return winrt::get_class_name(element);}
+sx::Controls::ControlTemplate UserTemplate(){return sx::Markup::XamlReader::Load(LR"(<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Button"><Grid><Border Name="BackgroundBorder" CornerRadius="4" Background="#20404040"/><ContentPresenter Name="ContentPresenter" Padding="{TemplateBinding Padding}" BorderThickness="{TemplateBinding BorderThickness}" HorizontalAlignment="Stretch" VerticalAlignment="Center"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><Grid Name="UserTileIcon" Width="32" Height="32" VerticalAlignment="Center"><Ellipse Fill="Gray"/></Grid><TextBlock Name="UserTileNameText" Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center" Text="Fixture account"/></Grid></ContentPresenter></Grid></ControlTemplate>)").as<sx::Controls::ControlTemplate>();}
+void UserChecks(const sx::Hosting::DesktopWindowXamlSource& host){
+    sx::Controls::Grid root;root.Width(640);root.Name(L"UserTile");root.Height(40);root.HorizontalAlignment(sx::HorizontalAlignment::Left);
+    sx::Controls::Button button;button.Name(L"UserTileButton");button.HorizontalAlignment(sx::HorizontalAlignment::Left);button.Template(UserTemplate());button.Padding({11,0,11,0});button.BorderThickness({1,1,1,1});root.Children().Append(button);
+    sx::Controls::ToolTipService::SetToolTip(button,winrt::box_value(L"Fixture account"));bool clicked=false;const auto token=button.Click([&](auto&&,auto&&){clicked=true;});
+    host.Content(root);Layout(root);const auto nativeTemplate=button.Template();
+    Check(!IsStartUserButton(button) && IsStartUserButton(button,UserType),"profile styles reject unrelated same-named controls");
+    auto icon=FindStartElement(button,L"UserTileIcon");auto background=FindStartElement(button,L"BackgroundBorder").as<sx::Controls::Border>();auto label=FindStartElement(button,L"UserTileNameText").as<sx::Controls::TextBlock>();
+    const auto originalFont=label.FontFamily().Source();const auto originalSize=label.FontSize();
+    StartUser user(button);user.Refresh(true);Layout(root);
+    Check(user.Applied() && icon.ActualWidth()==28 && icon.ActualHeight()==28 && button.ActualHeight()==40,"one-step-smaller avatar retains the full native click target");
+    const auto position=icon.TransformToVisual(button).TransformPoint({0,0});const auto text=label.TransformToVisual(button).TransformPoint({0,0});
+    std::printf("Badge avatar=%g,%g target=%g,%g edge=%g,%g,%g\n",icon.ActualWidth(),icon.ActualHeight(),button.ActualWidth(),button.ActualHeight(),position.X,position.Y,button.ActualWidth()-(text.X+label.ActualWidth()));
+    Check(std::abs(position.X-6)<1 && std::abs(position.Y-6)<1 && std::abs(button.ActualWidth()-(text.X+label.ActualWidth())-6)<1,"hover container has equal six-DIP padding within native fractional-DPI rounding");
+    Check(background.CornerRadius().TopLeft==10 && button.Template()==nativeTemplate && button.IsTabStop(),"larger radius retains native template and keyboard target");
+    Check(label.FontFamily().Source()==originalFont && label.FontSize()==originalSize && winrt::unbox_value<winrt::hstring>(sx::Controls::ToolTipService::GetToolTip(button))==L"Fixture account","account typography and tooltip retained");
+    auto peer=sx::Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(button);peer.GetPattern(sx::Automation::Peers::PatternInterface::Invoke).as<sx::Automation::Provider::IInvokeProvider>().Invoke();Pump();Check(clicked,"native account invocation still reaches its handler");
+    button.Padding({16,2,16,2});Check(button.Padding().Left==5,"later native hover/layout padding cannot undo the compact badge");user.Restore();Layout(root);
+    Check(icon.Width()==32 && icon.Height()==32 && background.CornerRadius().TopLeft==4 && button.Padding().Left==16 && button.Padding().Top==2,"latest native sizing and visual-state values restore");
+    sx::Data::Binding binding;binding.Source(winrt::box_value(32.0));icon.SetBinding(sx::FrameworkElement::WidthProperty(),binding);user.Refresh(true);user.Restore();Check(icon.GetBindingExpression(sx::FrameworkElement::WidthProperty()).ParentBinding()==binding,"avatar width binding restores");
+    user.Refresh(true);button.Template(UserTemplate());Layout(root);user.Refresh(true);Layout(root);Check(FindStartElement(button,L"UserTileIcon").Width()==28,"replacement profile template is restyled");
+    user.Refresh(false);Check(FindStartElement(button,L"UserTileIcon").Width()==32,"disabled adapter restores replacement template");button.Click(token);
+}
 int main(){try{
     winrt::init_apartment(winrt::apartment_type::single_threaded);
     auto manager=sx::Hosting::WindowsXamlManager::InitializeForCurrentThread();
@@ -55,6 +84,7 @@ int main(){try{
     heading.ClearValue(sx::FrameworkElement::MarginProperty());
     {StartSpacing spacing(heading,StartSpacingRule::Heading);spacing.Refresh(true);Check(heading.Margin().Left==32,"unset margin gets the compact heading inset");}
     Check(heading.ReadLocalValue(sx::FrameworkElement::MarginProperty())==sx::DependencyProperty::UnsetValue(),"unset value restored without adding a local style");
+    UserChecks(host);
     host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();
     std::puts("PASS: recognized native Start headings/apps/footer/right controls, symmetrical compact layout, unknown-list guard, vertical updates and latest/local/unset/binding/destructor restoration.");return 0;
 }catch(const winrt::hresult_error& e){std::printf("FAIL HRESULT %08lx\n",static_cast<unsigned long>(e.code()));}catch(const std::exception& e){std::printf("FAIL %s\n",e.what());}return 1;}

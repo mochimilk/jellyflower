@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "search_art.hpp"
+#include "search_text.hpp"
 #include "start_metrics.hpp"
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
@@ -100,7 +101,7 @@ public:
     SearchInput(const SearchInput&)=delete;SearchInput& operator=(const SearchInput&)=delete;
     ~SearchInput(){Restore();}
     void Refresh(bool enabled,bool light){
-        if(!enabled){Restore();return;}if(!Discover()){if(applied_)Restore();return;}light_=light;
+        if(!enabled){Restore();return;}if(!Discover()){if(applied_)Restore();return;}const bool themeChanged=light_!=light;light_=light;
         if(!applied_)try{
             auto clear=sx::Media::SolidColorBrush(winrt::Windows::UI::Color{0,0,0,0});
             values_.Set(control_,sx::Controls::Control::BackgroundProperty(),clear);values_.Set(control_,sx::Controls::Control::BorderBrushProperty(),clear);
@@ -132,12 +133,16 @@ public:
             values_.Set(textBox_,sx::Controls::Control::PaddingProperty(),nullptr,[](const auto& value){auto p=winrt::unbox_value<sx::Thickness>(value);p.Left=StartMetrics::SearchIcon+StartMetrics::SearchGap;return winrt::box_value(p);});
             // Preserve the template's placeholder binding. Its source lives
             // on the native editor, including the RichEditBox variant.
-            if(textBox_.try_as<sx::Controls::TextBox>())values_.Set(textBox_,sx::Controls::TextBox::PlaceholderTextProperty(),winrt::box_value(L"search"));
-            else if(textBox_.try_as<sx::Controls::RichEditBox>())values_.Set(textBox_,sx::Controls::RichEditBox::PlaceholderTextProperty(),winrt::box_value(L"search"));
+            if(textBox_.try_as<sx::Controls::TextBox>())values_.Set(textBox_,sx::Controls::TextBox::PlaceholderTextProperty(),winrt::box_value(SearchPlaceholder(light_)));
+            else if(textBox_.try_as<sx::Controls::RichEditBox>())values_.Set(textBox_,sx::Controls::RichEditBox::PlaceholderTextProperty(),winrt::box_value(SearchPlaceholder(light_)));
             icon_=SearchMagnifier();iconLayer_=Layer(L"JellyflowerResultsSearchIcon");iconLayer_.Children().Append(icon_);
             dividerLayer_=Layer(L"JellyflowerResultsSearchDivider");divider_=sx::Controls::Border();divider_.Height(1);dividerLayer_.Children().Append(divider_);
             root_.Children().Append(iconLayer_);pane_.Children().Append(dividerLayer_);applied_=true;layout_=control_.LayoutUpdated([this](auto&&,auto&&){Position();});
         }catch(...){Restore();throw;}
+        if(themeChanged) {
+            const auto key=textBox_.try_as<sx::Controls::TextBox>()?sx::Controls::TextBox::PlaceholderTextProperty():sx::Controls::RichEditBox::PlaceholderTextProperty();
+            values_.Update(textBox_,key,winrt::box_value(SearchPlaceholder(light_)));
+        }
         Ink();Position();
     }
     void Restore()noexcept{
