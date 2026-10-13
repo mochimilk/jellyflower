@@ -1,9 +1,7 @@
-jellyflower 0.16.16
+jellyflower 0.16.17
 
-General now includes jellyflower wallpaper, with the supplied Lucide wallpaper icon and an on/off status. The supplied light and dark wallpapers are embedded in the executable and follow the Windows system color preference, including sunrise/sunset auto mode. The option starts off and stays enabled across exits, updates and login.
+Light-mode system taskbar acrylic is less white and shows more background. The white tint and brightness layer now use 30% opacity, down from 48%, targeting roughly 70% transparency; the legacy overlay uses 77/255 alpha. This follows the request for a less opaque taskbar. Windows acrylic combines blur and material layers, so this is a visual target rather than an exact final pixel-alpha measurement. Very dark wallpaper can reduce dark-text contrast with the lighter white wash.
 
-Wallpaper work runs on one sleeping background worker, woken by actions, theme and display changes. Before applying, the app saves the current images for each monitor and their placement. Disabling restores them; an outside wallpaper choice is respected and stops following. A failed apply attempts rollback, and failed restoration retains its recovery record. Errors stay inside the menu. The longer row sizes to the Windows menu font without changing its typography.
+Update through general's version/download row, then sign out and back in once (or restart Windows) to load Explorer helper v15. The app does not restart Explorer or sign you out automatically; taskbar customization stays native until the older pinned helper unloads. Fresh installations need no extra sign-out. Dark-mode taskbar acrylic, pure/off, menu/Start/Search styling and wallpaper behavior retain their previous values.
 
-Restore covers current images/placement; Spotlight/slideshow rotation may need to be reselected in Windows Personalization. Disable wallpaper before uninstalling to restore the previous background. No desktop wallpaper was changed during validation; production logic, asynchronous worker, storage and exact asset bytes are checked with simulated desktop setters plus read-only Windows capture.
-
-Update through general's version/download row. This is a controller/menu/assets change: Explorer v14 and Start/Search v13 identities are unchanged. Users already on 0.16.15 need no additional sign-out for this release. The x64 installer, portable build and complete source are included.
+The x64 installer, portable build and matching source are included. Native brush/material, helper compatibility/notification, payload/extraction and production updater checks accompany the release. Visible compositor output and wallpaper-dependent legibility remain desktop acceptance checks.

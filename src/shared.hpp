@@ -8,11 +8,11 @@ namespace acrylic {
 inline constexpr wchar_t WindowClass[] = L"AcrylicTaskbar.Controller.v1";
 inline constexpr wchar_t RunValue[] = L"jellyflower";
 inline constexpr wchar_t RunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-inline constexpr GUID TapClass = {0xf43a8b72, 0xcb16, 0x4f42,
+inline constexpr GUID TapClass = {0x6b57d914, 0xcb16, 0x4f42,
     {0x97, 0x4d, 0x3a, 0xc8, 0xef, 0x2b, 0x06, 0x52}};
 inline constexpr GUID PowerSavingGuid = {0xe00958c0, 0xc213, 0x4ace,
     {0xac, 0x77, 0xfe, 0xcc, 0xed, 0x2e, 0xee, 0xa5}};
-inline constexpr LONG Magic = 0x4154423E;
+inline constexpr LONG Magic = 0x4154423F;
 inline constexpr UINT QueryMessage = WM_APP + 42;
 enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, EnabledQuery, TrayQuery,
     CursorModeQuery, CursorAppliedQuery, CursorErrorQuery, BorderQuery, LightQuery, AcrylicModeQuery,
@@ -43,7 +43,7 @@ inline LONG Read(volatile LONG& value) noexcept {
     return InterlockedCompareExchange(&value, 0, 0);
 }
 inline std::wstring MappingName(DWORD explorerPid) {
-    return L"Local\\AcrylicTaskbar.Bridge.v14." + std::to_wstring(explorerPid);
+    return L"Local\\AcrylicTaskbar.Bridge.v15." + std::to_wstring(explorerPid);
 }
 
 class Handle {
@@ -62,7 +62,7 @@ private:
     HANDLE value_;
 };
 inline bool OlderBridgePresent(DWORD explorerPid) {
-    for (UINT version = 1; version < 14; ++version) {
+    for (UINT version = 1; version < 15; ++version) {
         Handle older(OpenFileMappingW(FILE_MAP_READ, FALSE,
             (L"Local\\AcrylicTaskbar.Bridge.v" + std::to_wstring(version) + L"." + std::to_wstring(explorerPid)).c_str()));
         if (older) return true;

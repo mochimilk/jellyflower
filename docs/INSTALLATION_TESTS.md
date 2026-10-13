@@ -166,3 +166,9 @@ Upgrade an existing installation through general, then sign out/back in once or 
 4. While enabled, select a new wallpaper in Windows Personalization. Jellyflower must stop following, preserve that choice and restore any other monitors still using its images. Next theme change must not overwrite the outside choice.
 5. Deny a desktop change via policy or deny writes to the private wallpaper folder. No original may be lost; errors must show try again in the row. Restore permissions and retry. Check interruption/restart during a change retains recovery data. No stuck spinner, modal prompt or UI thread file work.
 6. From Spotlight/slideshow, disable and confirm the captured image returns. Reselect the original provider/rotation in Personalization if needed; restoring private provider configuration is outside this feature. Disable before uninstall to restore; local recovery data is retained.
+
+## 0.16.17 light taskbar acceptance
+
+1. Update through general > version > download, then sign out and back in once (or restart Windows) to load Explorer v15. Until the older helper unloads, taskbar customization is intentionally paused. Fresh install should apply without that extra step.
+2. In light system mode, compare detailed, black, white and colorful wallpapers. The configured white tint and brightness layer are 30% opacity, targeting roughly 70% transparency (legacy 77/255); more background should show through than 0.16.15/0.16.16. Check clock, tray and taskbar text visually: very dark backgrounds can have less contrast. Windows acrylic layering means the final effect is not a flat alpha blend.
+3. Cycle system/pure/off, change Windows theme and open taskbar flyouts. Dark mode, pure/off, menu/Start/Search materials and the optional jellyflower wallpaper must retain previous behavior. Check secondary monitors/scales, transparency-off/high-contrast and battery-saver compositor fallback separately.

@@ -35,17 +35,27 @@ int main() {
                     // brightness interpolation. This is a contrast model,
                     // not a measurement of Windows' GPU/compositor output.
                     const double modeled = background * (1 - luminosity.Value()) + color.R / 255.0 * luminosity.Value();
-                    Check(Contrast(modeled, light) >= 4.5, "black/white backdrop brightness keeps text contrast");
                     const double alpha = (recipe.legacyColor >> 24) / 255.0;
                     const double legacy = background * (1 - alpha) + (recipe.legacyColor & 255) / 255.0 * alpha;
-                    Check(Contrast(legacy, light) >= 4.5, "legacy theme alpha keeps contrast at both extremes");
+                    if (light && background == 0) {
+                        // The requested lighter white wash trades away the old
+                        // normal-text contrast floor over fully black wallpaper.
+                        // Keep that limitation visible rather than claiming AA.
+                        Check(modeled > 0 && modeled < .48 && legacy > 0 && legacy < .48,
+                            "light theme shows more black backdrop than the previous material");
+                        Check(Contrast(modeled, light) < 4.5 && Contrast(legacy, light) < 4.5,
+                            "transparent light material has documented black-backdrop contrast limit");
+                    } else {
+                        Check(Contrast(modeled, light) >= 4.5, "dark material and light-on-white keep modeled text contrast");
+                        Check(Contrast(legacy, light) >= 4.5, "legacy dark and light-on-white keep modeled text contrast");
+                    }
                 }
                 Check(Contrast(fallback.R / 255.0, light) >= 4.5, "system fallback stays readable");
             }
             Check(Contrast(0, true) < 4.5, "regression model rejects previous zero-luminosity white on black");
         }
         manager.Close();
-        std::puts("PASS: real AcrylicBrush theme/pure transitions, explicit brightness, modeled black/white contrast, legacy overlay and opaque fallback. GPU appearance still needs desktop verification.");
+        std::puts("PASS: real AcrylicBrush theme/pure transitions, lighter white wash, explicit brightness, documented black-backdrop contrast tradeoff, legacy overlay and opaque fallback. GPU appearance still needs desktop verification.");
         return 0;
     } catch (const winrt::hresult_error& error) { std::printf("FAIL: XAML HRESULT %08lx\n", static_cast<unsigned long>(error.code())); }
     catch (const std::exception& error) { std::printf("FAIL: %s\n", error.what()); }
