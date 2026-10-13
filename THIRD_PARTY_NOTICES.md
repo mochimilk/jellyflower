@@ -26,6 +26,8 @@ The acrylic menu icons use the user's supplied panel SVGs: `panel-bottom` for pu
 
 Cursor Concept 3 HDPi is an external cursor pack by **JepriCreations**, [website](https://jepricreations.com), [DeviantArt](https://www.deviantart.com/jepricreations). Its supplied Agreement.txt permits personal use and modification but prohibits distributing the pack files. This project imports the user's own complete ZIP into their private jellyflower data folder, or references an explicitly configured local pack. It does not include, relicense, modify, or redistribute cursor files in its source or binary packages. The cursor names identify the original pack's variants. The supplied install.inf files informed the mapping of file names to the 17 Windows cursor roles; they are not executed or bundled.
 
+The optional light/dark wallpaper images in assets/jelly_wall_light.png and assets/jelly_wall_dark.png were supplied directly by the user for inclusion in jellyflower; the original PNG bytes are embedded without editing. The wallpaper menu glyph is Lucide wallpaper, covered by the included ISC notice.
+
 The notification-area and application icons are the jellyflower SVG artwork supplied directly by the user. Their original paths are retained in assets/tray.svg and assets/app.svg, with light/dark icon variants generated at multiple sizes. The previous Y2K Element 48 artwork is no longer included. The update row uses Lucide's package, package-open, and refresh-cw icons under the included ISC notice.
 
 ## miniz

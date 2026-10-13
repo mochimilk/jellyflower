@@ -13,6 +13,7 @@
 #include "update_download.hpp"
 #include "version.hpp"
 #include "startup.hpp"
+#include "wallpaper.hpp"
 #include "start_session.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
@@ -186,6 +187,7 @@ public:
     StartSession search{ShellHost::Search};
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
+    std::unique_ptr<WallpaperManager> wallpaper;
     AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
     void RefreshAutoTheme(bool invalidate = false) {
         bool light = false;
@@ -195,6 +197,7 @@ public:
         if (autoTheme->Update(light, delay, invalidate) && (SystemLightTheme() != light || AppLightTheme() != light)) {
             const auto changed = SetWindowsLightTheme(light);
             if (changed.error) Log(L"Automatic theme error=" + std::to_wstring(changed.error));
+            if (wallpaper) wallpaper->Refresh(SystemLightTheme());
         }
         // A non-waking window timer. Re-arm from the next absolute deadline,
         // rather than running solar calculations in the taskbar recovery loop.
@@ -525,6 +528,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return wParam ? static_cast<UINT>(self->autoTheme->Status()) : SystemLightTheme();
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
+    } else if (message == TrayWallpaperQueryMessage) {
+        return self->wallpaper ? static_cast<UINT>(self->wallpaper->Status()) : 0;
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
     } else if (message == TrayCursorQueryMessage) {
@@ -534,6 +539,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
+        if (wParam == TrayWallpaperCommand) {
+            if (self->wallpaper) self->wallpaper->Toggle(SystemLightTheme());
+            return self->wallpaper ? static_cast<UINT>(self->wallpaper->Status()) : 0;
+        }
         if (wParam == TrayGithubCommand) {
             return reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open", GithubUrl, nullptr, nullptr, SW_SHOWNORMAL)) > 32;
         }
@@ -563,6 +572,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 self->tray.ThemeError(change.error, change.rollbackError != 0);
             } else Log(SystemLightTheme() ? L"Windows light mode selected" : L"Windows dark mode selected");
             if (change.notificationError) self->tray.ThemeError(change.notificationError, false, true);
+            if (self->wallpaper) self->wallpaper->Refresh(SystemLightTheme());
             self->Refresh();
             SetBridgeMode(self->shared, self->explorerPid, self->mode, true);
             return SystemLightTheme();
@@ -580,6 +590,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         self->RefreshAutoTheme(message == WM_TIMECHANGE);
         self->Refresh();
         return 0;
+    } else if (message == WallpaperChangedMessage) {
+        if (self->wallpaper && FAILED(self->wallpaper->Error()))
+            Log(L"Wallpaper error=" + std::to_wstring(self->wallpaper->Error()));
+        RefreshWallpaperMenu(window);
+        return 0;
     } else if (message == WM_TIMER) {
         if (wParam == AutoThemeTimer) { self->RefreshAutoTheme(); self->Refresh(); return 0; }
         if (wParam == UpdateTimer) { self->PollUpdate(); return 0; }
@@ -591,6 +606,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DWMCOMPOSITIONCHANGED
         || message == WM_DPICHANGED) {
         if (message == WM_SETTINGCHANGE) self->RefreshAutoTheme();
+        if (self->wallpaper && (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DISPLAYCHANGE))
+            self->wallpaper->Refresh(SystemLightTheme());
         if (message == self->taskbarCreated) {
             self->tray.ShellRestarted();
             self->attachStarted = GetTickCount64();
@@ -618,6 +635,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         DestroyWindow(window);
         return 0;
     } else if (message == WM_DESTROY) {
+        self->wallpaper.reset();
         self->autoTheme.reset();
         self->tray.Remove();
         self->window = nullptr;
@@ -677,6 +695,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, &app);
     if (!window) return static_cast<int>(GetLastError());
     app.autoTheme = std::make_unique<AutoTheme>(window);
+    app.wallpaper = std::make_unique<WallpaperManager>(window, SystemLightTheme());
     app.powerNotification = RegisterPowerSettingNotification(window, &PowerSavingGuid, DEVICE_NOTIFY_WINDOW_HANDLE);
     app.foregroundHook = SetWinEventHook(EVENT_SYSTEM_FOREGROUND, EVENT_SYSTEM_FOREGROUND, nullptr,
         ForegroundChanged, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);

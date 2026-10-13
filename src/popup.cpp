@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "popup.hpp"
+#include "wallpaper.hpp"
 #include "tray.hpp"
 #include "cursors.hpp"
 #include "resource.h"
@@ -55,7 +56,8 @@ std::vector<Row> RootRows(AcrylicMode mode, bool date, bool light, UINT mask) {
         {TrayGeneralCommand, L"general", true}};
 }
 std::vector<Row> GeneralRows() {
-    return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
+    return {{TrayWallpaperCommand, L"jellyflower wallpaper", false, false, L"off"},
+        {TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -152,7 +154,7 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
-    HICON githubIcon = nullptr;
+    HICON githubIcon = nullptr, wallpaperIcon = nullptr;
     MenuIndicator checkIcon, chevronIcon, externalIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
@@ -194,6 +196,7 @@ struct Popup {
         if (packageOpenIcon) DestroyIcon(packageOpenIcon);
         if (generalIcon) DestroyIcon(generalIcon);
         if (githubIcon) DestroyIcon(githubIcon);
+        if (wallpaperIcon) DestroyIcon(wallpaperIcon);
         for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
@@ -288,6 +291,20 @@ struct Popup {
             cursorIcon = replacement;iconCursorMode=cursorMode;iconPixels=pixels;iconLight=systemLight;
             RepaintButtons();
         }
+    }
+    void RefreshWallpaper() {
+        if (kind == TrayGeneralCommand) {
+            const auto state = static_cast<WallpaperStatus>(SendMessageW(controller, TrayWallpaperQueryMessage, 0, 0));
+            for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayWallpaperCommand) {
+                auto& row = rows[i]; row.secondary = WallpaperLabel(state); row.enabled = !WallpaperBusy(state);
+                if (i < buttons.size()) {
+                    SetWindowTextW(buttons[i], (row.label + L", " + row.secondary).c_str());
+                    EnableWindow(buttons[i], row.enabled);
+                }
+                RepaintRow(static_cast<int>(i));
+            }
+        }
+        if (child) child->RefreshWallpaper();
     }
     void RefreshUpdate() {
         const auto state = static_cast<UpdateStatus>(SendMessageW(controller, TrayUpdateQueryMessage, 0, 0));
@@ -408,15 +425,16 @@ struct Popup {
             const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
                 darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
                 darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK,
-                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK};
-            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon};
+                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK,
+                darkInk ? IDI_WALLPAPER_LIGHT : IDI_WALLPAPER_DARK};
+            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon, &wallpaperIcon};
             for (size_t i = 0; i < std::size(resources); ++i) {
                 const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
                     MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
                 if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
             }
             if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
-            if (!updateIcon || !packageIcon || !packageOpenIcon || !githubIcon || !externalIcon) return false;
+            if (!updateIcon || !packageIcon || !packageOpenIcon || !githubIcon || !wallpaperIcon || !externalIcon) return false;
         }
         if (window) {
             const BOOL dark = !light;
@@ -513,6 +531,7 @@ struct Popup {
         ShowWindow(child->window, SW_SHOWNORMAL);
         SetForegroundWindow(child->window);
         child->RefreshUpdate();
+        child->RefreshWallpaper();
         const UINT selected = command == TrayCursorCommand ? std::min(Root()->cursorMode, CursorDisabled) : 0;
         child->Focus(static_cast<int>(selected));
         child->keyboard = fromKeyboard;
@@ -614,6 +633,8 @@ struct Popup {
                 root->RepaintButtons();
             } else if (command == TrayUpdateCommand) {
                 root->RefreshUpdate();
+            } else if (command == TrayWallpaperCommand) {
+                root->RefreshWallpaper();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
             } else if (command == TrayDateCommand) {
@@ -699,7 +720,7 @@ struct Popup {
             : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayGeneralCommand ? generalIcon : row.command == TrayUpdateCommand
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
-                : row.command == TrayGithubCommand ? githubIcon : nullptr;
+                : row.command == TrayGithubCommand ? githubIcon : row.command == TrayWallpaperCommand ? wallpaperIcon : nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
@@ -775,7 +796,11 @@ struct Popup {
         // Work-area coordinates also handle secondary/negative-coordinate monitors.
         RECT area = monitor.rcWork;
         InflateRect(&area, -Px(MenuEdgeGap), -Px(MenuEdgeGap));
-        const int width = Px(parent ? 228 : 296);
+        int width = Px(parent ? 228 : 296);
+        // Reserve the longest status, using the inherited Windows font at this
+        // DPI rather than squeezing a new long label into a fixed submenu.
+        if (kind == TrayGeneralCommand) width = std::max(width, menuText.Width(L"jellyflower wallpaper")
+            + menuText.Width(L"try again") + Px(2 * Padding + 34 + 12 + 12));
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
@@ -813,6 +838,7 @@ struct Popup {
             top += rowHeight;
         }
         RefreshUpdate();
+        RefreshWallpaper();
         if (!parent) {
             constexpr COLORREF fills[]{RGB(250,250,250), RGB(40,40,40), RGB(145,170,240), RGB(148,182,104), RGB(129,216,184), RGB(244,143,167), RGB(230,170,100), RGB(245,229,179), RGB(231,194,218)};
             if(!HasCursorPack(static_cast<UINT>(SendMessageW(controller,TrayCursorQueryMessage,0,0))))for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));
@@ -944,6 +970,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
 
 void RefreshUpdateMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshUpdate();
+}
+void RefreshWallpaperMenu(HWND owner) {
+    if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshWallpaper();
 }
 void RefreshCursorMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshCursors();
