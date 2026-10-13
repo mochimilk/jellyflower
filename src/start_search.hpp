@@ -112,7 +112,7 @@ public:
     StartSearch(const StartSearch&) = delete;
     StartSearch& operator=(const StartSearch&) = delete;
     ~StartSearch() { Restore(); }
-    void Refresh(bool enabled, bool light, std::wstring_view text=DeviceSearchPlaceholder()) {
+    void Refresh(bool enabled, bool light, std::wstring_view text=L"Search") {
         if (!enabled) { Restore(); return; }
         if (!Discover()) { if (applied_) Restore(); return; }
         if (!heading_.get()) heading_ = FindStartElement(pane_, L"PinnedListHeaderText");

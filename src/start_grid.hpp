@@ -56,25 +56,36 @@ inline double StartLayoutX(sx::DependencyObject child,const sx::DependencyObject
 class StartGrid {
     struct Cell {
         sx::Controls::GridViewItem element;
-        StartSearchValues values,content;
+        StartSearchValues values,content,hover;
+        sx::DependencyObject hoverRoot{nullptr};
         sx::FrameworkElement root{nullptr},category{nullptr};
         std::vector<sx::FrameworkElement> roots;
         sx::Controls::Border square{nullptr};
         sx::Controls::Button categoryButton{nullptr};
         sx::Controls::ItemsWrapGrid mini{nullptr};
         std::vector<sx::FrameworkElement> miniTargets;
-        double native=0,gutter=0,lastWidth=-1;
+        double native=0,nativeHeight=0,gutter=0,lastWidth=-1;
         bool pinned=false;
         double NativeWidth() {
             if(root){const double width=winrt::unbox_value<double>(content.Original(root,sx::FrameworkElement::WidthProperty()));
                 if(std::isfinite(width) && width>0){const auto m=winrt::unbox_value<sx::Thickness>(content.Original(root,sx::FrameworkElement::MarginProperty()));return width+m.Left+m.Right+element.Padding().Left+element.Padding().Right;}}
             if(native<=0)native=element.ActualWidth();return native;
         }
+        double NativeRowHeight() {
+            if(nativeHeight<=0 && root){
+                const double height=winrt::unbox_value<double>(content.Original(root,sx::FrameworkElement::HeightProperty()));
+                const auto margin=winrt::unbox_value<sx::Thickness>(values.Original(element,sx::FrameworkElement::MarginProperty()));
+                if(std::isfinite(height) && height>0)nativeHeight=height+margin.Top+margin.Bottom;
+            }
+            return nativeHeight;
+        }
         explicit Cell(const sx::Controls::GridViewItem& item,bool pin):element(item),pinned(pin) {
             // Real shell containers usually have no Width/MinWidth/MaxWidth.
             // Their content/template determines the stock slot, unlike our old
             // fixture. Capture it before changing either wrapper or content.
             native=item.ActualWidth()+item.Margin().Left+item.Margin().Right;
+            nativeHeight=item.ActualHeight()+item.Margin().Top+item.Margin().Bottom;
+            if(!std::isfinite(nativeHeight) || nativeHeight<=0)nativeHeight=item.DesiredSize().Height;
             if(!std::isfinite(native) || native<=0)native=item.DesiredSize().Width;
             for(auto key:{sx::FrameworkElement::WidthProperty(),sx::FrameworkElement::MinWidthProperty(),sx::FrameworkElement::MaxWidthProperty()})
                 values.Set(item,key,winrt::box_value(key==sx::FrameworkElement::MinWidthProperty()?0:key==sx::FrameworkElement::MaxWidthProperty()?std::numeric_limits<double>::infinity():std::numeric_limits<double>::quiet_NaN()));
@@ -82,6 +93,8 @@ class StartGrid {
             values.Set(item,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(sx::HorizontalAlignment::Stretch));
             if(pin) {
                 values.Set(item,sx::FrameworkElement::HeightProperty(),winrt::box_value(std::numeric_limits<double>::quiet_NaN()));
+                values.Set(item,sx::FrameworkElement::MinHeightProperty(),winrt::box_value(0.0));
+                values.Set(item,sx::FrameworkElement::MaxHeightProperty(),winrt::box_value(std::numeric_limits<double>::infinity()));
                 values.Set(item,sx::Controls::Control::VerticalContentAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Stretch));
             }
             values.Set(item,sx::FrameworkElement::MarginProperty(),nullptr,[this](const auto& value){
@@ -100,11 +113,31 @@ class StartGrid {
             if(stripMargin)content.Set(f,sx::FrameworkElement::MarginProperty(),nullptr,[](const auto& value){auto m=winrt::unbox_value<sx::Thickness>(value);m.Left=m.Right=0;return winrt::box_value(m);});
             if(height){
                 content.Set(f,sx::FrameworkElement::HeightProperty(),winrt::box_value(std::numeric_limits<double>::quiet_NaN()));
+                if(pinned){content.Set(f,sx::FrameworkElement::MinHeightProperty(),winrt::box_value(0.0));content.Set(f,sx::FrameworkElement::MaxHeightProperty(),winrt::box_value(std::numeric_limits<double>::infinity()));}
                 content.Set(f,sx::FrameworkElement::VerticalAlignmentProperty(),winrt::box_value(sx::VerticalAlignment::Stretch));
             }
         }
+        void RoundPinned() {
+            if(!pinned || !sx::Media::VisualTreeHelper::GetChildrenCount(element))return;
+            const auto current=sx::Media::VisualTreeHelper::GetChild(element,0);
+            if(current==hoverRoot)return;
+            hover.Clear();hoverRoot=current;
+            const sx::CornerRadius radius{StartMetrics::PinnedRadius,StartMetrics::PinnedRadius,StartMetrics::PinnedRadius,StartMetrics::PinnedRadius};
+            std::vector<sx::DependencyObject> nodes{current};
+            for(size_t i=0;i<nodes.size() && i<96;++i) {
+                const auto f=nodes[i].try_as<sx::FrameworkElement>();if(!f)continue;
+                if(auto border=f.try_as<sx::Controls::Border>();border && (f.Name()==L"BackgroundBorder" || f.Name()==L"HighContrastBorder"))hover.Set(f,sx::Controls::Border::CornerRadiusProperty(),winrt::box_value(radius));
+                if(auto presenter=f.try_as<sx::Controls::ContentPresenter>()) {
+                    if(f.try_as<sx::Controls::Primitives::GridViewItemPresenter>())hover.Set(f,sx::Controls::ContentPresenter::CornerRadiusProperty(),winrt::box_value(radius));
+                    continue; // Never change an app logo's own corners.
+                }
+                for(int c=0;c<sx::Media::VisualTreeHelper::GetChildrenCount(f);++c)nodes.push_back(sx::Media::VisualTreeHelper::GetChild(f,c));
+            }
+        }
         void ResetContent() {content.Clear();roots.clear();root=nullptr;category=nullptr;square=nullptr;categoryButton=nullptr;mini=nullptr;miniTargets.clear();lastWidth=-1;}
+        void Invalidate(){ResetContent();hover.Clear();hoverRoot=nullptr;}
         void Discover(StartClassName name) {
+            RoundPinned();
             if(root && sx::Media::VisualTreeHelper::GetParent(root))return;
             ResetContent();
             std::vector<sx::DependencyObject> nodes{element};
@@ -175,7 +208,7 @@ class StartGrid {
     };
     sx::Controls::GridView view_;
     winrt::hstring id_;
-    sx::FrameworkElement pane_{nullptr};
+    sx::FrameworkElement pane_{nullptr},pinnedHost_{nullptr};
     sx::Controls::ItemsWrapGrid panel_{nullptr};
     StartSearchValues viewValues_,panelValues_;
     std::unordered_map<void*,std::unique_ptr<Cell>> cells_;
@@ -185,6 +218,19 @@ class StartGrid {
     StartClassName name_;
     bool applied_=false,updating_=false,contentDirty_=false;unsigned passes_=0;
     double panelLeft_=0,panelRight_=0,hostLeft_=0;
+    double nativePinnedRow_=0,pinnedPitch_=0;
+    double PinnedHeight(double original) const {
+        if(!std::isfinite(original) || original<=0 || nativePinnedRow_<=0 || pinnedPitch_<=0)return original;
+        const double rows=std::max(1.0,std::floor(original/nativePinnedRow_+.01));
+        return rows*pinnedPitch_+std::max(0.0,original-rows*nativePinnedRow_);
+    }
+    void PinnedViewport() {
+        for(const auto& f:{view_.as<sx::FrameworkElement>(),pinnedHost_})if(f) {
+            const double original=winrt::unbox_value<double>(viewValues_.Original(f,sx::FrameworkElement::HeightProperty()));
+            const double height=PinnedHeight(original);
+            if(std::isfinite(height) && std::abs(f.Height()-height)>.01)viewValues_.Update(f,sx::FrameworkElement::HeightProperty(),winrt::box_value(height));
+        }
+    }
     struct Observation {
         void *panel=nullptr,*first=nullptr,*last=nullptr;uint32_t count=0;
         std::array<double,10> geometry{};
@@ -222,10 +268,12 @@ class StartGrid {
             }
             std::vector<void*> live;double native=0;
             for(const auto& child:panel_.Children())if(auto item=child.try_as<sx::Controls::GridViewItem>()) {
-                const auto key=winrt::get_abi(item);live.push_back(key);auto& cell=cells_[key];if(!cell)cell=std::make_unique<Cell>(item,pinned);if(contentDirty_)cell->ResetContent();if(!native)native=cell->NativeWidth();
+                const auto key=winrt::get_abi(item);live.push_back(key);auto& cell=cells_[key];if(!cell)cell=std::make_unique<Cell>(item,pinned);if(contentDirty_)cell->Invalidate();if(!native)native=cell->NativeWidth();
+                if(pinned && nativePinnedRow_<=0)nativePinnedRow_=cell->NativeRowHeight();
             }
             for(auto i=cells_.begin();i!=cells_.end();)if(std::find(live.begin(),live.end(),i->first)==live.end())i=cells_.erase(i);else ++i;
             auto source=winrt::unbox_value<double>(panelValues_.Original(panel_,sx::Controls::ItemsWrapGrid::ItemWidthProperty()));if(std::isfinite(source) && source>0)native=source;
+            if(pinned){const auto row=winrt::unbox_value<double>(panelValues_.Original(panel_,sx::Controls::ItemsWrapGrid::ItemHeightProperty()));if(std::isfinite(row) && row>0)nativePinnedRow_=row;}
             double viewport=view_.ActualWidth()-view_.Padding().Left-view_.Padding().Right;
             auto ancestor=sx::Media::VisualTreeHelper::GetParent(panel_);
             for(unsigned i=0;ancestor && ancestor!=view_ && i<16;++i){if(auto p=ancestor.try_as<sx::Controls::ScrollContentPresenter>()){viewport=p.ActualWidth();break;}ancestor=sx::Media::VisualTreeHelper::GetParent(ancestor);}
@@ -240,7 +288,11 @@ class StartGrid {
             const auto columns=StartColumns(width,native,panel_.MaximumRowsOrColumns());
             if(columns){const double slot=width/columns;
                 if(panel_.ItemWidth()!=slot)panelValues_.Update(panel_,sx::Controls::ItemsWrapGrid::ItemWidthProperty(),winrt::box_value(slot));
-                if(pinned && panel_.ItemHeight()!=StartMetrics::PinnedHeight+StartMetrics::PinnedRowGap)panelValues_.Update(panel_,sx::Controls::ItemsWrapGrid::ItemHeightProperty(),winrt::box_value(StartMetrics::PinnedHeight+StartMetrics::PinnedRowGap));
+                if(pinned){
+                    pinnedPitch_=slot+StartMetrics::PinnedRowGap;
+                    if(panel_.ItemHeight()!=pinnedPitch_)panelValues_.Update(panel_,sx::Controls::ItemsWrapGrid::ItemHeightProperty(),winrt::box_value(pinnedPitch_));
+                    PinnedViewport();
+                }
                 for(auto& item:cells_)item.second->Layout(slot,gap,name_);
             }
         }catch(...){/* Unknown/retemplating trees retry after their next layout. */}
@@ -258,6 +310,11 @@ public:
             viewValues_.Set(view_,sx::FrameworkElement::MinWidthProperty(),winrt::box_value(0.0));
             viewValues_.Set(view_,sx::FrameworkElement::MaxWidthProperty(),winrt::box_value(std::numeric_limits<double>::infinity()));
             viewValues_.Set(view_,sx::FrameworkElement::HorizontalAlignmentProperty(),winrt::box_value(id_==L"PinnedList"?sx::HorizontalAlignment::Stretch:sx::HorizontalAlignment::Left));
+            if(id_==L"PinnedList"){
+                auto parent=sx::Media::VisualTreeHelper::GetParent(view_);
+                for(unsigned i=0;parent && i<24;++i){const auto type=name_?name_(parent):winrt::get_class_name(parent);if(type==L"StartMenu.PinnedList" || type==L"StartDocked.PinnedList"){pinnedHost_=parent.try_as<sx::FrameworkElement>();break;}parent=sx::Media::VisualTreeHelper::GetParent(parent);}
+                for(const auto& f:{view_.as<sx::FrameworkElement>(),pinnedHost_})if(f)viewValues_.Set(f,sx::FrameworkElement::HeightProperty(),nullptr,[this](const auto& original){return winrt::box_value(PinnedHeight(winrt::unbox_value<double>(original)));});
+            }
             if(id_!=L"PinnedList")viewValues_.Set(view_,sx::FrameworkElement::MarginProperty(),nullptr,[this](const auto& value){auto m=winrt::unbox_value<sx::Thickness>(value);m.Left=-hostLeft_;m.Right=0;return winrt::box_value(m);});
             timer_=sx::DispatcherTimer();timer_.Interval(std::chrono::milliseconds(1));pending_=std::make_shared<TickState>(TickState{this});
             tick_=timer_.Tick([weak=std::weak_ptr<TickState>(pending_)](auto&&,auto&&){if(auto live=weak.lock();live && live->owner){auto self=live->owner;self->timer_.Stop();self->Layout();}});
@@ -269,7 +326,7 @@ public:
         applied_=false;if(pending_)pending_->owner=nullptr;pending_.reset();
         try{if(timer_){timer_.Stop();if(tick_.value)timer_.Tick(tick_);}}catch(...){}tick_={};timer_=nullptr;
         try{if(layout_.value)view_.LayoutUpdated(layout_);}catch(...){}layout_={};
-        cells_.clear();panelValues_.Clear();panel_=nullptr;pane_=nullptr;viewValues_.Clear();observedValid_=false;contentDirty_=false;hostLeft_=panelLeft_=panelRight_=0;
+        cells_.clear();panelValues_.Clear();panel_=nullptr;pane_=nullptr;viewValues_.Clear();pinnedHost_=nullptr;nativePinnedRow_=pinnedPitch_=0;observedValid_=false;contentDirty_=false;hostLeft_=panelLeft_=panelRight_=0;
     }
     bool Applied()const noexcept{return applied_;}
     unsigned LayoutPasses()const noexcept{return passes_;}

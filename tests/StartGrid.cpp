@@ -11,9 +11,10 @@ using namespace acrylic;
 void Check(bool yes,const char* text){if(!yes)throw std::runtime_error(text);}
 void Pump(){MSG m{};while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}}
 void Layout(const sx::Controls::Grid& root){for(unsigned i=0;i<16;++i){root.UpdateLayout();Pump();Sleep(8);}}
-winrt::hstring Supported(const sx::DependencyObject& o){auto f=o.try_as<sx::FrameworkElement>();if(f && f.Name()==L"MainContent")return L"StartMenu.StartHome";if(f && f.Name()==L"Category")return L"StartMenu.CategoryControl";if(f && f.Name()==L"PinnedApp")return L"StartMenu.PinnedListTile";if(f && f.Name()==L"PinnedFolder")return L"StartMenu.PinnedListCollapsedFolder";return winrt::get_class_name(o);}
+winrt::hstring Supported(const sx::DependencyObject& o){auto f=o.try_as<sx::FrameworkElement>();if(f && f.Name()==L"MainContent")return L"StartMenu.StartHome";if(f && f.Name()==L"PinnedHost")return L"StartMenu.PinnedList";if(f && f.Name()==L"Category")return L"StartMenu.CategoryControl";if(f && f.Name()==L"PinnedApp")return L"StartMenu.PinnedListTile";if(f && f.Name()==L"PinnedFolder")return L"StartMenu.PinnedListCollapsedFolder";return winrt::get_class_name(o);}
 double X(const sx::FrameworkElement& item,const sx::UIElement& root){return item.TransformToVisual(root).TransformPoint({0,0}).X;}
 sx::Controls::ControlTemplate Plain(){return sx::Markup::XamlReader::Load(LR"(<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ContentControl"><ContentPresenter HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/></ControlTemplate>)").as<sx::Controls::ControlTemplate>();}
+sx::Controls::ControlTemplate PinnedTemplate(){return sx::Markup::XamlReader::Load(LR"(<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="GridViewItem"><Border Name="ContentBorder"><Grid Name="DroppedFlickerWorkaroundWrapper"><Border Name="BackgroundBorder" CornerRadius="4" Background="#30404040"/><ContentPresenter Name="ContentPresenter" Content="{TemplateBinding Content}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/><Border Name="HighContrastBorder" CornerRadius="4" IsHitTestVisible="False"/></Grid></Border></ControlTemplate>)").as<sx::Controls::ControlTemplate>();}
 struct Item {
     sx::Controls::GridViewItem cell;
     sx::Controls::Grid root;
@@ -34,6 +35,7 @@ Item Make(unsigned kind){
         for(unsigned n=0;n<4;++n){sx::Controls::Button button;button.Name(n==3?L"FolderPlate":L"LogoContainer");button.Width(68);button.Height(68);category.Items().Append(button);}
         i.root.Children().Append(i.tile);
     }else if(kind==1 || kind==2){
+        i.cell.Template(PinnedTemplate());
         i.root.Width(96);i.root.Height(84);
         i.tile=sx::Controls::ContentControl();i.tile.Name(kind==1?L"PinnedApp":L"PinnedFolder");i.tile.Template(Plain());
         auto body=sx::Markup::XamlReader::Load(LR"(<Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Name="Root" Padding="0,12,0,0"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><Grid Name="LogoContainer" Width="32" Height="32" HorizontalAlignment="Center"/><Grid Name="DisplayNameAndDownloadIconContainer" Grid.Row="1"><TextBlock Name="DisplayName" Text="native accessible app name" Margin="2,4,2,0"/></Grid></Grid>)").as<sx::Controls::Grid>();
@@ -131,6 +133,9 @@ int main(){try{
                     auto scroll=FindStartElement(items[0].tile,L"ScrollViewer");Check(std::abs(scroll.ActualWidth()+20-first.ActualWidth())<1.5 && scroll.Margin().Left==10 && scroll.Margin().Right==10,"category inner grid keeps symmetric native padding while resizing");
                 }
                 if(v.kind==1 || v.kind==2){
+                    Check(std::abs(first.ActualWidth()-first.ActualHeight())<1.5,"pinned hover target stays square at every viewport width");
+                    auto hover=FindStartElement(first,L"BackgroundBorder").as<sx::Controls::Border>();
+                    Check(hover.CornerRadius().TopLeft==12 && std::abs(hover.ActualWidth()-hover.ActualHeight())<1.5,"native pinned hover background is square with twelve-DIP corners");
                     auto logo=items[0].logo;const auto p=logo.TransformToVisual(first).TransformPoint({0,0});
                     Check(items[0].label.Visibility()==sx::Visibility::Collapsed,"pinned app/folder caption hidden");
                     Check(std::abs(p.X+(logo.ActualWidth()-first.ActualWidth())/2)<1.5 && std::abs(p.Y+(logo.ActualHeight()-first.ActualHeight())/2)<1.5,"pinned app/folder icon centered in its actual target");
@@ -150,6 +155,23 @@ int main(){try{
         if(v.kind==4 || v.kind==6)Check(items[1].root.Width()==728,"stock list's nested fixed width restored");
         if(v.kind==7)Check(items[1].cell.MinWidth()==236 && items[1].cell.MaxWidth()==236 && items[1].root.MaxWidth()==212 && items[1].cell.Margin().Right==20,"React Recommended native wrapper/content constraints restore");
         Check(originalNative>0,"native template provided a real starting width");pane.Children().Clear();pane.Width(832);Layout(pane);
+    }
+    {
+        // The real shell clips pinned rows through two separate fixed heights.
+        // Scale its visible-row count without guessing collapsed/expanded state.
+        sx::Controls::Grid fixed;fixed.Name(L"PinnedHost");fixed.Height(168);fixed.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(fixed);
+        auto view=sx::Markup::XamlReader::Load(LR"(<GridView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Name="PinnedList" Height="168" VerticalAlignment="Top" Padding="0"><GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal"/></ItemsPanelTemplate></GridView.ItemsPanel></GridView>)").as<sx::Controls::GridView>();
+        std::vector<Item> items;for(unsigned j=0;j<32;++j){items.push_back(Make(j%2?2:1));view.Items().Append(items.back().cell);}fixed.Children().Append(view);Layout(pane);
+        Check(std::abs(items[0].cell.ActualHeight()-84)<.1,"fixed pinned fixture retains native 84-DIP row before styling");
+        sx::Data::Binding height;height.Source(winrt::box_value(168.0));view.SetBinding(sx::FrameworkElement::HeightProperty(),height);
+        StartGrid style(view,Supported);style.Refresh(true);Layout(pane);auto panel=view.ItemsPanelRoot().as<sx::Controls::ItemsWrapGrid>();
+        Check(std::abs(view.Height()-2*panel.ItemHeight())<.1 && std::abs(fixed.Height()-view.Height())<.1,"both fixed pinned hosts expand to fit two square rows");
+        fixed.Height(252);view.Height(252);Layout(pane);Check(std::abs(view.Height()-3*panel.ItemHeight())<.1 && std::abs(fixed.Height()-view.Height())<.1,"native expanded height preserves three visible rows");
+        pane.Width(751.333333);Layout(pane);Check(std::abs(view.Height()-3*panel.ItemHeight())<.1,"fixed visible-row height follows responsive square width");
+        auto old=FindStartElement(items[0].cell,L"BackgroundBorder").as<sx::Controls::Border>();old.CornerRadius({7,7,7,7});Check(old.CornerRadius().TopLeft==12,"native pinned corner changes stay rounded while active");
+        items[0].cell.Template(PinnedTemplate());Layout(pane);style.Invalidate();Layout(pane);Check(old.CornerRadius().TopLeft==7 && FindStartElement(items[0].cell,L"BackgroundBorder").as<sx::Controls::Border>().CornerRadius().TopLeft==12,"old hover values restore and replacement wrapper is rounded");
+        view.SetBinding(sx::FrameworkElement::HeightProperty(),height);style.Restore();Layout(pane);Check(view.GetBindingExpression(sx::FrameworkElement::HeightProperty()).ParentBinding()==height && view.Height()==168 && fixed.Height()==252,"latest native fixed heights and binding restore");
+        pane.Children().Clear();pane.Width(832);Layout(pane);
     }
     host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();
     std::printf("PASS: %u live XAML layout cases with unconstrained native wrappers, nested fixed templates, category cards, pinned apps/folders, list/grid and compact/expanded Recommended; centered icons, identity, resize/recycling/idle/restoration.\n",cases);return 0;

@@ -101,7 +101,7 @@ public:
     explicit SearchInput(const sx::Controls::Control& control,StartClassName name=nullptr):control_(control),name_(name){}
     SearchInput(const SearchInput&)=delete;SearchInput& operator=(const SearchInput&)=delete;
     ~SearchInput(){Restore();}
-    void Refresh(bool enabled,bool light,std::wstring_view text=DeviceSearchPlaceholder()){
+    void Refresh(bool enabled,bool light,std::wstring_view text=L"Search"){
         if(!enabled){Restore();return;}if(!Discover()){if(applied_)Restore();return;}
         const bool textChanged=std::wstring_view(placeholderText_)!=text;if(textChanged)placeholderText_=winrt::hstring(text);light_=light;
         if(!applied_)try{

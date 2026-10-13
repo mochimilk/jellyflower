@@ -194,3 +194,13 @@ Upgrade an existing installation through general, then sign out/back in once or 
 ## 0.16.21 eight-DIP vertical badge acceptance
 
 Update from 0.16.20 and reopen Start. Verify another two-DIP reduction on top/bottom only, with visible vertical gaps around eight DIP on the inspected template. Side position, centered 28-DIP avatar/name, 10-DIP corners, account actions, hidden tooltip and `Search <PC name>` should retain prior behavior. Check both themes, photo/default avatar and 100/125/150/175/200% scaling. Exit to verify original padding, alignments, heights, bindings and tooltip restore. Start/Search v17 must wait for older generation restoration without forcing a shell restart.
+
+## 0.16.22 square pinned targets and footer acceptance
+
+Update from 0.16.21 and reopen Start. Check pinned apps and folders in collapsed/expanded states and at 100/125/150/175/200% scaling: each hover background is square, uses 12-DIP corners and centers the native icon. Complete rows retain balanced side gaps, native ordering, page indicators and tooltips. Resize/open the phone companion; the fixed pinned viewport must grow with the square row pitch without cutting off the last visible row. Test retemplating, native collapsed/expanded changes and restoration on exit.
+
+The inspected footer row should grow from 64 to 80 DIP. Account, shortcuts and power should share its vertical center; shortcut/power hover corners use 12 DIP. Account avatar/padding/corners/tooltip behavior retains 0.16.21 settings. Test native actions, keyboard focus, both themes and all scaling options. Exit and owner-loss recovery must restore original/latest native sizing, alignments, corner values and bindings. Unknown flexible footer rows or explicit/bound minima retain their native sizing. Start/Search v18 must wait for older helper restoration without restarting shell processes. Run StartGrid, StartFooter and StartSpacing native fixtures.
+
+## 0.16.22 greeting acceptance
+
+Open Start and Search with an empty query. Check the exact greeting/name and 🤍 before noon (from 5am), 🧸 from noon, and 😇 from 6pm through the night, using the device time zone. Test boundaries with GreetingLogic; manually changing a clock is optional and must not be done by automated validation. Clock/time-zone changes and resume should catch up through existing messages/maintenance. Verify both themes, emoji fallback, long/Unicode names and narrower widths. Begin typing, select text and cross a simulated greeting boundary: query, selection, caret and TextChanged events must remain unaffected. Account display-name formats/fallbacks are documented in START_MENU.md. Exit to restore native placeholders/bindings. Run GreetingLogic, StartSearch and SearchInput.

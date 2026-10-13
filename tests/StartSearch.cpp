@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <stdexcept>
 using namespace acrylic;
+const std::wstring& FixtureGreeting(){static const auto text=SearchGreeting(L"Jelly",0);return text;}
 void Check(bool value,const char* text) {if(!value) throw std::runtime_error(text);}
 void Pump(){MSG msg{};while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
 void Layout(const sx::FrameworkElement& root){root.UpdateLayout();for(unsigned i=0;i<4;++i){Pump();Sleep(20);}root.UpdateLayout();}
@@ -45,8 +46,6 @@ void RenderChecks(const sx::Controls::Grid& pane,const sx::Controls::Canvas& ico
 }
 int main(){
     try{
-        Check(SearchPlaceholder(L"jelly-PC")==L"Search jelly-PC" && SearchPlaceholder(L"名-PC")==L"Search 名-PC" && SearchPlaceholder({})==L"Search","PC names retain case and Unicode with an empty-name fallback");
-        wchar_t pc[256]{};DWORD pcSize=256;if(GetComputerNameExW(ComputerNamePhysicalDnsHostname,pc,&pcSize))Check(DeviceSearchPlaceholder()==std::wstring(L"Search ")+pc,"cached controller label matches the current Windows device name");
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         winrt::init_apartment(winrt::apartment_type::single_threaded);auto manager=sx::Hosting::WindowsXamlManager::InitializeForCurrentThread();
         WNDCLASSW wc{};wc.lpszClassName=L"jellyflower.StartSearchFixture";wc.hInstance=GetModuleHandleW(nullptr);wc.lpfnWndProc=DefWindowProcW;RegisterClassW(&wc);
@@ -72,9 +71,9 @@ int main(){
             for(bool light:{false,true}){
                 primary.Color(light?winrt::Windows::UI::Color{255,0,0,0}:winrt::Windows::UI::Color{255,245,245,245});
                 pane.Background(sx::Media::SolidColorBrush(light?winrt::Windows::UI::Color{255,249,249,249}:winrt::Windows::UI::Color{255,16,16,16}));
-                search.Refresh(true,light);Layout(pane);search.Refresh(true,light);Layout(pane);
+                search.Refresh(true,light,FixtureGreeting());Layout(pane);search.Refresh(true,light,FixtureGreeting());Layout(pane);
                 Check(search.Applied() && button.Template()==originalTemplate && button.IsTabStop(),"native search button/template/keyboard navigation retained");
-                Check(nativePlaceholder.Text()==DeviceSearchPlaceholder() && sx::Automation::AutomationProperties::GetName(button)==L"search","device-name placeholder and stable accessible search label");
+                Check(nativePlaceholder.Text()==FixtureGreeting() && sx::Automation::AutomationProperties::GetName(button)==L"search","greeting placeholder and stable accessible search label");
                 Check(nativePlaceholder.FontFamily().Source()==originalFont && nativePlaceholder.FontSize()==originalSize,"native search typography retained");
                 Check(nativeOutline.BorderThickness().Left==0 && nativeOutline.Background().as<sx::Media::SolidColorBrush>().Color().A==0,"outlined input fill and border removed");
                 for(const auto name:{L"SearchGlyph",L"SearchIconOff",L"SearchIconOn",L"BorderUnderline"})Check(FindStartElement(button,name).Opacity()==0,"native icon variants and input underline hidden");
@@ -100,19 +99,19 @@ int main(){
                 pane.Width(720);Layout(pane);Check(line.Width()==720,"divider follows native width changes");pane.Width(640);
                 const auto text=nativePresenter.TransformToVisual(pane).TransformPoint({0,0});Check(std::abs(text.X-60)<.1,"placeholder has 8 DIP after the 20-DIP icon");
                 button.IsChecked(true);Check(checked,"native toggle behavior and event handlers retained");button.IsChecked(false);checked=false;
-                search.Refresh(false,light);Layout(pane);
+                search.Refresh(false,light,FixtureGreeting());Layout(pane);
                 Check(!search.Applied() && nativePlaceholder.Text()==L"Search for apps, settings, and documents" && nativeOutline.Background()==originalBackground,"disable restores native label and input fill");
                 Check(nativePresenter.ReadLocalValue(sx::UIElement::RenderTransformProperty())==originalTransform,"unset original transform is restored");
                 Check(!FindStartElement(pane,L"JellyflowerSearchIcon") && !FindStartElement(pane,L"JellyflowerSearchDivider"),"owned visuals removed completely");
             }
-            heading.Name(L"UnrecognizedHeading");search.Refresh(true,false);Layout(pane);
+            heading.Name(L"UnrecognizedHeading");search.Refresh(true,false,FixtureGreeting());Layout(pane);
             const auto compactIcon=FindStartElement(button,L"JellyflowerSearchIcon").as<sx::Controls::Canvas>().Children().GetAt(0).as<sx::Controls::Canvas>();
             Check(header.Margin().Left==32 && header.Margin().Right==32 && std::abs(compactIcon.TransformToVisual(pane).TransformPoint({0,0}).X-32)<.1,"compact header has symmetric margins and 32-DIP shared alignment");
             search.Restore();heading.Name(L"PinnedListHeaderText");Layout(pane);Check(header.Margin().Left==32 && header.Margin().Right==28,"native asymmetric header margins restore");
-            search.Refresh(true,false);search.Refresh(true,true);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"device name stays unchanged in light mode");search.Refresh(true,false);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"device name stays unchanged in dark mode");nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
-            search.Refresh(true,false,L"Search jelly-PC");Check(nativePlaceholder.Text()==L"Search jelly-PC","controller-supplied device name updates the placeholder");search.Refresh(true,false);Check(nativePlaceholder.Text()==DeviceSearchPlaceholder(),"native device label can be restored without replacing the header");search.Restore();
-            sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true);search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");
-            search.Refresh(true,false);button.Template(Template());Layout(pane);search.Refresh(true,false);Layout(pane);Check(search.Applied() && FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>().Text()==DeviceSearchPlaceholder(),"replacement native templates are rediscovered without duplicate overlays");
+            search.Refresh(true,false,FixtureGreeting());search.Refresh(true,true,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"greeting stays unchanged in light mode");search.Refresh(true,false,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"greeting stays unchanged in dark mode");nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==FixtureGreeting(),"shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
+            for(unsigned period=0;period<3;++period){const auto greeting=SearchGreeting(L"Jelly",period);search.Refresh(true,false,greeting);Check(nativePlaceholder.Text()==greeting && sx::Automation::AutomationProperties::GetName(button)==L"search","clock-driven greetings retain native accessible search action");}search.Refresh(true,false,L"Good afternoon, Jelly 🧸");Check(nativePlaceholder.Text()==L"Good afternoon, Jelly 🧸","controller-supplied greeting updates the placeholder");search.Refresh(true,false,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"native greeting can be restored without replacing the header");search.Restore();
+            sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true,FixtureGreeting());search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");
+            search.Refresh(true,false,FixtureGreeting());button.Template(Template());Layout(pane);search.Refresh(true,false,FixtureGreeting());Layout(pane);Check(search.Applied() && FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>().Text()==FixtureGreeting(),"replacement native templates are rediscovered without duplicate overlays");
         }
         Check(!FindStartElement(pane,L"JellyflowerSearchDivider") && !FindStartElement(button,L"JellyflowerSearchIcon"),"destructor restores the native header");
         button.Checked(checkToken);host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();

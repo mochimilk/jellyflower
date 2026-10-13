@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <stdexcept>
 using namespace acrylic;
+const std::wstring& FixtureGreeting(){static const auto text=SearchGreeting(L"Jelly",0);return text;}
 void Check(bool yes,const char* text){if(!yes)throw std::runtime_error(text);}
 void Pump(){MSG m{};while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}}
 void Layout(const sx::FrameworkElement& root){for(unsigned i=0;i<8;++i){root.UpdateLayout();Pump();Sleep(12);}}
@@ -34,10 +35,10 @@ int main(){const char* step="initialize";try{
         step="apply style";
         for(bool light:{false,true}){
             sx::Media::SolidColorBrush ink(light?winrt::Windows::UI::Color{255,0,0,0}:winrt::Windows::UI::Color{255,255,255,255});text.Foreground(ink);
-            style.Refresh(true,light);Layout(pane);style.Refresh(true,light);Layout(pane);Check(style.Applied(),"native Search input is styled");
+            style.Refresh(true,light,FixtureGreeting());Layout(pane);style.Refresh(true,light,FixtureGreeting());Layout(pane);Check(style.Applied(),"native Search input is styled");
             Check(text.Template()==templateBefore && outer.Template()==outerBefore && text.Text()==L"notepad" && text.SelectionStart()==2 && text.SelectionLength()==3 && !changed,"applying style preserves native editor text, selection, templates and handlers");
             Check(text.FontFamily()==font && text.FontSize()==size && text.FontWeight().Weight==weight.Weight,"native typography is untouched");
-            Check(root.Background().as<sx::Media::SolidColorBrush>().Color().A==0 && root.BorderThickness().Left==0 && placeholder.Text()==DeviceSearchPlaceholder(),"native pill fill/outline and placeholder styled");
+            Check(root.Background().as<sx::Media::SolidColorBrush>().Color().A==0 && root.BorderThickness().Left==0 && placeholder.Text()==FixtureGreeting(),"native pill fill/outline and placeholder styled");
             auto layer=FindStartElement(outer,L"JellyflowerResultsSearchIcon").as<sx::Controls::Canvas>();auto icon=layer.Children().GetAt(0).as<sx::Controls::Canvas>();
             Check(!layer.IsHitTestVisible() && icon.Width()==20 && icon.Height()==20,"noninteractive exact 20-DIP shared magnifier");
             Check(icon.Children().GetAt(0).as<sx::Shapes::Path>().Stroke()==ink,"native primary editor brush colors search artwork");
@@ -48,12 +49,12 @@ int main(){const char* step="initialize";try{
                 auto divider=FindStartElement(pane,L"JellyflowerResultsSearchDivider").as<sx::Controls::Canvas>().Children().GetAt(0).as<sx::Controls::Border>();
                 Check(divider.Width()==pane.ActualWidth() && divider.Height()==1,"thin divider spans the header viewport");
             }
-            style.Refresh(true,!light);Check(text.PlaceholderText()==DeviceSearchPlaceholder() && text.Text()==L"notepad","theme change retains the device name and query");style.Refresh(true,light,L"Search jelly-PC");Check(text.PlaceholderText()==L"Search jelly-PC" && text.Text()==L"notepad" && text.SelectionStart()==2 && text.SelectionLength()==3 && !changed,"controller-supplied device name never changes query or selection");style.Refresh(true,light);style.Restore();Layout(pane);Check(outer.Margin().Left==40 && outer.Margin().Right==40,"original outer margins restore");Check(root.Background()==fill,"original Search brush restores");Check(placeholder.Text()==nativePlaceholder,"original Search placeholder restores");Check(scroll.Margin().Left==nativeMargin.Left,"native editor template padding restores");
+            style.Refresh(true,!light,FixtureGreeting());Check(text.PlaceholderText()==FixtureGreeting() && text.Text()==L"notepad","theme change retains the greeting and query");style.Refresh(true,light,L"Good afternoon, Jelly 🧸");Check(text.PlaceholderText()==L"Good afternoon, Jelly 🧸" && text.Text()==L"notepad" && text.SelectionStart()==2 && text.SelectionLength()==3 && !changed,"controller-supplied greeting never changes query or selection");for(unsigned period=0;period<3;++period){const auto greeting=SearchGreeting(L"Jelly",period);style.Refresh(true,light,greeting);Check(text.PlaceholderText()==greeting && text.Text()==L"notepad" && text.SelectionStart()==2 && text.SelectionLength()==3 && !changed,"clock-driven greetings never change query/selection/events");}style.Refresh(true,light,FixtureGreeting());style.Restore();Layout(pane);Check(outer.Margin().Left==40 && outer.Margin().Right==40,"original outer margins restore");Check(root.Background()==fill,"original Search brush restores");Check(placeholder.Text()==nativePlaceholder,"original Search placeholder restores");Check(scroll.Margin().Left==nativeMargin.Left,"native editor template padding restores");
         }
-        style.Refresh(true,false);Layout(pane);text.Text(L"a long native editable query that scrolls horizontally without changing the text model");text.Select(50,4);Layout(pane);Check(changed==1 && text.SelectionStart()==50 && text.SelectionLength()==4,"native text events and selection still work after styling");
-        outer.Template(OuterTemplate());Layout(pane);style.Refresh(true,false);Layout(pane);Check(style.Applied(),"replacement Search template is rediscovered");
-        style.Refresh(false,false);Check(!style.Applied() && !FindStartElement(pane,L"JellyflowerResultsSearchDivider"),"policy disable removes owned visuals");
-        style.Refresh(true,false);Layout(pane);
+        style.Refresh(true,false,FixtureGreeting());Layout(pane);text.Text(L"a long native editable query that scrolls horizontally without changing the text model");text.Select(50,4);Layout(pane);Check(changed==1 && text.SelectionStart()==50 && text.SelectionLength()==4,"native text events and selection still work after styling");
+        outer.Template(OuterTemplate());Layout(pane);style.Refresh(true,false,FixtureGreeting());Layout(pane);Check(style.Applied(),"replacement Search template is rediscovered");
+        style.Refresh(false,false,FixtureGreeting());Check(!style.Applied() && !FindStartElement(pane,L"JellyflowerResultsSearchDivider"),"policy disable removes owned visuals");
+        style.Refresh(true,false,FixtureGreeting());Layout(pane);
     }
     Check(!FindStartElement(pane,L"JellyflowerResultsSearchDivider") && !FindStartElement(outer,L"JellyflowerResultsSearchIcon"),"destruction restores Search and removes overlays");
     // Build 26200 puts the input and a separate pill inside a padded page;
@@ -64,7 +65,7 @@ int main(){const char* step="initialize";try{
     sx::Controls::Border frame;frame.Name(L"AppBorder");frame.CornerRadius({8,8,8,8});pane.Children().InsertAt(0,frame);
     viewport.CornerRadius({7,7,7,7});
     sx::Controls::Grid results;results.Name(L"QueryFormulationRoot");results.Margin({3,0,4,5});results.Height(100);results.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(results);
-    {SearchInput style(outer,Supported);style.Refresh(true,false);Layout(pane);
+    {SearchInput style(outer,Supported);style.Refresh(true,false,FixtureGreeting());Layout(pane);
         Check(frame.CornerRadius().TopLeft==20 && viewport.CornerRadius().BottomRight==19,"Search outer and inset background layers share the main Start corner recipe");
         Check(results.Margin().Top==12 && results.Margin().Left==3 && results.Margin().Bottom==5,"results tabs receive their own spacing below the header divider");
         results.Margin({6,2,7,8});Check(results.Margin().Top==12 && results.Margin().Left==6,"native result margin updates preserve the tab gap");
