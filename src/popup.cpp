@@ -48,16 +48,23 @@ std::vector<Row> CursorRows(UINT mask, UINT selected) {
     return rows;
 }
 bool HasCursorPack(UINT mask) { return (mask & ((1u << CursorDisabled) - 1)) != 0; }
-std::vector<Row> RootRows(AcrylicMode mode, bool date, bool light, UINT mask) {
+std::vector<Row> RootRows(bool light, UINT mask) {
     return {{TrayThemeCommand, L"system", false, false, light ? L"light" : L"dark"},
-        {TrayToggleCommand, L"acrylic", false, false, AcrylicModeName(mode)},
-        {TrayDateCommand, L"date", false, false, date ? L"on" : L"off"},
+        {TrayTaskbarCommand, L"taskbar"}, {TrayWallpaperMenuCommand,L"wallpaper"},
         HasCursorPack(mask) ? Row{TrayCursorCommand, L"cursor"} : Row{TrayCursorUnlockCommand, L"colors", false, false, L"unlock"},
         {TrayGeneralCommand, L"general", true}};
 }
 std::vector<Row> GeneralRows() {
-    return {{TrayWallpaperCommand, L"jellyflower wallpaper", false, false, L"off"},
-        {TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
+    return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
+}
+std::vector<Row> TaskbarRows(AcrylicMode mode,bool date){
+    return {{TrayToggleCommand,L"acrylic",false,false,AcrylicModeName(mode)},
+        {TrayDateCommand,L"date",false,false,date?L"on":L"off"},
+        {TrayAutoHideCommand,L"auto hide",false,false,L"off",false}};
+}
+std::vector<Row> WallpaperRows(){
+    return {{TrayWallpaperCommand,L"jellyflower",false,false,L"off"},
+        {TrayWallpaperThemeCommand,L"theme",false,false,L"system"}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -85,7 +92,7 @@ std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     result->UnlockBits(&target);
     return result;
 }
-bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayGeneralCommand; }
+bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayGeneralCommand || command==TrayTaskbarCommand || command==TrayWallpaperMenuCommand; }
 HICON LoadTintedIcon(int resource, int pixels, COLORREF ink) {
     const auto source = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, pixels, pixels, 0));
     ICONINFO info{};
@@ -155,7 +162,7 @@ struct Popup {
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
     HICON githubIcon = nullptr, wallpaperIcon = nullptr;
-    MenuIndicator checkIcon, chevronIcon, externalIcon;
+    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -173,7 +180,7 @@ struct Popup {
     std::array<HCURSOR,CursorDisabled+1> previewCursors{};
     HCURSOR previewCursor = nullptr;
     UINT iconCursorMode = CursorPreviewNone;int iconPixels = 0;bool iconLight = false;
-    bool clockDate = true;
+    bool clockDate = true, wallpaperAuto=false;
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
     bool acrylic = false, highContrast = false;
@@ -253,6 +260,27 @@ struct Popup {
             }
         }
         RepaintButtons();
+        if(child)child->UpdateDate(date);
+    }
+    void UpdateAcrylic(AcrylicMode selected){
+        mode=selected;
+        for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayToggleCommand){
+            rows[i].secondary=AcrylicModeName(mode);
+            if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
+            RepaintRow(static_cast<int>(i));
+        }
+        if(child)child->UpdateAcrylic(selected);
+    }
+    void RefreshTaskbar(){
+        if(kind==TrayTaskbarCommand){
+            const auto state=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,0,0));
+            for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayAutoHideCommand){
+                auto& row=rows[i];row.secondary=(state&1)?L"on":L"off";row.enabled=(state&2)!=0;
+                if(i<buttons.size()){SetWindowTextW(buttons[i],(row.label+L", "+row.secondary).c_str());EnableWindow(buttons[i],row.enabled);}
+                RepaintRow(static_cast<int>(i));
+            }
+        }
+        if(child)child->RefreshTaskbar();
     }
     int Focused() const {
         for (size_t i = 0; i < buttons.size(); ++i) if (GetFocus() == buttons[i]) return static_cast<int>(i);
@@ -293,7 +321,9 @@ struct Popup {
         }
     }
     void RefreshWallpaper() {
-        if (kind == TrayGeneralCommand) {
+        if (kind == TrayWallpaperMenuCommand) {
+            const bool automatic=SendMessageW(controller,TrayWallpaperQueryMessage,2,0)!=0;
+            if(automatic!=wallpaperAuto){wallpaperAuto=automatic;UpdateTheme(systemLight);}
             const auto state = static_cast<WallpaperStatus>(SendMessageW(controller, TrayWallpaperQueryMessage, 0, 0));
             const auto error = static_cast<HRESULT>(SendMessageW(controller, TrayWallpaperQueryMessage, 1, 0));
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayWallpaperCommand) {
@@ -302,6 +332,11 @@ struct Popup {
                     SetWindowTextW(buttons[i], (row.label + L", " + row.secondary).c_str());
                     EnableWindow(buttons[i], row.enabled);
                 }
+                RepaintRow(static_cast<int>(i));
+            }
+            for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayWallpaperThemeCommand){
+                rows[i].secondary=wallpaperAuto?L"auto":L"system";
+                if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
                 RepaintRow(static_cast<int>(i));
             }
         }
@@ -364,6 +399,7 @@ struct Popup {
     bool UpdateIndicators() {
         return checkIcon.Load(IDI_CHECK_LIGHT, Px(MenuGlyphSize), text, highlightedText)
             && chevronIcon.Load(IDI_CHEVRON_RIGHT_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true))
+            && (kind!=TrayTaskbarCommand || autoHideIcon.Load(IDI_ACRYLIC_PURE_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT)))
             && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
     }
     bool UpdateTheme(bool systemMode) {
@@ -393,49 +429,44 @@ struct Popup {
         text = high ? GetSysColor(COLOR_MENUTEXT) : light ? RGB(26, 26, 26) : RGB(243, 243, 243);
         highlightedText = high ? GetSysColor(COLOR_HIGHLIGHTTEXT) : text;
         if (!UpdateIndicators()) return false;
+        const bool darkInk=GetRValue(text)+GetGValue(text)+GetBValue(text)<384;
+        auto load=[&](HICON& icon,int primary,int secondary){
+            const auto next=static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(darkInk?primary:secondary),IMAGE_ICON,Px(MenuGlyphSize),Px(MenuGlyphSize),0));
+            if(!next)return false;if(icon)DestroyIcon(icon);icon=next;return true;
+        };
         if (!parent) {
-            const auto automatic = static_cast<AutoThemeStatus>(SendMessageW(controller, TrayThemeQueryMessage, 1, 0));
-            const bool autoSelected = automatic == AutoThemeStatus::Automatic || automatic == AutoThemeStatus::Locating;
-            const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
-            const int resources[]{darkInk ? IDI_ACRYLIC_OFF_LIGHT : IDI_ACRYLIC_OFF_DARK,
-                darkInk ? IDI_ACRYLIC_SYSTEM_LIGHT : IDI_ACRYLIC_SYSTEM_DARK,
-                darkInk ? IDI_ACRYLIC_PURE_LIGHT : IDI_ACRYLIC_PURE_DARK,
-                autoSelected ? (darkInk ? IDI_SUNSET_LIGHT : IDI_SUNSET_DARK)
-                    : systemLight ? (darkInk ? IDI_SUN_LIGHT : IDI_SUN_DARK) : (darkInk ? IDI_MOON_LIGHT : IDI_MOON_DARK),
-                darkInk ? IDI_CALENDAR_OFF_LIGHT : IDI_CALENDAR_OFF_DARK,
-                darkInk ? IDI_CALENDAR_LIGHT : IDI_CALENDAR_DARK,
-                darkInk ? IDI_SETTINGS_LIGHT : IDI_SETTINGS_DARK};
-            HICON* icons[]{&acrylicIcons[0], &acrylicIcons[1], &acrylicIcons[2], &themeIcon, &dateIcons[0], &dateIcons[1], &generalIcon};
-            for (size_t i = 0; i < std::size(resources); ++i) {
-                const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
-                    MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
-                if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
-            }
+            const auto automatic=static_cast<AutoThemeStatus>(SendMessageW(controller,TrayThemeQueryMessage,1,0));
+            const bool autoSelected=automatic==AutoThemeStatus::Automatic || automatic==AutoThemeStatus::Locating;
+            if(!load(acrylicIcons[2],IDI_ACRYLIC_PURE_LIGHT,IDI_ACRYLIC_PURE_DARK)
+                || !load(generalIcon,IDI_SETTINGS_LIGHT,IDI_SETTINGS_DARK)
+                || !load(wallpaperIcon,IDI_WALLPAPER_LIGHT,IDI_WALLPAPER_DARK)
+                || !load(themeIcon,autoSelected?IDI_SUNSET_LIGHT:systemLight?IDI_SUN_LIGHT:IDI_MOON_LIGHT,
+                    autoSelected?IDI_SUNSET_DARK:systemLight?IDI_SUN_DARK:IDI_MOON_DARK))return false;
             RefreshCursorIcon();
-            for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayThemeCommand) {
-                rows[i].label = L"system";
-                rows[i].secondary = autoSelected ? L"auto"
-                    : automatic == AutoThemeStatus::Denied ? L"location off" : automatic == AutoThemeStatus::Unavailable ? L"no location"
-                    : automatic == AutoThemeStatus::Error ? L"try again" : systemLight ? L"light" : L"dark";
-                if (i < buttons.size()) SetWindowTextW(buttons[i], (rows[i].label + L", " + rows[i].secondary).c_str());
+            for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayThemeCommand){
+                rows[i].label=L"system";
+                rows[i].secondary=autoSelected?L"auto":automatic==AutoThemeStatus::Denied?L"location off"
+                    :automatic==AutoThemeStatus::Unavailable?L"no location":automatic==AutoThemeStatus::Error?L"try again":systemLight?L"light":L"dark";
+                if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
             }
-            if (!acrylicIcons[0] || !acrylicIcons[1] || !acrylicIcons[2] || !themeIcon || !dateIcons[0] || !dateIcons[1] || !generalIcon) return false;
-        } else if (kind == TrayGeneralCommand) {
+        }else if(kind==TrayTaskbarCommand){
+            if(!load(acrylicIcons[0],IDI_ACRYLIC_OFF_LIGHT,IDI_ACRYLIC_OFF_DARK)
+                || !load(acrylicIcons[1],IDI_ACRYLIC_SYSTEM_LIGHT,IDI_ACRYLIC_SYSTEM_DARK)
+                || !load(acrylicIcons[2],IDI_ACRYLIC_PURE_LIGHT,IDI_ACRYLIC_PURE_DARK)
+                || !load(dateIcons[0],IDI_CALENDAR_OFF_LIGHT,IDI_CALENDAR_OFF_DARK)
+                || !load(dateIcons[1],IDI_CALENDAR_LIGHT,IDI_CALENDAR_DARK))return false;
+        }else if(kind==TrayWallpaperMenuCommand){
+            wallpaperAuto=SendMessageW(controller,TrayWallpaperQueryMessage,2,0)!=0;
+            if(!load(wallpaperIcon,IDI_WALLPAPER_LIGHT,IDI_WALLPAPER_DARK)
+                || !load(themeIcon,wallpaperAuto?IDI_SUNSET_LIGHT:systemLight?IDI_SUN_LIGHT:IDI_MOON_LIGHT,
+                    wallpaperAuto?IDI_SUNSET_DARK:systemLight?IDI_SUN_DARK:IDI_MOON_DARK))return false;
+        }else if(kind==TrayGeneralCommand){
             if(!graphicsToken){Gdiplus::GdiplusStartupInput input;if(Gdiplus::GdiplusStartup(&graphicsToken,&input,nullptr)!=Gdiplus::Ok)graphicsToken=0;}
-            const bool darkInk = GetRValue(text) + GetGValue(text) + GetBValue(text) < 384;
-            const int resources[]{darkInk ? IDI_UPDATE_LIGHT : IDI_UPDATE_DARK,
-                darkInk ? IDI_PACKAGE_LIGHT : IDI_PACKAGE_DARK,
-                darkInk ? IDI_PACKAGE_OPEN_LIGHT : IDI_PACKAGE_OPEN_DARK,
-                darkInk ? IDI_GITHUB_LIGHT : IDI_GITHUB_DARK,
-                darkInk ? IDI_WALLPAPER_LIGHT : IDI_WALLPAPER_DARK};
-            HICON* icons[]{&updateIcon, &packageIcon, &packageOpenIcon, &githubIcon, &wallpaperIcon};
-            for (size_t i = 0; i < std::size(resources); ++i) {
-                const auto next = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
-                    MAKEINTRESOURCEW(resources[i]), IMAGE_ICON, Px(MenuGlyphSize), Px(MenuGlyphSize), 0));
-                if (next) { if (*icons[i]) DestroyIcon(*icons[i]); *icons[i] = next; }
-            }
-            if (graphicsToken && updateIcon) spinnerBitmap = SpinnerBitmap(updateIcon);
-            if (!updateIcon || !packageIcon || !packageOpenIcon || !githubIcon || !wallpaperIcon || !externalIcon) return false;
+            if(!load(updateIcon,IDI_UPDATE_LIGHT,IDI_UPDATE_DARK)
+                || !load(packageIcon,IDI_PACKAGE_LIGHT,IDI_PACKAGE_DARK)
+                || !load(packageOpenIcon,IDI_PACKAGE_OPEN_LIGHT,IDI_PACKAGE_OPEN_DARK)
+                || !load(githubIcon,IDI_GITHUB_LIGHT,IDI_GITHUB_DARK) || !externalIcon)return false;
+            if(graphicsToken && updateIcon)spinnerBitmap=SpinnerBitmap(updateIcon);
         }
         if (window) {
             const BOOL dark = !light;
@@ -515,12 +546,15 @@ struct Popup {
             child->dpi = dpi;
             child->light = light;
             child->systemLight = systemLight;
+            child->mode=Root()->mode;child->clockDate=Root()->clockDate;
             child->hoverDelay = hoverDelay;
             auto* root = Root();
             if (command == TrayCursorCommand) {
                 const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
                 child->rows = CursorRows(mask, root->cursorMode);
-            } else child->rows = GeneralRows();
+            }else if(command==TrayTaskbarCommand)child->rows=TaskbarRows(root->mode,root->clockDate);
+            else if(command==TrayWallpaperMenuCommand)child->rows=WallpaperRows();
+            else child->rows=GeneralRows();
             RECT bounds{}, row{};
             GetWindowRect(window, &bounds);
             GetWindowRect(buttons[static_cast<size_t>(index)], &row);
@@ -533,6 +567,7 @@ struct Popup {
         SetForegroundWindow(child->window);
         child->RefreshUpdate();
         child->RefreshWallpaper();
+        child->RefreshTaskbar();
         const UINT selected = command == TrayCursorCommand ? std::min(Root()->cursorMode, CursorDisabled) : 0;
         child->Focus(static_cast<int>(selected));
         child->keyboard = fromKeyboard;
@@ -626,16 +661,13 @@ struct Popup {
             if (root->done) return;
             if (command == TrayGithubCommand && state) { Finish(); return; }
             if (command == TrayToggleCommand) {
-                root->mode = DecodeAcrylicMode(static_cast<LONG>(state));
-                for (size_t i = 0; i < root->rows.size(); ++i) if (root->rows[i].command == TrayToggleCommand) {
-                    auto& row = root->rows[i]; row.secondary = AcrylicModeName(root->mode);
-                    SetWindowTextW(root->buttons[i], (row.label + L", " + row.secondary).c_str());
-                }
-                root->RepaintButtons();
+                root->UpdateAcrylic(DecodeAcrylicMode(static_cast<LONG>(state)));
             } else if (command == TrayUpdateCommand) {
                 root->RefreshUpdate();
-            } else if (command == TrayWallpaperCommand) {
+            } else if (command == TrayWallpaperCommand || command==TrayWallpaperThemeCommand) {
                 root->RefreshWallpaper();
+            } else if(command==TrayAutoHideCommand){
+                root->RefreshTaskbar();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
             } else if (command == TrayDateCommand) {
@@ -710,7 +742,7 @@ struct Popup {
             const int statusWidth=menuText.Width(row.secondary);
             SIZE fallback{};if(!statusWidth) GetTextExtentPoint32W(item.hDC,row.secondary.c_str(),static_cast<int>(row.secondary.size()),&fallback);
             status.left = status.right - (statusWidth?statusWidth:fallback.cx);
-            DrawLabel(item.hDC, status, row.secondary, SecondaryInk(highlighted), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            DrawLabel(item.hDC, status, row.secondary, row.enabled?SecondaryInk(highlighted):LabelInk(row,false), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
         DrawLabel(item.hDC, bounds, row.label, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
@@ -718,10 +750,11 @@ struct Popup {
         // label's visible ink instead, using the selected font at this DPI.
         const int cy = menuText.InkCenter(row.label,bounds);
         const HICON icon = row.command == TrayToggleCommand ? acrylicIcons[static_cast<size_t>(mode)]
-            : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : row.command == TrayThemeCommand ? themeIcon
+            : row.command == TrayCursorCommand ? cursorIcon : row.command == TrayCursorUnlockCommand && !colorIcons.empty() ? colorIcons[colorFrame % colorIcons.size()] : (row.command == TrayThemeCommand || row.command==TrayWallpaperThemeCommand) ? themeIcon
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayGeneralCommand ? generalIcon : row.command == TrayUpdateCommand
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
-                : row.command == TrayGithubCommand ? githubIcon : row.command == TrayWallpaperCommand ? wallpaperIcon : nullptr;
+                : row.command == TrayGithubCommand ? githubIcon : (row.command == TrayWallpaperCommand || row.command==TrayWallpaperMenuCommand) ? wallpaperIcon
+                : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayTaskbarCommand?acrylicIcons[2]:nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
@@ -800,9 +833,10 @@ struct Popup {
         int width = Px(parent ? 228 : 296);
         // Reserve the longest status, using the inherited Windows font at this
         // DPI rather than squeezing a new long label into a fixed submenu.
-        if (kind == TrayGeneralCommand) for(const auto label:WallpaperErrorLabels)
-            width = std::max(width, menuText.Width(L"jellyflower wallpaper")
+        if (kind == TrayWallpaperMenuCommand) for(const auto label:WallpaperErrorLabels)
+            width = std::max(width, menuText.Width(L"jellyflower")
                 + menuText.Width(label) + 2 * Px(Padding) + Px(34) + 2 * Px(12));
+        if(kind==TrayGeneralCommand)width=std::max(width,menuText.Width(std::wstring(L"v")+AppVersion)+menuText.Width(L"downloading...")+2*Px(Padding)+Px(34)+2*Px(12));
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
@@ -816,7 +850,7 @@ struct Popup {
         const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(MenuEdgeGap), area.top,
             std::max(area.top, area.bottom - height));
         restingBounds = {x, y, x + width, y + height};
-        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : kind == TrayGeneralCommand ? L"general" : L"jellyflower",
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : kind == TrayGeneralCommand ? L"general" : kind==TrayTaskbarCommand?L"taskbar":kind==TrayWallpaperMenuCommand?L"wallpaper":L"jellyflower",
             WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;
@@ -841,6 +875,7 @@ struct Popup {
         }
         RefreshUpdate();
         RefreshWallpaper();
+        RefreshTaskbar();
         if (!parent) {
             constexpr COLORREF fills[]{RGB(250,250,250), RGB(40,40,40), RGB(145,170,240), RGB(148,182,104), RGB(129,216,184), RGB(244,143,167), RGB(230,170,100), RGB(245,229,179), RGB(231,194,218)};
             if(!HasCursorPack(static_cast<UINT>(SendMessageW(controller,TrayCursorQueryMessage,0,0))))for (const auto fill : fills) colorIcons.push_back(CreateCursorColorIcon(Px(MenuGlyphSize), fill, fill == RGB(40,40,40) ? RGB(240,240,240) : RGB(45,45,45)));
@@ -976,6 +1011,9 @@ void RefreshUpdateMenu(HWND owner) {
 void RefreshWallpaperMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshWallpaper();
 }
+void RefreshTaskbarMenu(HWND owner){
+    if(activePopup && activePopup->controller==owner && !activePopup->done)activePopup->RefreshTaskbar();
+}
 void RefreshCursorMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshCursors();
 }
@@ -1003,7 +1041,7 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayDateQueryMessage, 0, 0));
     popup.clockDate = (clockState & 1) != 0;
     SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &popup.hoverDelay, 0);
-    popup.rows = RootRows(mode, popup.clockDate, popup.systemLight, static_cast<UINT>(SendMessageW(owner, TrayCursorQueryMessage, 0, 0)));
+    popup.rows = RootRows(popup.systemLight, static_cast<UINT>(SendMessageW(owner, TrayCursorQueryMessage, 0, 0)));
     popup.RefreshUpdate();
     if (!popup.Create(owner, anchor, false)) return 0;
     activePopup = &popup;

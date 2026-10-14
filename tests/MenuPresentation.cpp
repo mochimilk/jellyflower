@@ -14,6 +14,8 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
 HRESULT wallpaperError=E_FAIL;
+bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true;UINT autoHideActions=0;
+AcrylicMode selectedAcrylic=AcrylicMode::System;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
 std::vector<UINT> cursorPreviews;
@@ -70,17 +72,17 @@ double Contrast(COLORREF a,COLORREF b) {
     const auto first=luminance(a),second=luminance(b);return (std::max(first,second)+.05)/(std::min(first,second)+.05);
 }
 void ExitTextChecks(Popup& popup) {
-    const auto& row=popup.rows[3];
+    const auto& row=popup.rows[2];
     const COLORREF ink=popup.LabelInk(row,false);
     Check(GetRValue(ink)>GetGValue(ink)+25 && GetRValue(ink)>GetBValue(ink)+25,"exit uses a distinct red in each theme");
     LOGBRUSH base{},hover{};GetObjectW(popup.background,sizeof(base),&base);GetObjectW(popup.highlight,sizeof(hover),&hover);
     Check(Contrast(ink,base.lbColor)>=4.5 && Contrast(ink,hover.lbColor)>=4.5,"exit red has readable contrast on base and hover surfaces");
     RECT bounds{};GetClientRect(popup.window,&bounds);
     for(int interaction=0;interaction<3;++interaction) {
-        popup.hovered=interaction==1?3:-1;popup.keyboard=interaction==2;
-        if(interaction==2) SetFocus(popup.buttons[3]);
+        popup.hovered=interaction==1?2:-1;popup.keyboard=interaction==2;
+        if(interaction==2) SetFocus(popup.buttons[2]);
         MenuSurface surface(nullptr,bounds,false);popup.Paint(surface.Dc());GdiFlush();
-        RECT exit{};GetWindowRect(popup.buttons[3],&exit);MapWindowPoints(nullptr,popup.window,reinterpret_cast<POINT*>(&exit),2);
+        RECT exit{};GetWindowRect(popup.buttons[2],&exit);MapWindowPoints(nullptr,popup.window,reinterpret_cast<POINT*>(&exit),2);
         size_t red=0;
         for(LONG y=exit.top;y<exit.bottom;++y) for(LONG x=exit.left+popup.Px(34);x<exit.right-popup.Px(24);++x) {
             const DWORD pixel=surface.pixels[static_cast<size_t>(y)*bounds.right+x];
@@ -94,9 +96,9 @@ void ExitTextChecks(Popup& popup) {
     popup.highContrast=false;popup.UpdateTheme(light);popup.hovered=-1;popup.keyboard=false;
 }
 void GithubChecks(Popup& popup) {
-    Check(popup.rows[1].label==L"github" && std::wstring(GithubUrl)==L"https://github.com/mochimilk/jellyflower","github row opens the project's fixed HTTPS destination");
+    Check(popup.rows[0].label==L"github" && std::wstring(GithubUrl)==L"https://github.com/mochimilk/jellyflower","github row opens the project's fixed HTTPS destination");
     RECT bounds{};GetClientRect(popup.window,&bounds);
-    RECT row{};GetWindowRect(popup.buttons[1],&row);MapWindowPoints(nullptr,popup.window,reinterpret_cast<POINT*>(&row),2);
+    RECT row{};GetWindowRect(popup.buttons[0],&row);MapWindowPoints(nullptr,popup.window,reinterpret_cast<POINT*>(&row),2);
     auto pixels=[&] {
         MenuSurface surface(nullptr,bounds,false);popup.Paint(surface.Dc());GdiFlush();std::vector<DWORD> region;
         for(LONG y=row.top+popup.Px(8);y<row.bottom-popup.Px(8);++y)
@@ -112,8 +114,8 @@ void GithubChecks(Popup& popup) {
         return count;
     };
     popup.keyboard=false;popup.hovered=-1;Check(coverage()==0,"external arrow is hidden at rest");
-    popup.hovered=1;Check(coverage()>10,"external arrow paints at the right on hover");
-    popup.hovered=-1;popup.keyboard=true;SetFocus(popup.buttons[1]);Check(coverage()>10,"external arrow also appears for keyboard focus");
+    popup.hovered=0;Check(coverage()>10,"external arrow paints at the right on hover");
+    popup.hovered=-1;popup.keyboard=true;SetFocus(popup.buttons[0]);Check(coverage()>10,"external arrow also appears for keyboard focus");
     popup.keyboard=false;
 }
 std::vector<DWORD> IconPixels(HICON icon) {
@@ -185,11 +187,15 @@ void SubmenuToggleChecks(Popup& popup,int index) {
     Check(IsWindowVisible(branch) && popup.child->keyboard,"keyboard right can reopen a clicked-closed branch");
 }
 LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other) {
-    if (message == TrayWallpaperQueryMessage) return parameter?wallpaperError:static_cast<LRESULT>(wallpaperState);
+    if (message == TrayWallpaperQueryMessage) return parameter==2?wallpaperAutomatic:parameter?wallpaperError:static_cast<LRESULT>(wallpaperState);
     if (message == TraySettingMessage && parameter == TrayWallpaperCommand) {
         wallpaperState = wallpaperState == WallpaperStatus::On ? WallpaperStatus::Restoring : WallpaperStatus::Applying;
         return static_cast<UINT>(wallpaperState);
     }
+    if(message==TraySettingMessage && parameter==TrayWallpaperThemeCommand){wallpaperAutomatic=!wallpaperAutomatic;return wallpaperAutomatic;}
+    if(message==TrayTaskbarQueryMessage)return (autoHide?1u:0u)|(taskbarBottom?2u:0u);
+    if(message==TraySettingMessage && parameter==TrayAutoHideCommand){++autoHideActions;if(taskbarBottom)autoHide=!autoHide;return (autoHide?1u:0u)|(taskbarBottom?2u:0u);}
+    if(message==TraySettingMessage && parameter==TrayToggleCommand){selectedAcrylic=NextAcrylicMode(selectedAcrylic);return static_cast<UINT>(selectedAcrylic);}
     if(message==TraySettingMessage && parameter==TrayGithubCommand) {++githubOpens;return 1;}
     if (message == TrayThemeQueryMessage) return parameter ? static_cast<UINT>(automatic) : light;
     if (message == TraySettingMessage && parameter == TrayThemeCommand) {
@@ -283,7 +289,7 @@ void Compositor(HWND controller,const std::filesystem::path& destination) {
     ShowWindow(background,SW_SHOWNOACTIVATE);UpdateWindow(background);
     for(int theme=0;theme<2;++theme) {
         light=theme!=0;state=UpdateStatus::Idle;cursorMask=1u<<CursorDisabled;
-        Popup popup;popup.controller=controller;popup.dpi=96;popup.systemLight=light;popup.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
+        Popup popup;popup.controller=controller;popup.dpi=96;popup.systemLight=light;popup.rows=RootRows(light,cursorMask);
         Check(popup.Create(background,{180,420},false),"composited popup");
         popup.closing=true; // The fixture never takes focus away from the user's app.
         ShowWindow(popup.window,SW_SHOWNOACTIVATE);
@@ -325,7 +331,7 @@ int wmain(int argc,wchar_t** argv) {
             light=theme!=0;state=UpdateStatus::Idle;
             Popup popup;popup.controller=controller;popup.dpi=dpi;popup.light=light;popup.systemLight=light;
             cursorMask=1u<<CursorDisabled;
-            popup.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
+            popup.rows=RootRows(light,cursorMask);
             Check(popup.Create(controller,{100,100},false),"native popup created");
             ShowWindow(popup.window,SW_SHOWNORMAL);SetForegroundWindow(popup.window);
             Check(popup.acrylic,"Windows accepts explicit acrylic on root menu");
@@ -345,58 +351,66 @@ int wmain(int argc,wchar_t** argv) {
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
             const HWND same=popup.window;
-            dateEnabled=true;
-            Check(popup.rows[1].command==TrayToggleCommand && popup.rows[2].command==TrayDateCommand && !HasSubmenu(TrayDateCommand),"date directly below acrylic, no nested controls");
-            Check(popup.dateIcons[0] && popup.dateIcons[1] && popup.dateIcons[0]!=popup.dateIcons[1],"both supplied calendar glyphs loaded");
-            popup.Activate(2,false);
-            Check(!dateEnabled && !popup.clockDate && popup.rows[2].secondary==L"off" && popup.window==same && !popup.done,"date off updates in place");
-            Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"date-off-light-":L"date-off-dark-")+std::to_wstring(dpi)+L".bmp"));
-            popup.Activate(2,false);
-            Check(dateEnabled && popup.clockDate && popup.rows[2].secondary==L"on" && popup.window==same && !popup.done,"date on updates in place");
+            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;
+            Check(popup.rows[1].command==TrayTaskbarCommand && popup.rows[2].command==TrayWallpaperMenuCommand && HasSubmenu(TrayTaskbarCommand) && HasSubmenu(TrayWallpaperMenuCommand),"root groups taskbar and wallpaper settings");
+            popup.OpenChild(1,true);auto& taskbar=*popup.child;const HWND taskbarWindow=taskbar.window;
+            Check(taskbar.rows.size()==3 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayAutoHideCommand,"taskbar order is acrylic, date, auto hide");
+            Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.dateIcons[0] && taskbar.dateIcons[1],"taskbar submenu owns its themed setting icons");
+            for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeName(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
+            taskbar.Activate(1,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && taskbar.rows[1].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
+            taskbar.Activate(1,false);Check(dateEnabled && popup.clockDate && taskbar.clockDate && taskbar.rows[1].secondary==L"on","nested date on persists in the existing branch");
+            Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"bottom taskbar enables auto hide");
+            taskbar.Activate(2,false);Check(autoHide && taskbar.rows[2].secondary==L"on" && !popup.done,"auto hide toggles native preference in place");
+            taskbarBottom=false;popup.RefreshTaskbar();const auto previousActions=autoHideActions;taskbar.Activate(2,false);
+            Check(!taskbar.rows[2].enabled && !IsWindowEnabled(taskbar.buttons[2]) && autoHideActions==previousActions && autoHide,"non-bottom row greys out and cannot dispatch a change");
+            {const auto gray=GetSysColor(COLOR_GRAYTEXT);for(const auto pixel:IconPixels(taskbar.autoHideIcon.Get(true))){const auto alpha=pixel>>24;Check(((pixel>>16)&255)==(GetRValue(gray)*alpha+127)/255 && ((pixel>>8)&255)==(GetGValue(gray)*alpha+127)/255 && (pixel&255)==(GetBValue(gray)*alpha+127)/255,"disabled auto-hide icon uses the same gray ink as its label");}}
+            Capture(taskbar,std::filesystem::path(argv[1])/(std::wstring(light?L"taskbar-light-":L"taskbar-dark-")+std::to_wstring(dpi)+L".bmp"));
+            taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(2,false);Check(!autoHide && taskbar.rows[2].secondary==L"off","external edge changes re-enable the current state");
+            SubmenuToggleChecks(popup,1);
+            popup.OpenChild(2,true);auto& wallpapers=*popup.child;const HWND wallpaperWindow=wallpapers.window;
+            Check(wallpapers.rows.size()==2 && wallpapers.rows[0].label==L"jellyflower" && wallpapers.rows[1].command==TrayWallpaperThemeCommand,"wallpaper has jellyflower toggle then theme row");
+            wallpaperAutomatic=false;wallpaperState=WallpaperStatus::Off;wallpapers.RefreshWallpaper();wallpapers.Activate(0,false);
+            Check(wallpapers.rows[0].secondary==L"on" && !IsWindowEnabled(wallpapers.buttons[0]) && !popup.done && wallpapers.window==wallpaperWindow,"wallpaper applies inside its own branch");
+            wallpaperState=WallpaperStatus::On;wallpapers.RefreshWallpaper();wallpapers.Activate(0,false);Check(wallpapers.rows[0].secondary==L"off" && !popup.done,"wallpaper restoration keeps both menus open");
+            const auto systemBefore=automatic;const auto lightBefore=light;
+            wallpapers.Activate(1,false);Check(wallpaperAutomatic && wallpapers.rows[1].secondary==L"auto" && wallpapers.themeIcon && automatic==systemBefore && light==lightBefore,"wallpaper auto is immediate and independent of system theme");
+            wallpapers.Activate(1,false);Check(!wallpaperAutomatic && wallpapers.rows[1].secondary==L"system" && wallpapers.window==wallpaperWindow,"wallpaper theme cycles between system and auto in place");
+            wallpaperState=WallpaperStatus::ErrorOn;wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"error 80004005" && IsWindowEnabled(wallpapers.buttons[0]),"unknown error retains inline code and retry");
+            RECT wallpaperBounds{};GetClientRect(wallpapers.buttons[0],&wallpaperBounds);
+            for(const auto label:WallpaperErrorLabels)Check(wallpapers.menuText.Width(L"jellyflower")+wallpapers.menuText.Width(label)+wallpapers.Px(34)+2*wallpapers.Px(12)<=wallpaperBounds.right,"wallpaper error statuses fit at every DPI");
+            wallpaperError=HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"image missing","missing image remains readable in the new submenu");
+            wallpaperError=E_ACCESSDENIED;wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"not allowed","permission error remains inline");wallpaperError=E_FAIL;
+            wallpaperState=WallpaperStatus::Off;wallpapers.RefreshWallpaper();
+            Capture(wallpapers,std::filesystem::path(argv[1])/(std::wstring(light?L"wallpaper-light-":L"wallpaper-dark-")+std::to_wstring(dpi)+L".bmp"));
+            SubmenuToggleChecks(popup,2);
             Check(popup.rows.size()==5 && popup.rows[4].command==TrayGeneralCommand && popup.rows[4].label==L"general"
                 && HasSubmenu(popup.rows[4].command) && popup.generalIcon,"general replaces root update/exit and has the supplied gear icon");
             Check(std::none_of(popup.rows.begin(),popup.rows.end(),[](const Row& row){return row.command==TrayUpdateCommand || row.command==TrayExitCommand;}),"update and exit only appear inside general");
             Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"root-light-":L"root-dark-")+std::to_wstring(dpi)+L".bmp"));
             popup.Activate(4,true);
-            Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows.size()==4,"general submenu opens with wallpaper, github, version and exit actions");
+            Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows.size()==3,"general contains only github, version and exit");
             auto& general=*popup.child;
             const HWND generalWindow=general.window;
-            Check(general.rows[0].command==TrayWallpaperCommand && general.rows[0].label==L"jellyflower wallpaper" && general.wallpaperIcon,"wallpaper row has supplied themed artwork");
-            const HWND wallpaperWindow=general.window;
-            wallpaperState=WallpaperStatus::Off;general.RefreshWallpaper();general.Activate(0,false);
-            Check(general.rows[0].secondary==L"on" && !IsWindowEnabled(general.buttons[0]) && !popup.done && general.window==wallpaperWindow,"wallpaper queues enable in place without closing the menu");
-            wallpaperState=WallpaperStatus::On;general.RefreshWallpaper();
-            Check(IsWindowEnabled(general.buttons[0]),"wallpaper row re-enabled on completion");
-            general.Activate(0,false);Check(general.rows[0].secondary==L"off" && !popup.done,"wallpaper restore stays in the same menu");
-            wallpaperState=WallpaperStatus::ErrorOn;general.RefreshWallpaper();
-            Check(general.rows[0].secondary==L"error 80004005" && IsWindowEnabled(general.buttons[0]),"unknown wallpaper failure shows a code inline without requiring logs");
-            RECT wallpaperBounds{};GetClientRect(general.buttons[0],&wallpaperBounds);
-            for(const auto status:WallpaperErrorLabels){const auto needed=general.menuText.Width(general.rows[0].label)+general.menuText.Width(status)+general.Px(34)+2*general.Px(12);
-                if(needed>wallpaperBounds.right)std::cout<<"Wallpaper fit dpi="<<dpi<<" required="<<needed<<" actual="<<wallpaperBounds.right<<'\n';
-                Check(needed<=wallpaperBounds.right,"wallpaper label and all failure statuses fit at this DPI");}
-            wallpaperError=HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);general.RefreshWallpaper();Check(general.rows[0].secondary==L"image missing" && IsWindowEnabled(general.buttons[0]) && general.window==wallpaperWindow,"missing-image error is readable without logs and keeps retry in place");
-            wallpaperError=E_ACCESSDENIED;general.RefreshWallpaper();Check(general.rows[0].secondary==L"not allowed","wallpaper permission error is readable inline");wallpaperError=E_FAIL;
-            wallpaperState=WallpaperStatus::Off;general.RefreshWallpaper();general.Focus(0);
             SubmenuToggleChecks(popup,4);
             GithubChecks(general);
             IndicatorChecks(general);
-            general.hovered=1;
+            general.hovered=0;
             Capture(general,std::filesystem::path(argv[1])/(std::wstring(light?L"github-light-":L"github-dark-")+std::to_wstring(dpi)+L".bmp"));
             general.hovered=-1;
-            Check(general.rows[2].command==TrayUpdateCommand && general.rows[3].command==TrayExitCommand && general.rows[3].divider && general.rows[1].command==TrayGithubCommand
-                && GetFocus()==general.buttons[1],"general actions preserve the github focus set by its keyboard check");
+            Check(general.rows[1].command==TrayUpdateCommand && general.rows[2].command==TrayExitCommand && general.rows[2].divider && general.rows[0].command==TrayGithubCommand
+                && GetFocus()==general.buttons[0],"general actions preserve the github focus set by its keyboard check");
             Check(general.packageIcon && general.packageOpenIcon && general.updateIcon && general.githubIcon && general.externalIcon,"general owns themed update artwork");
             popup.RefreshCursors();Check(IsWindowVisible(generalWindow),"no-pack cursor refresh does not close general");
-            general.Activate(2,false);
+            general.Activate(1,false);
             Check(state==UpdateStatus::Checking && popup.window==same && general.window==generalWindow && !popup.done,"check starts inside general while keeping both menus alive");
             for (const auto result : {UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing}) {
                 state=result;popup.RefreshUpdate();
-                Check(general.updateStatus==result && general.rows[2].label==std::wstring(L"v")+AppVersion,"root refresh reaches general and preserves installed version label");
-                if(result==UpdateStatus::Available) Check(general.rows[2].secondary==L"download","available update presents download action");
-                const int label=general.menuText.Width(general.rows[2].label),secondary=general.menuText.Width(general.rows[2].secondary);
-                RECT bounds{};GetClientRect(general.buttons[2],&bounds);
+                Check(general.updateStatus==result && general.rows[1].label==std::wstring(L"v")+AppVersion,"root refresh reaches general and preserves installed version label");
+                if(result==UpdateStatus::Available) Check(general.rows[1].secondary==L"download","available update presents download action");
+                const int label=general.menuText.Width(general.rows[1].label),secondary=general.menuText.Width(general.rows[1].secondary);
+                RECT bounds{};GetClientRect(general.buttons[1],&bounds);
                 Check(label+secondary+general.Px(34+12+12)<bounds.right,"native text measurements fit without overlap");
-                wchar_t accessible[256]{};GetWindowTextW(general.buttons[2],accessible,256);
+                wchar_t accessible[256]{};GetWindowTextW(general.buttons[1],accessible,256);
                 Check(std::wstring(accessible).find(UpdateStatusLabel(result))!=std::wstring::npos,"accessible general update state reflects result");
                 const auto name=std::wstring(light?L"general-light-":L"general-dark-")+std::to_wstring(dpi)+L"-"+std::to_wstring(static_cast<UINT>(result))+L".bmp";
                 Capture(general,std::filesystem::path(argv[1])/name);
@@ -411,7 +425,7 @@ int wmain(int argc,wchar_t** argv) {
             ExitTextChecks(general);
             general.Key(VK_LEFT);Check(!IsWindowVisible(generalWindow) && !popup.done,"left arrow closes general without dismissing root");
             state=UpdateStatus::Available;popup.RefreshUpdate();popup.Activate(4,true);
-            Check(popup.child->window==generalWindow && popup.child->rows[2].secondary==L"download","reopening general preserves latest update state");
+            Check(popup.child->window==generalWindow && popup.child->rows[1].secondary==L"download","reopening general preserves latest update state");
             popup.child->Key(VK_ESCAPE);Check(!IsWindowVisible(generalWindow) && !popup.done,"escape closes nested general only");
             popup.child->HideBranch();popup.child.reset();
             popup.child=std::make_unique<Popup>();popup.childIndex=3;
@@ -456,12 +470,12 @@ int wmain(int argc,wchar_t** argv) {
             popup.highContrast=false;popup.ConfigureBackdrop();Check(popup.acrylic,"acrylic recovers after fallback");
             popup.OpenChild(3,true);Check(popup.child && popup.child->kind==TrayCursorCommand && !popup.done,"cursor replaces the previous general branch");
             SubmenuToggleChecks(popup,3);
-            popup.OpenChild(4,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[2].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
-            popup.child->Activate(3,true);
+            popup.OpenChild(4,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[1].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
+            popup.child->Activate(2,true);
             Check(popup.done && popup.result==TrayExitCommand && !IsWindowVisible(popup.child->window),"nested exit returns the existing controller shutdown command and dismisses every menu");
         }
         {
-            Popup preview;preview.controller=controller;preview.rows=RootRows(AcrylicMode::System,true,light,cursorMask);
+            Popup preview;preview.controller=controller;preview.rows=RootRows(light,cursorMask);
             Check(preview.Create(controller,{100,100},false),"cursor dismissal fixture created");
             preview.OpenChild(3,false);preview.child->Hover(4);
             Check(cursorPreviews.back()==4,"cursor preview starts in nested menu");
@@ -473,7 +487,7 @@ int wmain(int argc,wchar_t** argv) {
         {
             Popup link;link.controller=controller;link.kind=TrayGeneralCommand;link.rows=GeneralRows();
             Check(link.Create(controller,{100,100},false),"external link menu created");
-            const auto before=githubOpens;link.Activate(1,true);
+            const auto before=githubOpens;link.Activate(0,true);
             Check(githubOpens==before+1 && link.done && !link.result,"github dispatches once and dismisses the menu after successful launch");
         }
         Check(MenuEntranceProgress(0)==0 && MenuEntranceProgress(1)==1,"entrance curve endpoints");
@@ -481,7 +495,7 @@ int wmain(int argc,wchar_t** argv) {
         double last=0;for(int i=0;i<=1000;++i){const auto value=MenuEntranceProgress(i/1000.0);Check(value>=last && value<=1,"entrance curve monotonic without overshoot");last=value;}
         for(UINT dpi:{96u,120u,144u,168u,192u}) {
             MONITORINFO monitor{sizeof(monitor)};GetMonitorInfoW(MonitorFromWindow(controller,MONITOR_DEFAULTTOPRIMARY),&monitor);
-            Popup edge;edge.controller=controller;edge.dpi=dpi;edge.rows=RootRows(AcrylicMode::System,true,false,1u<<CursorDisabled);
+            Popup edge;edge.controller=controller;edge.dpi=dpi;edge.rows=RootRows(false,1u<<CursorDisabled);
             Check(edge.Create(controller,{monitor.rcWork.right,monitor.rcWork.bottom},false),"edge popup created");
             RECT rect{};GetWindowRect(edge.window,&rect);
             Check(rect.right==monitor.rcWork.right-edge.Px(12) && rect.bottom==monitor.rcWork.bottom-edge.Px(12),"equal 12 DIP bottom/right screen margins at all scales");
@@ -495,7 +509,7 @@ int wmain(int argc,wchar_t** argv) {
         }
         if(argc==3 && wcscmp(argv[2],L"--compositor")==0) Compositor(controller,argv[1]);
         DestroyWindow(controller);
-        std::cout<<"PASS: Windows menu typography at 96/120/144/168/192 DPI in both themes; native DirectWrite alpha/ink alignment, root date/icon toggles, general submenu/update propagation/spinner frames/red exit, branch switching, acrylic/fallback, cursor actions and keyboard selection.\n";
+        std::cout<<"PASS: Windows menu typography at 96/120/144/168/192 DPI in both themes; native DirectWrite alpha/ink alignment, taskbar/date/auto-hide and independent wallpaper submenus, general submenu/update propagation/spinner frames/red exit, branch switching, acrylic/fallback, cursor actions and keyboard selection.\n";
         return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

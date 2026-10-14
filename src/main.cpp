@@ -14,6 +14,8 @@
 #include "version.hpp"
 #include "startup.hpp"
 #include "wallpaper.hpp"
+#include "wallpaper_theme.hpp"
+#include "taskbar_options.hpp"
 #include "start_session.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
@@ -30,6 +32,7 @@ constexpr UINT_PTR DebounceTimer = 2;
 constexpr UINT_PTR UpdateTimer = 3;
 constexpr UINT_PTR FastAttachTimer = 4;
 constexpr UINT_PTR AutoThemeTimer = 5;
+constexpr UINT_PTR WallpaperAutoThemeTimer = 6;
 constexpr UINT RefreshMs = 5000;
 struct AccentPolicy { int state; UINT flags; DWORD color; DWORD animation; };
 struct CompositionData { int attribute; void* data; SIZE_T size; };
@@ -190,6 +193,39 @@ public:
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
     std::unique_ptr<WallpaperManager> wallpaper;
+    std::unique_ptr<AutoTheme> wallpaperAutoTheme;
+    WallpaperTheme wallpaperTheme=LoadWallpaperTheme();
+    bool wallpaperLight=SystemLightTheme();
+    AutoThemeStatus lastWallpaperAutoStatus=AutoThemeStatus::Manual;
+    void RefreshWallpaperTheme(bool invalidate=false,bool requestLocation=false,bool force=false){
+        KillTimer(window,WallpaperAutoThemeTimer);
+        bool solarLight=false,solarReady=false;UINT delay=0;
+        const auto status=wallpaper?wallpaper->Status():WallpaperStatus::Off;
+        const bool active=status==WallpaperStatus::On || status==WallpaperStatus::Applying || status==WallpaperStatus::ErrorOn;
+        if(wallpaperTheme==WallpaperTheme::Auto && active){
+            if(!wallpaperAutoTheme)wallpaperAutoTheme=std::make_unique<AutoTheme>(window,AutoThemeScope::Wallpaper);
+            if(requestLocation && wallpaperAutoTheme->Status()!=AutoThemeStatus::Automatic && wallpaperAutoTheme->Status()!=AutoThemeStatus::Locating)wallpaperAutoTheme->Enable();
+            solarReady=wallpaperAutoTheme->Update(solarLight,delay,invalidate);
+            const auto current=wallpaperAutoTheme->Status();
+            if(current!=lastWallpaperAutoStatus){lastWallpaperAutoStatus=current;Log(L"Wallpaper auto status="+std::to_wstring(static_cast<UINT>(current))+L" error="+std::to_wstring(wallpaperAutoTheme->Error()));}
+        }else{wallpaperAutoTheme.reset();lastWallpaperAutoStatus=AutoThemeStatus::Manual;}
+        const bool next=WallpaperUsesLight(wallpaperTheme,SystemLightTheme(),solarReady,solarLight);
+        // Completion messages must not queue another identical worker request.
+        // Only a changed decision or an external desktop/display event refreshes.
+        if(wallpaper && (force || next!=wallpaperLight))wallpaper->Refresh(next);
+        wallpaperLight=next;
+        if(delay && !SetTimer(window,WallpaperAutoThemeTimer,delay,nullptr))Log(L"Wallpaper auto timer error="+std::to_wstring(GetLastError()));
+    }
+    UINT ChangeWallpaperTheme(){
+        const auto next=wallpaperTheme==WallpaperTheme::System?WallpaperTheme::Auto:WallpaperTheme::System;
+        const auto error=SaveWallpaperTheme(next);
+        if(error){Log(L"Wallpaper theme setting error="+std::to_wstring(error));return static_cast<UINT>(wallpaperTheme);}
+        wallpaperTheme=next;
+        if(next==WallpaperTheme::System && wallpaperAutoTheme){const auto disabled=wallpaperAutoTheme->Disable();if(disabled)Log(L"Wallpaper location cleanup error="+std::to_wstring(disabled));}
+        RefreshWallpaperTheme(false,true);
+        RefreshWallpaperMenu(window);
+        return static_cast<UINT>(wallpaperTheme);
+    }
     AutoThemeStatus lastAutoStatus = AutoThemeStatus::Manual;
     void RefreshAutoTheme(bool invalidate = false) {
         bool light = false;
@@ -199,7 +235,7 @@ public:
         if (autoTheme->Update(light, delay, invalidate) && (SystemLightTheme() != light || AppLightTheme() != light)) {
             const auto changed = SetWindowsLightTheme(light);
             if (changed.error) Log(L"Automatic theme error=" + std::to_wstring(changed.error));
-            if (wallpaper) wallpaper->Refresh(SystemLightTheme());
+            RefreshWallpaperTheme();
         }
         // A non-waking window timer. Re-arm from the next absolute deadline,
         // rather than running solar calculations in the taskbar recovery loop.
@@ -532,7 +568,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return wParam ? static_cast<UINT>(self->autoTheme->Status()) : SystemLightTheme();
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
+    } else if (message == TrayTaskbarQueryMessage) {
+        return ReadTaskbarOptions().Packed();
     } else if (message == TrayWallpaperQueryMessage) {
+        if(wParam==2)return static_cast<UINT>(self->wallpaperTheme);
         return self->wallpaper ? (wParam ? self->wallpaper->Error() : static_cast<LRESULT>(self->wallpaper->Status())) : 0;
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
@@ -543,8 +582,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
+        if(wParam==TrayAutoHideCommand){const auto result=ToggleTaskbarAutoHide();if(result.error)Log(L"Taskbar auto hide error="+std::to_wstring(result.error));RefreshTaskbarMenu(window);return result.Packed();}
+        if(wParam==TrayWallpaperThemeCommand)return self->ChangeWallpaperTheme();
         if (wParam == TrayWallpaperCommand) {
-            if (self->wallpaper) self->wallpaper->Toggle(SystemLightTheme());
+            self->RefreshWallpaperTheme();
+            if (self->wallpaper) self->wallpaper->Toggle(self->wallpaperLight);
+            self->RefreshWallpaperTheme(false,true);
             return self->wallpaper ? static_cast<UINT>(self->wallpaper->Status()) : 0;
         }
         if (wParam == TrayGithubCommand) {
@@ -576,7 +619,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
                 self->tray.ThemeError(change.error, change.rollbackError != 0);
             } else Log(SystemLightTheme() ? L"Windows light mode selected" : L"Windows dark mode selected");
             if (change.notificationError) self->tray.ThemeError(change.notificationError, false, true);
-            if (self->wallpaper) self->wallpaper->Refresh(SystemLightTheme());
+            self->RefreshWallpaperTheme();
             self->Refresh();
             SetBridgeMode(self->shared, self->explorerPid, self->mode, true);
             return SystemLightTheme();
@@ -593,16 +636,19 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == SearchIdentityReadyMessage) {
         self->Refresh();
         return 0;
-    } else if (message == AutoThemeChangedMessage || message == WM_TIMECHANGE) {
-        self->RefreshAutoTheme(message == WM_TIMECHANGE);
+    } else if (message == AutoThemeChangedMessage || message == WallpaperAutoThemeChangedMessage || message == WM_TIMECHANGE) {
+        if(message!=WallpaperAutoThemeChangedMessage)self->RefreshAutoTheme(message == WM_TIMECHANGE);
+        self->RefreshWallpaperTheme(message == WM_TIMECHANGE);
         self->Refresh();
         return 0;
     } else if (message == WallpaperChangedMessage) {
         if (self->wallpaper && FAILED(self->wallpaper->Error()))
             Log(L"Wallpaper error=" + std::to_wstring(self->wallpaper->Error()));
+        self->RefreshWallpaperTheme();
         RefreshWallpaperMenu(window);
         return 0;
     } else if (message == WM_TIMER) {
+        if (wParam == WallpaperAutoThemeTimer) { self->RefreshWallpaperTheme(); return 0; }
         if (wParam == AutoThemeTimer) { self->RefreshAutoTheme(); self->Refresh(); return 0; }
         if (wParam == UpdateTimer) { self->PollUpdate(); return 0; }
         if (wParam == FastAttachTimer) { self->FastAttach(); return 0; }
@@ -614,7 +660,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         || message == WM_DPICHANGED) {
         if (message == WM_SETTINGCHANGE) self->RefreshAutoTheme();
         if (self->wallpaper && (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DISPLAYCHANGE))
-            self->wallpaper->Refresh(SystemLightTheme());
+            self->RefreshWallpaperTheme(false,false,message==WM_SETTINGCHANGE || message==WM_DISPLAYCHANGE);
+        RefreshTaskbarMenu(window);
         if (message == self->taskbarCreated) {
             self->tray.ShellRestarted();
             self->attachStarted = GetTickCount64();
@@ -625,8 +672,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         SetTimer(window, DebounceTimer, 300, nullptr);
         return 0;
     } else if (message == WM_POWERBROADCAST) {
-        if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND)
-            self->RefreshAutoTheme(true);
+        if (wParam == PBT_APMRESUMEAUTOMATIC || wParam == PBT_APMRESUMESUSPEND){
+            self->RefreshAutoTheme(true);self->RefreshWallpaperTheme(true);
+        }
         if (wParam == PBT_POWERSETTINGCHANGE && lParam) {
             const auto* setting = reinterpret_cast<const POWERBROADCAST_SETTING*>(lParam);
             if (IsEqualGUID(setting->PowerSetting, PowerSavingGuid) && setting->DataLength == sizeof(DWORD)) {
@@ -642,6 +690,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         DestroyWindow(window);
         return 0;
     } else if (message == WM_DESTROY) {
+        self->wallpaperAutoTheme.reset();
         self->wallpaper.reset();
         self->autoTheme.reset();
         self->tray.Remove();
@@ -713,6 +762,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
     Log(L"Started pid=" + std::to_wstring(GetCurrentProcessId()));
     app.RefreshAutoTheme();
+    app.RefreshWallpaperTheme();
     app.Refresh();
     SetTimer(window, FastAttachTimer, 100, nullptr);
     MSG message{};

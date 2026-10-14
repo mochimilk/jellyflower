@@ -4,10 +4,14 @@
 #include <memory>
 namespace acrylic {
 inline constexpr UINT AutoThemeChangedMessage = WM_APP + 91;
+inline constexpr UINT WallpaperAutoThemeChangedMessage = WM_APP + 92;
+enum class AutoThemeScope { System, Wallpaper };
+inline const wchar_t* AutoThemeValue(AutoThemeScope scope){return scope==AutoThemeScope::System?L"AutoTheme":L"WallpaperAutoTheme";}
+inline const wchar_t* AutoLocationValue(AutoThemeScope scope){return scope==AutoThemeScope::System?L"ThemeLocation":L"WallpaperThemeLocation";}
 enum class AutoThemeStatus : UINT { Manual, Automatic, Locating, Denied, Unavailable, Error };
 class AutoTheme {
 public:
-    explicit AutoTheme(HWND window);
+    explicit AutoTheme(HWND window,AutoThemeScope scope=AutoThemeScope::System);
     ~AutoTheme();
     void Enable(); // Call on the foreground UI thread, only after a menu click.
     DWORD Disable();

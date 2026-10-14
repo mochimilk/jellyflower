@@ -9,18 +9,19 @@ namespace acrylic {
 namespace {
 constexpr wchar_t Key[] = L"Software\\jellyflower";
 struct Coordinates { double latitude = 0, longitude = 0; };
-DWORD Save(bool enabled, const Coordinates* coordinates = nullptr) {
+DWORD Save(bool enabled, const Coordinates* coordinates = nullptr,AutoThemeScope scope=AutoThemeScope::System) {
     HKEY key = nullptr;
     auto error = RegCreateKeyExW(HKEY_CURRENT_USER, Key, 0, nullptr, 0, KEY_SET_VALUE, nullptr, &key, nullptr);
     if (error) return error;
-    if (coordinates) error = RegSetValueExW(key, L"ThemeLocation", 0, REG_BINARY, reinterpret_cast<const BYTE*>(coordinates), sizeof(*coordinates));
+    if (coordinates) error = RegSetValueExW(key, AutoLocationValue(scope), 0, REG_BINARY, reinterpret_cast<const BYTE*>(coordinates), sizeof(*coordinates));
     const DWORD value = enabled ? 1 : 0;
-    if (!error) error = RegSetValueExW(key, L"AutoTheme", 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
-    if (!error && !enabled) RegDeleteValueW(key, L"ThemeLocation");
+    if (!error) error = RegSetValueExW(key, AutoThemeValue(scope), 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
+    if (!error && !enabled) RegDeleteValueW(key, AutoLocationValue(scope));
     RegCloseKey(key); return error;
 }
 }
 struct AutoTheme::State {
+    AutoThemeScope scope=AutoThemeScope::System;
     std::mutex lock;
     Coordinates coordinates;
     AutoThemeStatus status = AutoThemeStatus::Manual;
@@ -32,7 +33,7 @@ struct AutoTheme::State {
     SolarSchedule schedule;
     winrt::Windows::Devices::Geolocation::Geolocator locator{nullptr};
     winrt::Windows::Devices::Geolocation::Geolocator::StatusChanged_revoker permission;
-    void Notify() const noexcept { if (alive && window) PostMessageW(window, AutoThemeChangedMessage, 0, 0); }
+    void Notify() const noexcept { if (alive && window) PostMessageW(window, scope==AutoThemeScope::System?AutoThemeChangedMessage:WallpaperAutoThemeChangedMessage, 0, 0); }
     static winrt::fire_and_forget Locate(std::shared_ptr<State> state, UINT generation, bool prompt) {
         using namespace winrt::Windows::Devices::Geolocation;
         AutoThemeStatus status = AutoThemeStatus::Unavailable;
@@ -55,7 +56,7 @@ struct AutoTheme::State {
                                 std::lock_guard<std::mutex> guard(strong->lock);
                                 if (!strong->alive || strong->generation != generation) return;
                                 strong->status = AutoThemeStatus::Denied; strong->error = ERROR_ACCESS_DENIED;
-                                ++strong->generation; strong->reading = false; Save(false); strong->Notify();
+                                ++strong->generation; strong->reading = false; Save(false,nullptr,strong->scope); strong->Notify();
                             }
                         });
                 }
@@ -72,7 +73,7 @@ struct AutoTheme::State {
         if (!state->alive || state->generation != generation) co_return;
         state->reading = false;
         if (!error) {
-            error = Save(true, &coordinates);
+            error = Save(true, &coordinates,state->scope);
             if (!error) {
                 if (state->coordinates.latitude != coordinates.latitude || state->coordinates.longitude != coordinates.longitude)
                     state->schedule.Invalidate();
@@ -80,7 +81,7 @@ struct AutoTheme::State {
             }
             else status = AutoThemeStatus::Error;
         }
-        if (error && (status == AutoThemeStatus::Denied || (prompt && status != AutoThemeStatus::Automatic))) Save(false);
+        if (error && (status == AutoThemeStatus::Denied || (prompt && status != AutoThemeStatus::Automatic))) Save(false,nullptr,state->scope);
         // With a transient GPS/network failure, retain an already approved
         // location. Revoked permission always stops automatic changes.
         if (!prompt && error && status != AutoThemeStatus::Denied && state->status == AutoThemeStatus::Automatic) status = AutoThemeStatus::Automatic;
@@ -89,12 +90,12 @@ struct AutoTheme::State {
         state->Notify();
     }
 };
-AutoTheme::AutoTheme(HWND window) : state_(std::make_shared<State>()) {
-    state_->window = window;
+AutoTheme::AutoTheme(HWND window,AutoThemeScope scope) : state_(std::make_shared<State>()) {
+    state_->window = window;state_->scope=scope;
     DWORD enabled = 0, size = sizeof(enabled);
-    if (RegGetValueW(HKEY_CURRENT_USER, Key, L"AutoTheme", RRF_RT_REG_DWORD, nullptr, &enabled, &size) || enabled != 1) return;
+    if (RegGetValueW(HKEY_CURRENT_USER, Key, AutoThemeValue(scope), RRF_RT_REG_DWORD, nullptr, &enabled, &size) || enabled != 1) return;
     size = sizeof(Coordinates);
-    if (!RegGetValueW(HKEY_CURRENT_USER, Key, L"ThemeLocation", RRF_RT_REG_BINARY, nullptr, &state_->coordinates, &size)
+    if (!RegGetValueW(HKEY_CURRENT_USER, Key, AutoLocationValue(scope), RRF_RT_REG_BINARY, nullptr, &state_->coordinates, &size)
         && size == sizeof(Coordinates) && ValidCoordinates(state_->coordinates.latitude, state_->coordinates.longitude)) {
         // A background launch never requests new consent. Revalidate the
         // previously approved location before resuming the schedule.
@@ -119,7 +120,7 @@ void AutoTheme::Enable() {
 }
 DWORD AutoTheme::Disable() {
     std::lock_guard<std::mutex> lock(state_->lock);
-    const DWORD error = Save(false);
+    const DWORD error = Save(false,nullptr,state_->scope);
     if (!error) {
         ++state_->generation; state_->reading = false;
         state_->status = AutoThemeStatus::Manual; state_->error = 0;
@@ -136,11 +137,11 @@ bool AutoTheme::Update(bool& light, UINT& delay, bool invalidate) {
         if (state_->status == AutoThemeStatus::Automatic) {
             try {
                 if (state_->locator && state_->locator.LocationStatus() == winrt::Windows::Devices::Geolocation::PositionStatus::Disabled) {
-                    state_->status = AutoThemeStatus::Denied; state_->error = ERROR_ACCESS_DENIED; Save(false); return false;
+                    state_->status = AutoThemeStatus::Denied; state_->error = ERROR_ACCESS_DENIED; Save(false,nullptr,state_->scope); return false;
                 }
             } catch (const winrt::hresult_error& failure) {
                 state_->error = static_cast<DWORD>(failure.code());
-                if (failure.code() == E_ACCESSDENIED) { state_->status = AutoThemeStatus::Denied; Save(false); return false; }
+                if (failure.code() == E_ACCESSDENIED) { state_->status = AutoThemeStatus::Denied; Save(false,nullptr,state_->scope); return false; }
             }
             SYSTEMTIME utc{}; GetSystemTime(&utc);
             const auto now = SolarSeconds(utc);
