@@ -295,8 +295,9 @@ struct Popup {
     void RefreshWallpaper() {
         if (kind == TrayGeneralCommand) {
             const auto state = static_cast<WallpaperStatus>(SendMessageW(controller, TrayWallpaperQueryMessage, 0, 0));
+            const auto error = static_cast<HRESULT>(SendMessageW(controller, TrayWallpaperQueryMessage, 1, 0));
             for (size_t i = 0; i < rows.size(); ++i) if (rows[i].command == TrayWallpaperCommand) {
-                auto& row = rows[i]; row.secondary = WallpaperLabel(state); row.enabled = !WallpaperBusy(state);
+                auto& row = rows[i]; row.secondary = WallpaperLabel(state,error); row.enabled = !WallpaperBusy(state);
                 if (i < buttons.size()) {
                     SetWindowTextW(buttons[i], (row.label + L", " + row.secondary).c_str());
                     EnableWindow(buttons[i], row.enabled);
@@ -799,8 +800,9 @@ struct Popup {
         int width = Px(parent ? 228 : 296);
         // Reserve the longest status, using the inherited Windows font at this
         // DPI rather than squeezing a new long label into a fixed submenu.
-        if (kind == TrayGeneralCommand) width = std::max(width, menuText.Width(L"jellyflower wallpaper")
-            + menuText.Width(L"try again") + Px(2 * Padding + 34 + 12 + 12));
+        if (kind == TrayGeneralCommand) for(const auto label:WallpaperErrorLabels)
+            width = std::max(width, menuText.Width(L"jellyflower wallpaper")
+                + menuText.Width(label) + 2 * Px(Padding) + Px(34) + 2 * Px(12));
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;

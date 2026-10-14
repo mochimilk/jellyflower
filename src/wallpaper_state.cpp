@@ -24,6 +24,7 @@ HRESULT WallpaperEngine::Update(bool enabled, bool light) {
     if (state.enabled) {
         for (const auto& monitor : current.monitors) {
             const auto* prior = Find(state.previous, monitor.id);
+            if(!monitor.attached){if(prior && owned(monitor))restore.push_back(monitor.id);continue;}
             if (owned(monitor)) { if (prior) restore.push_back(monitor.id); }
             else if (prior) {
                 // A completed partial rollback can already have restored this monitor.
@@ -55,10 +56,10 @@ HRESULT WallpaperEngine::Update(bool enabled, bool light) {
         if (FAILED(result)) return result;
         state = std::move(next);
     } else {
-        // Capture newly connected monitors before including them in SetWallpaper(NULL).
+        // Capture newly connected monitors before including them in the apply list.
         WallpaperState next = state;
         bool added = false;
-        for (const auto& monitor : current.monitors) if (!Find(state.previous, monitor.id)) {
+        for (const auto& monitor : current.monitors) if (monitor.attached && !Find(state.previous, monitor.id)) {
             WallpaperDesktop backup;
             result = backend.Capture(backup, true);
             if (FAILED(result)) return result;
@@ -70,9 +71,11 @@ HRESULT WallpaperEngine::Update(bool enabled, bool light) {
         if (added) { result = backend.Save(next); if (FAILED(result)) return result; state = std::move(next); }
         const auto& target = light ? lightImage : darkImage;
         if (current.position == 4 && !current.monitors.empty() && std::all_of(current.monitors.begin(), current.monitors.end(),
-            [&](const WallpaperMonitor& monitor) { return Same(monitor.image, target); })) return S_OK;
+            [&](const WallpaperMonitor& monitor) { return !monitor.attached || Same(monitor.image, target); })) return S_OK;
     }
-    result = backend.Apply(light ? lightImage : darkImage);
+    std::vector<std::wstring> targets;
+    for(const auto& monitor:current.monitors)if(monitor.attached && Find(state.previous,monitor.id))targets.push_back(monitor.id);
+    result = backend.Apply(light ? lightImage : darkImage,targets);
     if (FAILED(result) && first) {
         // Apply may have changed the position or only some screens before failing.
         // Roll back the captured desktop, keeping its recovery record on failure.

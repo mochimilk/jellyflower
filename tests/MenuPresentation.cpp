@@ -13,6 +13,7 @@ AutoThemeStatus automatic = AutoThemeStatus::Manual;
 UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
+HRESULT wallpaperError=E_FAIL;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
 std::vector<UINT> cursorPreviews;
@@ -184,7 +185,7 @@ void SubmenuToggleChecks(Popup& popup,int index) {
     Check(IsWindowVisible(branch) && popup.child->keyboard,"keyboard right can reopen a clicked-closed branch");
 }
 LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other) {
-    if (message == TrayWallpaperQueryMessage) return static_cast<UINT>(wallpaperState);
+    if (message == TrayWallpaperQueryMessage) return parameter?wallpaperError:static_cast<LRESULT>(wallpaperState);
     if (message == TraySettingMessage && parameter == TrayWallpaperCommand) {
         wallpaperState = wallpaperState == WallpaperStatus::On ? WallpaperStatus::Restoring : WallpaperStatus::Applying;
         return static_cast<UINT>(wallpaperState);
@@ -368,9 +369,13 @@ int wmain(int argc,wchar_t** argv) {
             Check(IsWindowEnabled(general.buttons[0]),"wallpaper row re-enabled on completion");
             general.Activate(0,false);Check(general.rows[0].secondary==L"off" && !popup.done,"wallpaper restore stays in the same menu");
             wallpaperState=WallpaperStatus::ErrorOn;general.RefreshWallpaper();
-            Check(general.rows[0].secondary==L"try again" && IsWindowEnabled(general.buttons[0]),"wallpaper failure is actionable inline");
+            Check(general.rows[0].secondary==L"error 80004005" && IsWindowEnabled(general.buttons[0]),"unknown wallpaper failure shows a code inline without requiring logs");
             RECT wallpaperBounds{};GetClientRect(general.buttons[0],&wallpaperBounds);
-            Check(general.menuText.Width(general.rows[0].label)+general.menuText.Width(L"try again")+general.Px(34+12+12)<=wallpaperBounds.right,"wallpaper label and longest status fit at this DPI");
+            for(const auto status:WallpaperErrorLabels){const auto needed=general.menuText.Width(general.rows[0].label)+general.menuText.Width(status)+general.Px(34)+2*general.Px(12);
+                if(needed>wallpaperBounds.right)std::cout<<"Wallpaper fit dpi="<<dpi<<" required="<<needed<<" actual="<<wallpaperBounds.right<<'\n';
+                Check(needed<=wallpaperBounds.right,"wallpaper label and all failure statuses fit at this DPI");}
+            wallpaperError=HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);general.RefreshWallpaper();Check(general.rows[0].secondary==L"image missing" && IsWindowEnabled(general.buttons[0]) && general.window==wallpaperWindow,"missing-image error is readable without logs and keeps retry in place");
+            wallpaperError=E_ACCESSDENIED;general.RefreshWallpaper();Check(general.rows[0].secondary==L"not allowed","wallpaper permission error is readable inline");wallpaperError=E_FAIL;
             wallpaperState=WallpaperStatus::Off;general.RefreshWallpaper();general.Focus(0);
             SubmenuToggleChecks(popup,4);
             GithubChecks(general);

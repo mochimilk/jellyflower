@@ -3,9 +3,88 @@
 #include "../src/wallpaper.cpp"
 #include <iostream>
 #include <stdexcept>
+#include <wrl/implements.h>
 using namespace acrylic;
 namespace {
 void Check(bool value, const char* text) { if (!value) throw std::runtime_error(text); }
+class DesktopFixture:public Microsoft::WRL::RuntimeClass<Microsoft::WRL::RuntimeClassFlags<Microsoft::WRL::ClassicCom>,IDesktopWallpaper> {
+    static HRESULT Copy(const std::wstring& text,PWSTR* out){*out=static_cast<PWSTR>(CoTaskMemAlloc((text.size()+1)*sizeof(wchar_t)));if(!*out)return E_OUTOFMEMORY;memcpy(*out,text.c_str(),(text.size()+1)*sizeof(wchar_t));return S_OK;}
+public:
+    std::wstring active,detached,common;
+    bool attached=true,missingDetached=false;
+    HRESULT readError=S_OK,setError=S_OK;
+    unsigned sets=0,reads=0,setAttempts=0;
+    DESKTOP_WALLPAPER_POSITION position=DWPOS_CENTER;
+    DesktopFixture(std::wstring image,std::wstring old):active(std::move(image)),detached(std::move(old)){}
+    HRESULT STDMETHODCALLTYPE SetWallpaper(LPCWSTR id,LPCWSTR image)override{++setAttempts;if(FAILED(setError))return setError;if(!id)return E_INVALIDARG;if(wcscmp(id,L"active")==0)active=image;else if(wcscmp(id,L"detached")==0)detached=image;else return E_INVALIDARG;++sets;return S_OK;}
+    HRESULT STDMETHODCALLTYPE GetWallpaper(LPCWSTR id,LPWSTR* image)override{*image=nullptr;if(!id)return common.empty()?S_FALSE:Copy(common,image);if(wcscmp(id,L"active")==0)return Copy(active,image);if(wcscmp(id,L"detached")!=0)return E_INVALIDARG;return missingDetached?HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND):Copy(detached,image);}
+    HRESULT STDMETHODCALLTYPE GetMonitorDevicePathAt(UINT index,LPWSTR* id)override{return index<2?Copy(index?L"detached":L"active",id):E_INVALIDARG;}
+    HRESULT STDMETHODCALLTYPE GetMonitorDevicePathCount(UINT* count)override{*count=2;return S_OK;}
+    HRESULT STDMETHODCALLTYPE GetMonitorRECT(LPCWSTR id,RECT* rect)override{*rect={0,0,1920,1080};if(wcscmp(id,L"active")==0)return attached?S_OK:S_FALSE;return wcscmp(id,L"detached")==0?S_FALSE:E_INVALIDARG;}
+    HRESULT STDMETHODCALLTYPE SetPosition(DESKTOP_WALLPAPER_POSITION placement)override{position=placement;return S_OK;}
+    HRESULT STDMETHODCALLTYPE GetPosition(DESKTOP_WALLPAPER_POSITION* placement)override{++reads;if(FAILED(readError))return readError;*placement=position;return S_OK;}
+    HRESULT STDMETHODCALLTYPE SetBackgroundColor(COLORREF)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetBackgroundColor(COLORREF*)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE SetSlideshow(IShellItemArray*)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetSlideshow(IShellItemArray**)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE SetSlideshowOptions(DESKTOP_SLIDESHOW_OPTIONS,UINT)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetSlideshowOptions(DESKTOP_SLIDESHOW_OPTIONS*,UINT*)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE AdvanceSlideshow(LPCWSTR,DESKTOP_SLIDESHOW_DIRECTION)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE GetStatus(DESKTOP_SLIDESHOW_STATE*)override{return E_NOTIMPL;}
+    HRESULT STDMETHODCALLTYPE Enable(BOOL)override{return E_NOTIMPL;}
+};
+std::wstring fallbackPath;
+std::wstring TestCopy(){return fallbackPath;}
+ComPtr<IDesktopWallpaper> replacement;
+unsigned connections=0;
+HRESULT ConnectFixture(IDesktopWallpaper** desktop){++connections;return replacement.CopyTo(desktop);}
+void Reconnect(const fs::path& output){
+    const HRESULT lost[]{HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE),HRESULT_FROM_WIN32(RPC_S_CALL_FAILED),HRESULT_FROM_WIN32(RPC_S_CALL_FAILED_DNE),RPC_E_DISCONNECTED,CO_E_OBJNOTCONNECTED,RPC_E_SERVER_DIED,RPC_E_SERVER_DIED_DNE};
+    for(const auto error:lost){
+        auto stale=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");stale->readError=error;
+        auto healthy=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");replacement=healthy;connections=0;
+        NativeWallpaperBackend backend(output,stale,TestCopy,ConnectFixture);WallpaperDesktop current;
+        Check(SUCCEEDED(backend.Capture(current,false)) && connections==1 && stale->reads==1 && healthy->reads==1 && !healthy->sets,"lost COM connection is replaced once for a read-only capture");
+        Check(SUCCEEDED(backend.Capture(current,false)) && connections==1,"healthy replacement reused instead of reconnecting on every event");
+    }
+    auto denied=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");denied->readError=E_ACCESSDENIED;connections=0;NativeWallpaperBackend permission(output,denied,TestCopy,ConnectFixture);WallpaperDesktop current;
+    Check(permission.Capture(current,false)==E_ACCESSDENIED && !connections,"non-connection failures are not retried as COM failures");
+    auto unavailable=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");unavailable->readError=HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE);replacement=unavailable;connections=0;NativeWallpaperBackend bounded(output,unavailable,TestCopy,ConnectFixture);
+    Check(bounded.Capture(current,false)==unavailable->readError && connections==1 && unavailable->reads==2,"unavailable server causes only one reconnect attempt per capture");
+    auto healthy=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");replacement=healthy;
+    Check(SUCCEEDED(bounded.Capture(current,false)) && connections==2,"failed replacement is discarded so next user request can reconnect");
+    auto failedSet=Microsoft::WRL::Make<DesktopFixture>(L"original.png",L"old.png");failedSet->setError=RPC_E_DISCONNECTED;connections=0;NativeWallpaperBackend setters(output,failedSet,TestCopy,ConnectFixture);
+    Check(setters.Apply(L"jelly.png",{L"active"})==RPC_E_DISCONNECTED && failedSet->setAttempts==1 && !connections && !healthy->sets,"partially completed apply is not automatically replayed");
+    Check(SUCCEEDED(setters.Capture(current,false)) && connections==1,"failed setter releases stale proxy for subsequent recovery");
+    auto failedRestore=Microsoft::WRL::Make<DesktopFixture>(L"jelly.png",L"old.png");failedRestore->setError=HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE);connections=0;NativeWallpaperBackend restore(output,failedRestore,TestCopy,ConnectFixture);
+    const WallpaperDesktop previous{{{L"active",L"original.png",L""}},DWPOS_CENTER};
+    Check(restore.Restore(previous,{L"active"},true)==failedRestore->setError && failedRestore->setAttempts==1 && !connections,"failed restore returns its error without replaying changes");
+    Check(SUCCEEDED(restore.Restore(previous,{L"active"},true)) && connections==1 && healthy->active==L"original.png" && healthy->position==DWPOS_CENTER,"user retry restores through a fresh proxy without restarting jellyflower");
+    replacement.Reset();
+}
+void DetachedDisplays(const fs::path& output,const fs::path& assets){
+    for(bool missing:{false,true}){
+        const auto original=(assets/L"jelly_wall_dark.png").wstring();const auto stale=(output/L"deleted-original.jpg").wstring();
+        auto desktop=Microsoft::WRL::Make<DesktopFixture>(original,stale);desktop->missingDetached=missing;
+        NativeWallpaperBackend backend(output/(missing?L"query-fails":L"file-missing"),desktop);WallpaperEngine engine(backend);Check(SUCCEEDED(engine.Load()),"detached fixture starts with native storage off");
+        Check(SUCCEEDED(engine.Update(true,true)) && desktop->sets==1 && desktop->detached==stale,"native enable ignores an unreadable detached assignment and sets only the saved active monitor");
+        const auto calls=desktop->sets;Check(SUCCEEDED(engine.Update(true,true)) && desktop->sets==calls && engine.Enabled(),"inactive assignment causes neither false external changes nor repeat setting");
+        Check(SUCCEEDED(engine.Update(false,true)) && desktop->active==original && desktop->detached==stale && desktop->position==DWPOS_CENTER,"native disable restores active image and placement without altering detached image");
+        desktop->attached=false;Check(backend.Apply(original,{L"active"})==HRESULT_FROM_WIN32(ERROR_NOT_READY) && desktop->sets==calls+1 && desktop->position==DWPOS_CENTER,"a display removed after capture is not changed by the apply operation");
+    }
+    auto absent=Microsoft::WRL::Make<DesktopFixture>((output/L"missing-active.png").wstring(),L"unused.png");NativeWallpaperBackend strict(output/L"active-unreadable",absent,TestCopy);WallpaperEngine protectedOriginal(strict);protectedOriginal.Load();
+    Check(protectedOriginal.Update(true,true)==HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) && !absent->sets && !protectedOriginal.Enabled(),"unreadable active original still prevents any destructive change");
+    fallbackPath=(assets/L"jelly_wall_dark.png").wstring();absent->common=L"different-monitor-source.png";NativeWallpaperBackend wrong(output/L"wrong-cache",absent,TestCopy);WallpaperEngine separate(wrong);separate.Load();Check(FAILED(separate.Update(true,true)) && !absent->sets,"a different monitor's common image cannot be substituted");
+    absent->common=absent->active;NativeWallpaperBackend cache(output/L"cached-current",absent,TestCopy);WallpaperEngine recovered(cache);recovered.Load();
+    Check(SUCCEEDED(recovered.Update(true,true)) && absent->sets==1,"reported common current-picture copy permits safe enable when source was removed");
+    WallpaperState saved;cache.Load(saved);Check(ReadBytes(saved.previous.monitors[0].backup)==ReadBytes(fallbackPath) && fs::path(saved.previous.monitors[0].backup).extension()==L".png","fallback copy is preserved byte-for-byte with its actual format");
+    Check(SUCCEEDED(recovered.Update(false,true)) && absent->active==saved.previous.monitors[0].backup,"disable uses saved current-picture copy when original remains missing");
+    const auto changing=output/L"locked-original.png";WriteAtomic(changing,ReadBytes(fallbackPath));auto lockedOriginal=Microsoft::WRL::Make<DesktopFixture>(changing.wstring(),L"unused.png");NativeWallpaperBackend restored(output/L"restore-locked",lockedOriginal,TestCopy);WallpaperEngine durable(restored);durable.Load();Check(SUCCEEDED(durable.Update(true,true)),"original captured before it becomes locked");
+    HANDLE originalFile=CreateFileW(changing.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);Check(originalFile!=INVALID_HANDLE_VALUE,"original temporarily inaccessible for restoration test");const auto restoredResult=durable.Update(false,true);CloseHandle(originalFile);
+    Check(SUCCEEDED(restoredResult) && ReadBytes(lockedOriginal->active)==ReadBytes(fallbackPath),"readable saved copy restores even when the original is locked");
+    const auto locked=output/L"locked-image.png";WriteAtomic(locked,"test");HANDLE file=CreateFileW(locked.c_str(),GENERIC_READ,0,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);Check(file!=INVALID_HANDLE_VALUE,"locked source created");HRESULT result=S_OK;try{ReadBytes(locked);}catch(HRESULT code){result=code;}CloseHandle(file);Check(result==HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION),"real file error is retained instead of mislabeled as missing");
+    Check(std::wstring_view(WallpaperLabel(WallpaperStatus::ErrorOff,result))==L"file in use" && std::wstring_view(WallpaperLabel(WallpaperStatus::ErrorOff,E_ACCESSDENIED))==L"not allowed","actionable wallpaper error labels");
+}
 struct Fake : WallpaperBackend {
     WallpaperState saved;
     WallpaperDesktop desktop{{{L"left", L"original-left.jpg", L""}, {L"right", L"original-right.png", L""}}, 2};
@@ -16,15 +95,16 @@ struct Fake : WallpaperBackend {
     HRESULT Save(const WallpaperState& value) override { ++saves; if (failSave) return E_ACCESSDENIED; saved = value; return S_OK; }
     HRESULT Capture(WallpaperDesktop& value, bool backup) override {
         ++captures; if (failCapture) return E_ACCESSDENIED; value = desktop;
+        if(backup)value.monitors.erase(std::remove_if(value.monitors.begin(),value.monitors.end(),[](const auto& monitor){return !monitor.attached;}),value.monitors.end());
         if (backup) for (auto& monitor : value.monitors) if (!monitor.image.empty()) monitor.backup = monitor.image + L".backup";
         return S_OK;
     }
     HRESULT Assets(std::wstring& light, std::wstring& dark) override { light = L"jelly-light.png"; dark = L"jelly-dark.png"; return S_OK; }
-    HRESULT Apply(const std::wstring& image) override {
+    HRESULT Apply(const std::wstring& image,const std::vector<std::wstring>& ids) override {
         ++applies; Check(saved.enabled, "recovery record must be durable before the OS change");
         if (applyDelay) Sleep(applyDelay);
         desktop.position = 4;
-        for (auto& monitor : desktop.monitors) { monitor.image = image; if (failApply) return E_FAIL; }
+        for(const auto& id:ids)for(auto& monitor:desktop.monitors)if(monitor.id==id){monitor.image=image;if(failApply)return E_FAIL;}
         return S_OK;
     }
     HRESULT Restore(const WallpaperDesktop& previous, const std::vector<std::wstring>& ids, bool position) override {
@@ -60,6 +140,12 @@ void Policy() {
 
     Fake solid; solid.desktop.monitors[0].image.clear(); WallpaperEngine blank(solid); blank.Load(); blank.Update(true, true); blank.Update(false, false);
     Check(solid.desktop.monitors[0].image.empty(), "solid-color desktop restored without inventing an image");
+    Fake laptop;laptop.desktop.monitors.push_back({L"detached",L"missing-old-image.jpg",L"",false});WallpaperEngine portable(laptop);portable.Load();
+    Check(SUCCEEDED(portable.Update(true,true)) && laptop.saved.previous.monitors.size()==2 && laptop.desktop.monitors.back().image==L"missing-old-image.jpg","detached assignment neither backed up nor overwritten");
+    const auto applies=laptop.applies;Check(SUCCEEDED(portable.Update(true,true)) && portable.Enabled() && laptop.applies==applies,"inactive assignment cannot disable theme following or cause redundant apply");
+    portable.Update(false,true);Check(laptop.desktop.monitors.back().image==L"missing-old-image.jpg","disable preserves untouched detached assignment");
+    Fake legacy;legacy.desktop.monitors[1].attached=false;legacy.saved={true,legacy.desktop};for(auto& monitor:legacy.desktop.monitors)monitor.image=L"jelly-light.png";
+    WallpaperEngine old(legacy);old.Load();Check(SUCCEEDED(old.Update(false,true)) && legacy.desktop.monitors[1].image==L"original-right.png","older snapshots still restore queryable jellyflower-owned detached assignments");
 }
 void Failures() {
     Fake save; save.failSave = true; WallpaperEngine app(save); app.Load();
@@ -118,14 +204,14 @@ void Worker() {
 int wmain(int argc, wchar_t** argv) {
     try {
         Check(argc == 3, "pass a fresh workspace output directory and source asset directory");
-        Policy(); Failures(); StorageAndAssets(argv[1], argv[2]); Worker();
+        Policy(); Failures(); StorageAndAssets(argv[1], argv[2]); DetachedDisplays(fs::path(argv[1])/L"detached",argv[2]); Reconnect(fs::path(argv[1])/L"reconnect"); Worker();
         Check(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)), "read-only COM initialization");
         { NativeWallpaperBackend readOnly(argv[1]); WallpaperDesktop current;
             const HRESULT result = readOnly.Capture(current, false);
             std::cout << "Read-only desktop capture HRESULT=" << std::hex << static_cast<ULONG>(result) << std::dec << " monitors=" << current.monitors.size() << '\n';
             Check(SUCCEEDED(result) && !current.monitors.empty(), "real Windows per-monitor read works; no desktop setter invoked"); }
         CoUninitialize();
-        std::cout << "PASS: wallpaper defaults, themes, monitor backup/restore, restart, external changes, failures, atomic storage, exact PNGs, nonblocking/coalesced worker and read-only Windows API.\n";
+        std::cout << "PASS: wallpaper defaults, themes, connected/detached backup/restore, guarded current-image recovery, COM reconnection, restart, external changes, failures, atomic storage, exact PNGs, nonblocking/coalesced worker and read-only Windows API.\n";
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
     catch (...) { std::cerr << "wallpaper check failed\n"; return 1; }

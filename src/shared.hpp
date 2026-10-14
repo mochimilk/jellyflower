@@ -18,7 +18,7 @@ enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, Enab
     CursorModeQuery, CursorAppliedQuery, CursorErrorQuery, BorderQuery, LightQuery, AcrylicModeQuery,
     ClockQuery, ClockResultQuery, VolumeQuery, VolumeResultQuery, IslandsQuery, RetainedQuery,
     ClockDateQuery, StartCountQuery, StartAttachedQuery, StartResultQuery, StartSearchQuery, StartSpacingQuery,
-    SearchAttachedQuery,SearchInputQuery,SearchResultQuery };
+    SearchAttachedQuery,SearchInputQuery,SearchResultQuery,WallpaperStatusQuery,WallpaperResultQuery };
 enum Backend : LONG { Waiting, Legacy, Modern, Unsupported };
 enum BridgeState : LONG { Idle, Starting, Attached, Failed };
 

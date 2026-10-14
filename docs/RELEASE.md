@@ -1,7 +1,9 @@
-jellyflower 0.16.23
+jellyflower 0.16.24
 
-The power button's hover box is square again. Its height now follows its native width, including the outer power host, while retaining the centered icon and 12-DIP corners.
+Fixes wallpaper failures caused by stale Windows wallpaper-service connections after Explorer restarts. Jellyflower reconnects for a failed capture, with one bounded retry. Wallpaper setters are not blindly replayed after partial failures, and saved recovery information is retained when restoration cannot finish.
 
-Search greetings now use Windows' dedicated first-name field, so an account whose sign-in ID is eunsoolee but first name is Eunsoo shows Eunsoo. This is a one-time background lookup; it does not block taskbar startup. A real display name is the fallback; if unavailable, the name is omitted instead of showing a sign-in ID. Both Start and Search retain the same clock-based greeting and emojis.
+Old disconnected displays no longer block enabling because their assigned image is missing; their assignments are left alone. Connected screens are still backed up before changing anything. A removed or inaccessible original can use a different readable current-image path reported by Windows only when Windows confirms that it is the common wallpaper. If no safe copy exists, enabling stops without changing the desktop. Disabling can use the untouched saved backup when the original is now missing or locked.
 
-Update through general's version/download row and reopen Start. Start/Search v19 waits for older helpers through v18 to restore before connecting; Explorer stays v15. Users already running 0.16.17 or newer need no additional sign-out. Native layout/identity, installer payload and update-download checks accompany the x64 installer, portable build and matching source.
+The wallpaper row now shows useful inline errors such as image missing, file in use, not allowed, or the Windows error code. The row remains clickable to retry, and diagnostics include wallpaper status/result. No wallpaper polling timer is added.
+
+Update through general > version > download. Start/Search stays v19 and Explorer stays v15; no extra sign-out is needed from 0.16.17 or newer. The x64 installer, portable build and matching source include wallpaper recovery, menu/DPI, setup recovery and updater checks. A specific laptop's original unreadable image cannot be identified from older logs; a missing current image with no safe backup still requires selecting a readable Picture in Windows Personalization before enabling.

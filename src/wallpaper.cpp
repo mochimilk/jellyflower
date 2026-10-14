@@ -11,6 +11,7 @@
 #include <mutex>
 #include <sstream>
 #include <thread>
+#include <algorithm>
 
 namespace acrylic {
 namespace {
@@ -60,11 +61,14 @@ WallpaperState Decode(std::istream& in) {
     return state;
 }
 std::string ReadBytes(const fs::path& path) {
-    std::ifstream in(path, std::ios::binary | std::ios::ate);
-    if (!in) throw HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
-    const auto size = in.tellg(); if (size < 0 || size > 64 * 1024 * 1024) throw E_INVALIDARG;
-    std::string bytes(static_cast<size_t>(size), '\0'); in.seekg(0);
-    if (!in.read(bytes.data(), size)) throw HRESULT_FROM_WIN32(ERROR_READ_FAULT);
+    struct File{HANDLE value;~File(){if(value!=INVALID_HANDLE_VALUE)CloseHandle(value);}} file{
+        CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_SEQUENTIAL_SCAN,nullptr)};
+    if(file.value==INVALID_HANDLE_VALUE)throw LastError();
+    LARGE_INTEGER size{};if(!GetFileSizeEx(file.value,&size))throw LastError();
+    if(size.QuadPart<0 || size.QuadPart>64*1024*1024)throw HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE);
+    std::string bytes(static_cast<size_t>(size.QuadPart),'\0');DWORD read=0;
+    if(!ReadFile(file.value,bytes.data(),static_cast<DWORD>(bytes.size()),&read,nullptr))throw LastError();
+    if(read!=bytes.size())throw HRESULT_FROM_WIN32(ERROR_READ_FAULT);
     return bytes;
 }
 void WriteAtomic(const fs::path& path, const std::string& bytes) {
@@ -91,17 +95,41 @@ fs::path DataFolder() {
     PWSTR local = nullptr; Require(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local));
     const fs::path folder = fs::path(local) / L"jellyflower" / L"wallpaper"; CoTaskMemFree(local); return folder;
 }
+std::wstring SystemWallpaperImage(){
+    wchar_t image[MAX_PATH]{};
+    return SystemParametersInfoW(SPI_GETDESKWALLPAPER,static_cast<UINT>(std::size(image)),image,0)?std::wstring(image):std::wstring{};
+}
+HRESULT FileError(const fs::filesystem_error& error){
+    if(error.code().category()==std::system_category())return HRESULT_FROM_WIN32(error.code().value());
+    if(error.code()==std::errc::permission_denied)return E_ACCESSDENIED;
+    if(error.code()==std::errc::no_such_file_or_directory)return HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
+    return E_FAIL;
+}
+bool LostDesktop(HRESULT result){
+    return result==HRESULT_FROM_WIN32(RPC_S_SERVER_UNAVAILABLE)
+        || result==HRESULT_FROM_WIN32(RPC_S_CALL_FAILED)
+        || result==HRESULT_FROM_WIN32(RPC_S_CALL_FAILED_DNE)
+        || result==RPC_E_DISCONNECTED || result==CO_E_OBJNOTCONNECTED
+        || result==RPC_E_SERVER_DIED || result==RPC_E_SERVER_DIED_DNE;
+}
+HRESULT CreateDesktop(IDesktopWallpaper** desktop){
+    return CoCreateInstance(CLSID_DesktopWallpaper,nullptr,CLSCTX_ALL,IID_PPV_ARGS(desktop));
+}
 class NativeWallpaperBackend : public WallpaperBackend {
     fs::path folder;
     bool assetsReady = false;
     ComPtr<IDesktopWallpaper> desktop;
+    std::wstring (*copyPath)();
+    HRESULT (*connect)(IDesktopWallpaper**);
     IDesktopWallpaper* Desktop() {
-        if (!desktop) Require(CoCreateInstance(CLSID_DesktopWallpaper, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&desktop)));
+        if (!desktop) Require(connect(desktop.ReleaseAndGetAddressOf()));
         return desktop.Get();
     }
+    HRESULT ConnectionResult(HRESULT result){if(LostDesktop(result))desktop.Reset();return result;}
     static std::wstring Take(PWSTR value) { std::wstring text = value ? value : L""; CoTaskMemFree(value); return text; }
 public:
-    explicit NativeWallpaperBackend(fs::path value) : folder(std::move(value)) {}
+    explicit NativeWallpaperBackend(fs::path value,ComPtr<IDesktopWallpaper> api={},std::wstring (*copy)()=SystemWallpaperImage,HRESULT (*create)(IDesktopWallpaper**)=CreateDesktop)
+        : folder(std::move(value)),desktop(std::move(api)),copyPath(copy),connect(create) {}
     HRESULT Load(WallpaperState& state) override {
         try {
             const auto path = folder / L"state.bin";
@@ -109,11 +137,11 @@ public:
             if (fs::file_size(path) > 8 * 1024 * 1024) return E_INVALIDARG;
             std::ifstream in(path, std::ios::binary); if (!in) return HRESULT_FROM_WIN32(ERROR_READ_FAULT);
             state = Decode(in); return S_OK;
-        } catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+        } catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Save(const WallpaperState& state) override {
         try { WriteAtomic(folder / L"state.bin", Encode(state)); return S_OK; }
-        catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+        catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Assets(std::wstring& light, std::wstring& dark) override {
         try {
@@ -132,9 +160,17 @@ public:
                 *paths[i] = path.wstring();
             }
             assetsReady = true; return S_OK;
-        } catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+        } catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Capture(WallpaperDesktop& value, bool backup) override {
+        auto result=CaptureOnce(value,backup);
+        if(!LostDesktop(result))return result;
+        // Explorer can replace the wallpaper COM server. Retry only this read /
+        // backup operation once; a partially completed setter is never replayed.
+        desktop.Reset();
+        return ConnectionResult(CaptureOnce(value,backup));
+    }
+    HRESULT CaptureOnce(WallpaperDesktop& value, bool backup) {
         try {
             WallpaperDesktop next;
             DESKTOP_WALLPAPER_POSITION position{}; Require(Desktop()->GetPosition(&position)); next.position = position;
@@ -142,25 +178,50 @@ public:
             for (UINT i = 0; i < count; ++i) {
                 PWSTR id = nullptr, image = nullptr;
                 Require(Desktop()->GetMonitorDevicePathAt(i, &id)); const auto name = Take(id);
-                // Windows includes detached monitors with assigned pictures.
-                // Preserve those too so reconnecting does not lose their image.
-                Require(Desktop()->GetWallpaper(name.c_str(), &image));
-                WallpaperMonitor monitor{name, Take(image), L""};
+                RECT rect{};const HRESULT connected=Desktop()->GetMonitorRECT(name.c_str(),&rect);Require(connected);
+                const bool attached=connected!=S_FALSE;
+                // Old display assignments can reference removed files. Do not
+                // back them up or alter them when applying to the laptop screen.
+                if(backup && !attached)continue;
+                const HRESULT picture=Desktop()->GetWallpaper(name.c_str(), &image);
+                if(FAILED(picture)){CoTaskMemFree(image);if(!attached)continue;Require(picture);}
+                WallpaperMonitor monitor{name, Take(image), L"",attached};
                 if (backup && !monitor.image.empty()) {
-                    const auto bytes = ReadBytes(monitor.image);
-                    const fs::path path = folder / (L"original-" + Digest(bytes) + fs::path(monitor.image).extension().wstring());
+                    std::string bytes;auto extension=fs::path(monitor.image).extension().wstring();
+                    try{bytes=ReadBytes(monitor.image);}catch(HRESULT originalError){
+                        // SPI has only one image. Use it only when Windows
+                        // confirms that this exact source is the common image.
+                        // Never guess a per-monitor or slideshow cache file.
+                        PWSTR common=nullptr;const auto result=Desktop()->GetWallpaper(nullptr,&common);const auto source=Take(common);Require(result);
+                        if(result!=S_OK || _wcsicmp(source.c_str(),monitor.image.c_str())!=0)throw originalError;
+                        const auto cached=copyPath?copyPath():std::wstring{};
+                        if(cached.empty() || _wcsicmp(cached.c_str(),monitor.image.c_str())==0)throw originalError;
+                        try{bytes=ReadBytes(cached);}catch(...){throw originalError;}
+                        extension=fs::path(cached).extension().wstring();
+                        if(bytes.size()>=3 && static_cast<unsigned char>(bytes[0])==0xff && static_cast<unsigned char>(bytes[1])==0xd8)extension=L".jpg";
+                        else if(bytes.size()>=8 && bytes.compare(0,8,"\x89PNG\r\n\x1a\n",8)==0)extension=L".png";
+                        else if(bytes.size()>=2 && bytes.compare(0,2,"BM")==0)extension=L".bmp";
+                    }
+                    const fs::path path = folder / (L"original-" + Digest(bytes) + extension);
                     if (!fs::exists(path) || ReadBytes(path) != bytes) WriteAtomic(path, bytes);
                     monitor.backup = path.wstring();
                 }
                 next.monitors.push_back(std::move(monitor));
             }
-            if (next.monitors.empty()) return E_FAIL;
+            if(std::none_of(next.monitors.begin(),next.monitors.end(),[](const auto& monitor){return monitor.attached;}))return HRESULT_FROM_WIN32(ERROR_NOT_READY);
             value = std::move(next); return S_OK;
-        } catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+        } catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
-    HRESULT Apply(const std::wstring& image) override {
-        try { Require(Desktop()->SetPosition(DWPOS_FILL)); return Desktop()->SetWallpaper(nullptr, image.c_str()); }
-        catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+    HRESULT Apply(const std::wstring& image,const std::vector<std::wstring>& monitors) override {
+        try {
+            std::vector<std::wstring> connected;
+            for(const auto& id:monitors){RECT rect{};const auto result=Desktop()->GetMonitorRECT(id.c_str(),&rect);Require(result);if(result!=S_FALSE)connected.push_back(id);}
+            if(connected.empty())return HRESULT_FROM_WIN32(ERROR_NOT_READY);
+            Require(Desktop()->SetPosition(DWPOS_FILL));
+            for(const auto& id:connected)Require(Desktop()->SetWallpaper(id.c_str(),image.c_str()));
+            return S_OK;
+        }
+        catch (HRESULT error) { return ConnectionResult(error); } catch (...) { return E_FAIL; }
     }
     HRESULT Restore(const WallpaperDesktop& previous, const std::vector<std::wstring>& monitors, bool position) override {
         try {
@@ -168,12 +229,16 @@ public:
                 // Windows can replace its cached source image. Prefer the
                 // untouched original file only when its bytes still match.
                 std::wstring image = monitor.image;
-                if (!monitor.backup.empty() && (image.empty() || !fs::exists(image) || ReadBytes(image) != ReadBytes(monitor.backup))) image = monitor.backup;
+                if(!monitor.backup.empty()){
+                    const auto saved=ReadBytes(monitor.backup);bool matches=false;
+                    if(!image.empty())try{matches=ReadBytes(image)==saved;}catch(...){/* Use the preserved copy when the original is inaccessible. */}
+                    if(!matches)image=monitor.backup;
+                }
                 Require(Desktop()->SetWallpaper(id.c_str(), image.c_str()));
             }
             if (position) Require(Desktop()->SetPosition(static_cast<DESKTOP_WALLPAPER_POSITION>(previous.position)));
             return S_OK;
-        } catch (HRESULT error) { return error; } catch (...) { return E_FAIL; }
+        } catch (HRESULT error) { return ConnectionResult(error); } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
 };
 } // namespace

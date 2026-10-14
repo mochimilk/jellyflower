@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <cwchar>
 
 namespace acrylic {
 inline constexpr UINT WallpaperChangedMessage = WM_APP + 68;
@@ -11,11 +12,22 @@ enum class WallpaperStatus : UINT { Off, On, Applying, Restoring, ErrorOff, Erro
 inline bool WallpaperBusy(WallpaperStatus state) {
     return state == WallpaperStatus::Applying || state == WallpaperStatus::Restoring;
 }
-inline const wchar_t* WallpaperLabel(WallpaperStatus state) {
-    return state == WallpaperStatus::ErrorOff || state == WallpaperStatus::ErrorOn ? L"try again"
-        : state == WallpaperStatus::On || state == WallpaperStatus::Applying ? L"on" : L"off";
+inline constexpr const wchar_t* WallpaperErrorLabels[]{L"try again",L"image missing",L"not allowed",L"file in use",L"storage full",L"image too large",L"backup issue",L"error 88888888",L"error aaaaaaaa",L"error bbbbbbbb",L"error cccccccc",L"error dddddddd",L"error eeeeeeee",L"error ffffffff"};
+inline const wchar_t* WallpaperLabel(WallpaperStatus state,HRESULT error=S_OK) {
+    if(state==WallpaperStatus::ErrorOff || state==WallpaperStatus::ErrorOn){
+        if(error==HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || error==HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND))return WallpaperErrorLabels[1];
+        if(error==E_ACCESSDENIED || error==HRESULT_FROM_WIN32(ERROR_ACCESS_DISABLED_BY_POLICY))return WallpaperErrorLabels[2];
+        if(error==HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) || error==HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION))return WallpaperErrorLabels[3];
+        if(error==HRESULT_FROM_WIN32(ERROR_DISK_FULL) || error==HRESULT_FROM_WIN32(ERROR_HANDLE_DISK_FULL))return WallpaperErrorLabels[4];
+        if(error==HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE))return WallpaperErrorLabels[5];
+        if(error==E_INVALIDARG)return WallpaperErrorLabels[6];
+        if(FAILED(error)){thread_local wchar_t detail[24]{};swprintf_s(detail,L"error %08lx",static_cast<unsigned long>(error));return detail;}
+        return WallpaperErrorLabels[0];
+    }
+    return state==WallpaperStatus::On || state==WallpaperStatus::Applying?L"on":L"off";
 }
-struct WallpaperMonitor { std::wstring id, image, backup; };
+// Attachment is a live observation, not part of the persisted v1 backup format.
+struct WallpaperMonitor { std::wstring id, image, backup; bool attached=true; };
 struct WallpaperDesktop {
     std::vector<WallpaperMonitor> monitors;
     DWORD position = 0;
@@ -29,7 +41,7 @@ struct WallpaperBackend {
     virtual HRESULT Save(const WallpaperState&) = 0;
     virtual HRESULT Capture(WallpaperDesktop&, bool backup) = 0;
     virtual HRESULT Assets(std::wstring& light, std::wstring& dark) = 0;
-    virtual HRESULT Apply(const std::wstring& image) = 0;
+    virtual HRESULT Apply(const std::wstring& image,const std::vector<std::wstring>& monitors) = 0;
     virtual HRESULT Restore(const WallpaperDesktop&, const std::vector<std::wstring>& monitors, bool position) = 0;
 };
 class WallpaperEngine {

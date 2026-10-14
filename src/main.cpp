@@ -121,7 +121,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[27]{};
+    LONG values[29]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -169,6 +169,8 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"searchAttached\": " << values[24]
         << ",\n  \"searchInputHeaders\": " << values[25]
         << ",\n  \"searchLastResult\": " << values[26]
+        << ",\n  \"wallpaperStatus\": " << values[27]
+        << ",\n  \"wallpaperLastResult\": " << values[28]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -488,6 +490,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     }
     if (!self) return DefWindowProcW(window, message, wParam, lParam);
     if (message == QueryMessage) {
+        if (wParam == WallpaperStatusQuery) return self->wallpaper ? static_cast<UINT>(self->wallpaper->Status()) : 0;
+        if (wParam == WallpaperResultQuery) return self->wallpaper ? self->wallpaper->Error() : S_OK;
         if (wParam == StartCountQuery) return self->start.Count();
         if (wParam == StartAttachedQuery) return self->start.Attached();
         if (wParam == StartResultQuery) return self->start.Result();
@@ -529,7 +533,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayWallpaperQueryMessage) {
-        return self->wallpaper ? static_cast<UINT>(self->wallpaper->Status()) : 0;
+        return self->wallpaper ? (wParam ? self->wallpaper->Error() : static_cast<LRESULT>(self->wallpaper->Status())) : 0;
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
     } else if (message == TrayCursorQueryMessage) {
