@@ -15,7 +15,7 @@ public:
     ~AutoTheme();
     void Enable(); // Call on the foreground UI thread, only after a menu click.
     DWORD Disable();
-    // Call only for its timer, async location/permission events, or system changes.
+    // Call only for its timer, one-shot completion, or system changes.
     // Returns the next one-shot delay (zero means no automatic work is pending).
     bool Update(bool& light, UINT& delay, bool invalidate = false);
     AutoThemeStatus Status() const;
