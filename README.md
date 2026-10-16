@@ -1,3 +1,4 @@
+<br/>
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/app-dark.png">
@@ -5,11 +6,13 @@
   </picture>
 </p>
 
-<h1 align="center">jellyflower</h1>
-
-![jellyflower's acrylic taskbar and tray menus with the dark wallpaper](docs/images/jellyflower01.png)
+<h1 align="center">jellyflower <br/><br/>
+</h1>
 
 ![jellyflower's Start menu with a personal greeting and a grid of pinned app icons](docs/images/jellyflower02.png)
+![jellyflower's acrylic taskbar and tray menus with the dark wallpaper](docs/images/jellyflower01.png)
+
+
 
 A small Windows 11 app for a frosted taskbar, a cleaner Start menu, and a desktop that follows your light and dark theme. Everything lives in the little flower in your system tray.
 
