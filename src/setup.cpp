@@ -20,7 +20,7 @@ const wchar_t* operation = L"preparing setup";
 bool silentUpdate = false;
 bool needsReload = false;
 struct Payload { int id; const wchar_t* name; };
-constexpr Payload Files[] = {{201, L"jellyflower.exe"}, {202, L"jellyflower-bridge-v16.dll"},
+constexpr Payload Files[] = {{201, L"jellyflower.exe"}, {202, L"jellyflower-bridge-v17.dll"},
     {203, L"LICENSE.md"}, {204, L"THIRD_PARTY_NOTICES.md"}, {205, L"LICENSE-LUCIDE.txt"},
     {206, L"README.md"}, {207, L"app-dark.ico"}, {208, L"app-light.ico"}, {209, L"jellyflower-start-v19.dll"}};
 std::wstring Known(REFKNOWNFOLDERID id) {

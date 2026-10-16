@@ -154,7 +154,22 @@ struct AdaptiveView::Impl : std::enable_shared_from_this<Impl> {
     }
     void ImageChanged()noexcept{
         if(!alive || updating)return;
-        try{RemoveOverlay();ClearSurface();source=nullptr;dirty=true;inspected=false;Refresh(enabled,visible,GetTickCount64());}catch(...){error=winrt::to_hresult();}
+        try{
+            // Explorer can replace a notification bitmap or raise ImageOpened
+            // for identical artwork. Preserve the mask, overlay position and
+            // source opacity across that event; otherwise native/adaptive ink
+            // flashes on every NIM_MODIFY. Only tiny CPU-resident bytes are
+            // compared, with no new PNG/GPU surface for unchanged artwork.
+            const auto nextSource=image.Source();
+            if(Allowed() && surface && visible && Visible(image) && !image.GetBindingExpression(x::UIElement::OpacityProperty())){
+                if(auto bitmap=nextSource.try_as<media::Imaging::WriteableBitmap>()){
+                    ++stats.bitmapReads;const auto next=adaptive::Inspect(bitmap);
+                    if(next.monochrome && next.hash==hash){source=nextSource;Geometry();return;}
+                }
+            }
+            if(image.GetBindingExpression(x::UIElement::OpacityProperty()))SaveOpacity();
+            RemoveOverlay();ClearSurface();source=nullptr;dirty=true;inspected=false;Refresh(enabled,visible,GetTickCount64());
+        }catch(...){error=winrt::to_hresult();try{RemoveOverlay();ClearSurface();}catch(...){}}
     }
     bool Geometry()noexcept{
         if(!applied || !panel || !overlay || !mask)return true;

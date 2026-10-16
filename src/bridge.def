@@ -1,4 +1,4 @@
-LIBRARY "jellyflower-bridge-v16"
+LIBRARY "jellyflower-bridge-v17"
 EXPORTS
     AcrylicHookProc
     DllGetClassObject PRIVATE

@@ -1,9 +1,7 @@
-jellyflower 0.18.0
+jellyflower 0.18.1
 
-Pure acrylic adds adaptive black/white clock and monochrome notification-icon foregrounds. Native colored logos, charging/warning states, high contrast, and unsupported renderers keep their original artwork. Standard transparent monochrome third-party tray bitmaps are supported without an app allowlist. The compositor averages a local backdrop neighborhood; no desktop capture or CPU screen readback is used. Bitmap artwork checks are bounded to four per second, cache unchanged masks, and pause when all taskbars are hidden or the session is locked. Moving content near the black/white threshold can still cause visible color changes.
+Fixes the flower tray icon flickering and jumping in pure acrylic. Routine refreshes no longer resend unchanged tray artwork. Identical Explorer bitmap replacements and ImageOpened events retain the decoded contrast mask, overlay and native image opacity instead of briefly exposing the original icon and rebuilding its replacement. Colored status artwork, theme/DPI changes and Explorer restart recovery remain supported.
 
-Auto hide now saves the Windows account preference as well as updating Explorer's live state, preserves unrelated shell settings, verifies the change, and rolls back denied persistence. Unknown shell records are refused. It does not hide taskbar windows or enforce an app-specific preference, and the chosen Windows setting remains when jellyflower exits.
+Explorer helper v17 uses a unique DLL name so an update loads the corrected code. Normally stopped v15/v16 presentation is synchronously restored before attachment; live or unknown incompatible helpers remain guarded. Start/Search styling and the saved Windows auto-hide setting are unchanged.
 
-Explorer helper v16 uses a unique DLL name. Normally stopped/restored v15 helpers can retire before attachment without a sign-out. An unknown or live incompatible helper still requires signing out/back in. Start/Search v19 behavior is unchanged.
-
-See docs/ADAPTIVE_CONTRAST.md for implementation limits and real-desktop validation steps. Native fixtures cover restoration, colored icon mutations, bitmap caching/throttling, visibility/owner cleanup, and saved auto-hide round trips; visual correctness on every third-party application or Windows build cannot be guaranteed.
+Native regressions cover 100 redundant tray refreshes, repeated identical bitmap replacements without mask rebuilds, theme/DPI changes, shell recovery, colored mutations, input/layout, binding preservation and safe helper retirement.

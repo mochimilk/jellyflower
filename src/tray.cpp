@@ -43,6 +43,7 @@ void TrayIcon::Remove() noexcept {
     }
 }
 void TrayIcon::Refresh(HWND owner, AcrylicMode) {
+    if(window_!=owner){Remove();brandTheme_=-1;}
     window_ = owner;
     const bool light = LightTaskbar();
     if (brandTheme_ != static_cast<int>(light)) {
@@ -53,7 +54,8 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode) {
     const HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
     const UINT dpi = GetDpiForWindow(taskbar ? taskbar : owner);
     const int pixels = GetSystemMetricsForDpi(SM_CXSMICON, dpi ? dpi : 96);
-    if (!icon_ || resource != resource_ || pixels != pixels_) {
+    const bool artworkChanged=!icon_ || resource != resource_ || pixels != pixels_;
+    if (artworkChanged) {
         const auto replacement = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),
             MAKEINTRESOURCEW(resource), IMAGE_ICON, pixels, pixels, 0));
         if (!replacement) return;
@@ -62,6 +64,10 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode) {
         resource_ = resource;
         pixels_ = pixels;
     }
+    // Re-sending NIF_ICON replaces Explorer's bitmap even when the HICON is
+    // unchanged. Keep routine foreground/recovery refreshes presentation-free.
+    // TaskbarCreated explicitly clears present_ through ShellRestarted().
+    if(present_ && !artworkChanged)return;
     auto data = Data(owner);
     data.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = TrayMessage;

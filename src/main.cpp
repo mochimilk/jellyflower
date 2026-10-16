@@ -327,7 +327,7 @@ public:
             const auto slash = path.find_last_of(L'\\');
             if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
             path.resize(slash + 1);
-            path += L"jellyflower-bridge-v16.dll";
+            path += L"jellyflower-bridge-v17.dll";
             bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
         }

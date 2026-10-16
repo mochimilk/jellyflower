@@ -30,6 +30,8 @@ inline Bitmap Inspect(winrt::Windows::UI::Xaml::Media::Imaging::WriteableBitmap 
     result.width=width;result.height=height;
     result.pixels.assign(buffer.data(),buffer.data()+size);
     uint64_t hash=14695981039346656037ull;
+    hash=(hash^static_cast<UINT>(width))*1099511628211ull;
+    hash=(hash^static_cast<UINT>(height))*1099511628211ull;
     unsigned visible=0,transparent=0;
     bool colored=false;
     for(size_t offset=0;offset<size;offset+=4){

@@ -1,5 +1,13 @@
 # Validation results
 
+## jellyflower 0.18.1 pure-acrylic tray stability
+
+Reproduced the reported movement on build 26300. Over 240 flower-only frames with 16 explicit calls to the normal refresh path, v0.18.0 showed four distinct bright-pixel centroids, spanning about 9 physical pixels horizontally and 6 vertically. The same run on the installed v0.18.1 fix produced one centroid across all frames. This checks routine refresh movement on a static desktop backdrop; it does not eliminate intended black/white changes over moving content.
+
+AdaptiveContrast first failed the new duplicate-source regression against v0.18.0, then passed after the fix: identical bitmap replacements retain the same overlay, keep native source opacity suppressed, and perform no additional mask rebuilds. Existing colored-state, binding, input/layout, throttling and restoration checks also pass. TrayRefresh passes 100 redundant refreshes without shell writes, one theme/DPI update each, cached-artwork re-add after Explorer restart, and cleanup. BridgeNotify verifies stopped v16 adaptive overrides are restored synchronously before v17 attachment and a live old controller is not retired.
+
+The payload-verified local installer completed successfully and attached the new helper without restarting Explorer. Exact installer/source/portable contents and hashes are checked before publication.
+
 ## jellyflower 0.18.0 contrast and system auto hide
 
 Validated on Windows build 26300 with MSVC 19.44 / Windows SDK 26100:

@@ -30,7 +30,7 @@ jobs:
         if: matrix.architecture == 'x64'
         shell: pwsh
         run: |
-          foreach ($test in 'UpdateLogic','SetupLockLogic','SetupRecovery','StartupLogic','SolarLogic','ThemeLogic','DesktopOptions') {
+          foreach ($test in 'UpdateLogic','SetupLockLogic','SetupRecovery','StartupLogic','SolarLogic','ThemeLogic','DesktopOptions','TrayRefresh') {
             & ".\build\Release\$test.exe"
             if ($LASTEXITCODE -ne 0) { throw "$test failed." }
           }
