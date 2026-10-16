@@ -5,6 +5,7 @@
 #include "bridge_notify.hpp"
 #include "theme.hpp"
 #include "clock.hpp"
+#include "adaptive_session.hpp"
 #include "volume.hpp"
 #include "chevron.hpp"
 #include "acrylic_material.hpp"
@@ -57,6 +58,7 @@ struct Owner {
     }
 };
 thread_local Owner owner;
+bool AdaptiveOwnerAlive(){return owner.Alive();}
 class Background;
 auto& Backgrounds() {
     // Explorer-lifetime storage avoids calling XAML during TLS/loader teardown.
@@ -180,6 +182,7 @@ void RefreshBackgrounds() noexcept {
         RefreshClocks();
         RefreshVolumes();
         RefreshChevrons();
+        RefreshAdaptive(module,state,AdaptiveOwnerAlive);
     } catch (...) { Result(winrt::to_hresult()); }
 }
 void CALLBACK BackgroundTimer(HWND, UINT, UINT_PTR timer, DWORD) {
@@ -212,7 +215,9 @@ public:
     }
     void Refresh() noexcept {
         try {
-            view.Refresh(owner.Alive(), DecodeClockOptions(state ? static_cast<UINT>(Read(state->clockOptions)) : 1));
+            HIGHCONTRASTW contrast{sizeof(contrast)};
+            const bool high=!SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0) || (contrast.dwFlags&HCF_HIGHCONTRASTON);
+            view.Refresh(owner.Alive(), DecodeClockOptions(state ? static_cast<UINT>(Read(state->clockOptions)) : 1),state && DecodeAcrylicMode(Read(state->active))==AcrylicMode::Pure && !high);
             if (state) InterlockedExchange(&state->clockResult, S_OK);
             Count();
         } catch (...) {
@@ -446,6 +451,7 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
         try {
             // Only Handle is valid on Remove. Never read/free other fields there.
             if (mutation == Remove) {
+                RemoveAdaptive(element.Handle);
                 auto& backgrounds = Backgrounds();
                 const auto it = backgrounds.find(element.Handle);
                 if (it != backgrounds.end()) {
@@ -477,6 +483,11 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
             Strings strings{element};
             if (!element.Type) return S_OK;
             const std::wstring_view type(element.Type);
+            if(type==L"Windows.UI.Xaml.Controls.TextBlock" || type==L"Windows.UI.Xaml.Controls.FontIcon" || type==L"Windows.UI.Xaml.Controls.SymbolIcon" || type==L"Windows.UI.Xaml.Controls.Image" || type==L"Windows.UI.Xaml.Shapes.Path"){
+                try{winrt::Windows::Foundation::IInspectable object{nullptr};winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+                    RefreshAdaptive(module,state,AdaptiveOwnerAlive);TrackAdaptive(element.Handle,object.as<xaml::DependencyObject>());
+                }catch(...){if(state)InterlockedExchange(&state->adaptiveResult,winrt::to_hresult());}
+            }
             const bool chevronCandidate = type == L"SystemTray.ChevronIconView"
                 || (type == L"Windows.UI.Xaml.Controls.TextBlock" && element.Name
                     && std::wstring_view(element.Name) == L"InnerTextBlock");

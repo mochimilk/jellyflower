@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "clock.hpp"
+#include "adaptive_material.hpp"
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
 #include <winrt/Windows.UI.Xaml.Automation.Peers.h>
@@ -66,6 +67,7 @@ struct ClockView::Impl {
     std::array<int64_t, 4> tokens{};
     size_t registered = 0;
     bool applied = false, updating = false;
+    xaml::Media::Brush adaptiveInk{nullptr};
     explicit Impl(const controls::StackPanel& value)
         : panel(value), date(FindText(value, L"DateInnerTextBlock")), time(FindText(value, L"TimeInnerTextBlock")),
           properties{{{date, xaml::UIElement::VisibilityProperty()}, {time, xaml::UIElement::VisibilityProperty()},
@@ -130,7 +132,7 @@ struct ClockView::Impl {
             updating = false;
         } catch (...) { updating = false; throw; }
     }
-    void Refresh(bool enabled, ClockOptions options) {
+    void Refresh(bool enabled, ClockOptions options, bool contrast) {
         if (!enabled) { Restore(); return; }
         if (!applied) {
             for (auto& p : properties) p.Save();
@@ -151,14 +153,25 @@ struct ClockView::Impl {
         line.FontSize(date.FontSize());
         line.FontWeight(date.FontWeight());
         line.FontStyle(date.FontStyle());
-        line.Foreground(date.Foreground());
+        const auto native=date.Foreground();
+        const auto solid=native.try_as<xaml::Media::SolidColorBrush>();
+        if(contrast && solid){
+            const auto color=solid.Color();
+            if(std::max({color.R,color.G,color.B})-std::min({color.R,color.G,color.B})<=2){
+                try{if(!adaptiveInk)adaptiveInk=winrt::make<adaptive::Ink>(line,color);
+                    adaptiveInk.Opacity(solid.Opacity()*color.A/255.);
+                    adaptiveInk.as<xaml::Media::XamlCompositionBrushBase>().FallbackColor({255,color.R,color.G,color.B});
+                }catch(...){adaptiveInk=nullptr;}
+            }else adaptiveInk=nullptr;
+        }else adaptiveInk=nullptr;
+        const auto foreground=adaptiveInk?adaptiveInk:native;if(line.Foreground()!=foreground)line.Foreground(foreground);
         line.IsTextScaleFactorEnabled(date.IsTextScaleFactorEnabled());
     }
     ~Impl() { Unregister(); try { Restore(); } catch (...) {} }
 };
 ClockView::ClockView(const controls::StackPanel& panel) : impl(std::make_unique<Impl>(panel)) {}
 ClockView::~ClockView() = default;
-void ClockView::Refresh(bool enabled, ClockOptions options) { impl->Refresh(enabled, options); }
+void ClockView::Refresh(bool enabled, ClockOptions options, bool contrast) { impl->Refresh(enabled, options, contrast); }
 void ClockView::Restore() { impl->Restore(); }
 bool ClockView::Applied() const noexcept { return impl->applied; }
 }

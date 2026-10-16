@@ -124,7 +124,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[29]{};
+    LONG values[32]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -174,6 +174,9 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"searchLastResult\": " << values[26]
         << ",\n  \"wallpaperStatus\": " << values[27]
         << ",\n  \"wallpaperLastResult\": " << values[28]
+        << ",\n  \"adaptiveTrayGlyphs\": " << values[29]
+        << ",\n  \"adaptiveTrayBitmaps\": " << values[30]
+        << ",\n  \"adaptiveLastResult\": " << values[31]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -301,7 +304,7 @@ public:
         if (newOwner) ReleaseBridge();
         // An older pinned helper must be removed by restarting Explorer before
         // a different brush implementation attaches to the same rectangles.
-        if (OlderBridgePresent(pid)) { lastResult = HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH); return; }
+        if (newOwner && OlderBridgePresent(pid)) { lastResult = HRESULT_FROM_WIN32(ERROR_REVISION_MISMATCH); return; }
         if (newOwner) {
             explorerPid = pid;
             explorerProcess.reset(OpenProcess(SYNCHRONIZE, FALSE, pid));
@@ -324,7 +327,7 @@ public:
             const auto slash = path.find_last_of(L'\\');
             if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
             path.resize(slash + 1);
-            path += L"jellyflower-bridge.dll";
+            path += L"jellyflower-bridge-v16.dll";
             bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
         }
@@ -544,6 +547,9 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == EnabledQuery) return self->mode != AcrylicMode::Off;
         if (wParam == AcrylicModeQuery) return static_cast<LONG>(self->mode);
         if (wParam == ClockQuery) return self->shared ? Read(self->shared->clockCount) : 0;
+        if (wParam == AdaptiveGlyphQuery) return self->shared ? Read(self->shared->adaptiveGlyphs) : 0;
+        if (wParam == AdaptiveBitmapQuery) return self->shared ? Read(self->shared->adaptiveBitmaps) : 0;
+        if (wParam == AdaptiveResultQuery) return self->shared ? Read(self->shared->adaptiveResult) : S_OK;
         if (wParam == ClockResultQuery) return self->shared ? Read(self->shared->clockResult) : S_OK;
         if (wParam == VolumeQuery) return self->shared ? Read(self->shared->volumeCount) : 0;
         if (wParam == VolumeResultQuery) return self->shared ? Read(self->shared->volumeResult) : S_OK;

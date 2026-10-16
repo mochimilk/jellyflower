@@ -1,5 +1,17 @@
 # Validation results
 
+## jellyflower 0.18.0 contrast and system auto hide
+
+Validated on Windows build 26300 with MSVC 19.44 / Windows SDK 26100:
+
+- Native AdaptiveContrast fixture passed: live neutral/colored brush changes, latest-value/binding/unset restoration, independent alpha mask, bitmap source and same-buffer color mutations, caching/throttle, hidden-state no-read, owner death, late completion cancellation, original input/layout. Windows stores image opacity at float precision; comparisons allow that native round trip.
+- ClockLayout and BridgeNotify passed, including normal clock click/tooltip identity and safe stopped-v15/live-v15 upgrade guards. DesktopOptions passed simulated auto-hide persistence denial/rollback, unknown layout refusal, bottom-edge guard, other flag/byte preservation.
+- TaskbarSystem --roundtrip passed against the real Windows API and saved shell record, restoring the exact previous live/saved settings. This confirms preference consistency; Windows Settings' displayed checkbox and other-monitor behavior remain manual checklist items.
+- Local installer completed successfully. The running modern bridge reported 13 adaptive tray glyphs and one eligible monochrome bitmap, with result 0 in pure; returning to system reported zero adaptive overrides. A separate bounded fixture placed dark, gray, and white content behind the real tray. Captures showed black/white clock, flower, Wi-Fi, and chevron with the green charging artwork retained. No claim is made that every installed third-party renderer or battery-saver condition was tested.
+- Installer manifests, embedded EXE/helper/docs/icons, wallpaper resources, native extraction, source/portable ZIP bytes and SHA-256 hashes passed. The temporary read-only tray inventory helper was removed by refreshing Explorer, with no inspection helper shipped in the payload.
+
+CPU/GPU/battery usage was not benchmarked on representative laptops. Composition replaces CPU screen sampling, but per-glyph effects and bounded bitmap checks still have a cost. See ADAPTIVE_CONTRAST.md for the remaining visual, shell-version, DPI, auto-hide, and power-mode checks.
+
 ## jellyflower 0.17.2 wallpaper recovery
 
 WallpaperLogic reproduces the affected desktop's GetMonitorRECT E_FAIL for a stale disconnected assignment. Native capture/backup confirms absence against an injected active-display inventory; active E_FAIL resolution, denied inventory, non-generic error preservation, connected-only apply and successful restore pass. Single-screen cached-current recovery now passes when stale assignments make the common query return S_FALSE. Multiple active displays still reject ambiguous or mismatched copies. Removed bundled images are re-extracted byte-for-byte during the same session. Original backups and v1 snapshots, COM reconnect bounds, partial rollback, missing/locked originals, exact error stages after rollback, outside choices and the sleeping/coalesced worker retain their tests. Setters are simulated; no real wallpaper setting is changed.

@@ -22,7 +22,7 @@ public:
     ~ClockView();
     ClockView(const ClockView&) = delete;
     ClockView& operator=(const ClockView&) = delete;
-    void Refresh(bool enabled, ClockOptions options = {});
+    void Refresh(bool enabled, ClockOptions options = {}, bool contrast = false);
     void Restore();
     bool Applied() const noexcept;
 private:

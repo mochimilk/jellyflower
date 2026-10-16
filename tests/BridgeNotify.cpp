@@ -43,6 +43,23 @@ int main() {
         Check(old && acrylic::OlderBridgePresent(pid), "old pinned material requires Explorer reload");
     }
     Check(!acrylic::OlderBridgePresent(pid), "reload clears incompatible helper");
+    {
+        const auto name=L"Local\\AcrylicTaskbar.Bridge.v15."+std::to_wstring(pid);
+        acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,4096,name.c_str()));
+        auto fields=static_cast<volatile LONG*>(MapViewOfFile(old.get(),FILE_MAP_ALL_ACCESS,0,0,14*sizeof(LONG)));
+        Check(fields!=nullptr,"known v15 fixture mapping");
+        if(fields){
+            InterlockedExchange(&fields[0],0x4154423F);InterlockedExchange(&fields[8],1);
+            Check(acrylic::OlderBridgePresent(pid),"still-running v15 cannot be replaced");
+            InterlockedExchange(&fields[8],0);InterlockedExchange(&fields[9],1);
+            Check(acrylic::OlderBridgePresent(pid),"stopped v15 with unrestored clock remains blocked");
+            InterlockedExchange(&fields[9],0);
+            Check(!acrylic::OlderBridgePresent(pid),"known stopped and restored v15 permits uniquely named v16");
+            InterlockedExchange(&fields[0],0);
+            Check(acrylic::OlderBridgePresent(pid),"unknown mapping contents cannot bypass reload guard");
+            UnmapViewOfFile(const_cast<LONG*>(fields));
+        }
+    }
     HANDLE ready[2]{CreateEventW(nullptr, TRUE, FALSE, nullptr), CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     std::atomic<bool> created[2]{};
     std::thread workers[2];

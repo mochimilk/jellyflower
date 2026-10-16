@@ -25,6 +25,7 @@ UINT_PTR WINAPI TestAppbar(DWORD message,PAPPBARDATA data){
     return 0;
 }
 HWND WINAPI TestFind(LPCWSTR,LPCWSTR){return taskbarPresent?reinterpret_cast<HWND>(1):nullptr;}
+BOOL WINAPI TestNotify(HWND,UINT,WPARAM,LPARAM){return TRUE;}
 void Check(bool good,const char* text){if(!good)throw std::runtime_error(text);}
 DWORD Number(const wchar_t* name){const auto& bytes=preferences.at(name);Check(bytes.size()==sizeof(DWORD),"DWORD setting size");DWORD value;memcpy(&value,bytes.data(),sizeof(value));return value;}
 }
@@ -38,6 +39,7 @@ DWORD Number(const wchar_t* name){const auto& bytes=preferences.at(name);Check(b
 #include "../src/wallpaper_theme.hpp"
 #define SHAppBarMessage TestAppbar
 #define FindWindowW TestFind
+#define SendNotifyMessageW TestNotify
 #include "../src/taskbar_options.hpp"
 using namespace acrylic;
 int main(){try{
@@ -57,9 +59,14 @@ int main(){try{
         Check(!Save(true,&point,AutoThemeScope::Wallpaper) && !system.Disable() && Number(L"WallpaperAutoTheme")==1 && preferences.count(L"WallpaperThemeLocation") && !preferences.count(L"ThemeLocation"),"system disable never removes wallpaper schedule/location");
         Check(!wallpaper.Update(light,delay) && !delay,"inactive scheduler has no timer or location request");
     }
+    const DWORD record[]{48,0xfffffffeu,2,ABE_BOTTOM,288,72,0,1528,2400,1600,144,1};
+    preferences[L"Settings"]={reinterpret_cast<const BYTE*>(record),reinterpret_cast<const BYTE*>(record)+sizeof(record)};
     Check(ReadTaskbarOptions().Packed()==2,"bottom taskbar off is enabled");
     appbarFlags=ABS_ALWAYSONTOP|0x80;Check(ToggleTaskbarAutoHide().autoHide && appbarFlags==(ABS_ALWAYSONTOP|0x80|ABS_AUTOHIDE),"native auto hide preserves all other appbar appbarFlags");
     Check(!ToggleTaskbarAutoHide().autoHide && appbarFlags==(ABS_ALWAYSONTOP|0x80),"native auto hide turns off again");
+    Check(preferences[L"Settings"].size()==sizeof(record) && memcmp(preferences[L"Settings"].data(),record,sizeof(record))==0,"round trip preserves every unrelated saved taskbar byte");
+    writeError=ERROR_ACCESS_DENIED;Check(ToggleTaskbarAutoHide().error==ERROR_ACCESS_DENIED && !(appbarFlags&ABS_AUTOHIDE),"failed persistence rolls back live auto-hide only");writeError=0;
+    preferences[L"Settings"][4]=0;const auto unsupportedSetters=setters;Check(ToggleTaskbarAutoHide().error==ERROR_NOT_SUPPORTED && setters==unsupportedSetters,"unknown shell record never changes live or saved settings");preferences[L"Settings"][4]=0xfe;
     for(DWORD other:std::vector<DWORD>{ABE_LEFT,ABE_TOP,ABE_RIGHT,99u}){edge=other;const auto before=setters;Check(!ToggleTaskbarAutoHide().bottom && setters==before,"non-bottom or unknown edges never call the native setter");}
     edge=ABE_BOTTOM;const auto old=ReadTaskbarOptions();edge=ABE_TOP;const auto before=setters;Check(old.bottom && !ToggleTaskbarAutoHide().bottom && setters==before,"edge is rechecked on click after an earlier enabled menu snapshot");
     edge=ABE_BOTTOM;available=false;Check(ToggleTaskbarAutoHide().error==ERROR_NOT_READY && setters==before,"failed taskbar query cannot change settings");available=true;
