@@ -26,7 +26,7 @@ A small Windows 11 app for a frosted taskbar, a cleaner Start menu, and a deskto
 
 ## Download and install
 
-[Download jellyflower for Windows x64](https://github.com/mochimilk/jellyflower/releases/latest/download/jellyflower-setup-x64.exe) · [All releases and ARM64 downloads](https://github.com/mochimilk/jellyflower/releases/latest)
+[Download jellyflower for Windows x64](https://github.com/mochimilk/jellyflower/releases/latest/download/jellyflower-setup-x64.exe) · [All releases](https://github.com/mochimilk/jellyflower/releases)
 
 Double-click the installer. It installs for your Windows account, starts jellyflower, and enables launch at login. No administrator rights, terminal commands, or extra runtime download is needed. Close TranslucentTB before using jellyflower.
 
