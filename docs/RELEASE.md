@@ -1,7 +1,9 @@
-jellyflower 0.17.1
+jellyflower 0.17.2
 
-System auto and wallpaper auto no longer retain a location object or status listener between readings. Each one-time city-level reading has a 15-second timeout, releases its resources on success/failure, and is cancelled when auto is disabled or its owner closes. Sunrise/sunset calculations use saved rounded coordinates between brief activation/startup and daily refresh readings. A transient refresh failure can retry after 15 minutes; it does not leave a listener running.
+Fixes wallpaper error 80004005 caused by a disconnected display assignment returning E_FAIL instead of S_FALSE. Only that generic rectangle failure is checked against Windows' active-display inventory; unavailable inventory and other errors still stop safely. No disconnected screen is added to the apply/backup targets.
 
-Windows permission can remain granted, and its global Location services switch remains under your control. Jellyflower never switches that setting on or off. Revocation is discovered at the next read rather than through a persistent watcher; cached daylight calculations may continue until then. Wallpaper auto stays independent of system auto and does no location work while wallpaper is off.
+A single attached screen can now preserve Windows' public current-picture copy when its original source has disappeared, including when stale assignments make the common-image query return S_FALSE. Multiple attached displays still require a confirmed matching common source. If neither the source nor a safe current copy is readable, the original is protected and the operation stops. This covers a missing-image recovery gap; the other laptop's specific missing path has not been inspected.
 
-Update through general > version > download. Menus, wallpaper recovery data and helper generations stay unchanged from 0.17.0. Production-coroutine lifetime/cancellation tests use a simulated location provider, with no real location access or settings changes. Installer/source/portable checks and production update verification accompany the x64 release.
+Wallpaper diagnostics now record the failing operation without image paths. Missing extracted jellyflower images are re-created from bundled resources, with no download. Existing recovery records, original backups, independent system/wallpaper auto themes and bounded location ownership remain compatible. Start/Search v19 and Explorer v15 are unchanged; this update needs no additional sign-out.
+
+Native wallpaper regressions use simulated setters and workspace files. Read-only validation on the affected desktop confirms capture now succeeds; automated tests do not change its wallpaper. Exact installer/source/portable payload checks accompany the x64 build.

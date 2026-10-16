@@ -643,7 +643,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return 0;
     } else if (message == WallpaperChangedMessage) {
         if (self->wallpaper && FAILED(self->wallpaper->Error()))
-            Log(L"Wallpaper error=" + std::to_wstring(self->wallpaper->Error()));
+            Log(L"Wallpaper error=" + std::to_wstring(self->wallpaper->Error())+L" stage="+self->wallpaper->ErrorStage());
         self->RefreshWallpaperTheme();
         RefreshWallpaperMenu(window);
         return 0;

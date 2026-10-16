@@ -11,6 +11,7 @@ const WallpaperMonitor* Find(const WallpaperDesktop& desktop, const std::wstring
 }
 }
 HRESULT WallpaperEngine::Update(bool enabled, bool light) {
+    failureStage=nullptr;
     if (!state.enabled && !enabled) return S_OK;
     std::wstring lightImage, darkImage;
     HRESULT result = backend.Assets(lightImage, darkImage);
@@ -77,6 +78,7 @@ HRESULT WallpaperEngine::Update(bool enabled, bool light) {
     for(const auto& monitor:current.monitors)if(monitor.attached && Find(state.previous,monitor.id))targets.push_back(monitor.id);
     result = backend.Apply(light ? lightImage : darkImage,targets);
     if (FAILED(result) && first) {
+        failureStage=backend.Stage();
         // Apply may have changed the position or only some screens before failing.
         // Roll back the captured desktop, keeping its recovery record on failure.
         std::vector<std::wstring> ids;

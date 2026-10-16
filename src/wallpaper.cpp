@@ -115,22 +115,55 @@ bool LostDesktop(HRESULT result){
 HRESULT CreateDesktop(IDesktopWallpaper** desktop){
     return CoCreateInstance(CLSID_DesktopWallpaper,nullptr,CLSCTX_ALL,IID_PPV_ARGS(desktop));
 }
+// Some shell revisions return E_FAIL instead of S_FALSE for old display
+// assignments. Confirm those against the public active-path inventory; never
+// interpret an arbitrary failed COM query as a disconnected screen.
+HRESULT ActiveMonitor(const wchar_t* id){
+    for(unsigned attempt=0;attempt<3;++attempt){
+        UINT32 paths=0,modes=0;
+        auto result=GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS,&paths,&modes);
+        if(result!=ERROR_SUCCESS)return HRESULT_FROM_WIN32(result);
+        std::vector<DISPLAYCONFIG_PATH_INFO> path(paths);
+        std::vector<DISPLAYCONFIG_MODE_INFO> mode(modes);
+        result=QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,&paths,path.data(),&modes,mode.data(),nullptr);
+        if(result==ERROR_INSUFFICIENT_BUFFER)continue;
+        if(result!=ERROR_SUCCESS)return HRESULT_FROM_WIN32(result);
+        HRESULT failure=S_OK;
+        for(UINT32 i=0;i<paths;++i){
+            DISPLAYCONFIG_TARGET_DEVICE_NAME target{};
+            target.header={DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,sizeof(target),path[i].targetInfo.adapterId,path[i].targetInfo.id};
+            result=DisplayConfigGetDeviceInfo(&target.header);
+            if(result!=ERROR_SUCCESS){failure=HRESULT_FROM_WIN32(result);continue;}
+            if(_wcsicmp(target.monitorDevicePath,id)==0)return S_OK;
+        }
+        return FAILED(failure)?failure:S_FALSE;
+    }
+    return HRESULT_FROM_WIN32(ERROR_RETRY);
+}
 class NativeWallpaperBackend : public WallpaperBackend {
     fs::path folder;
     bool assetsReady = false;
     ComPtr<IDesktopWallpaper> desktop;
     std::wstring (*copyPath)();
     HRESULT (*connect)(IDesktopWallpaper**);
+    HRESULT (*activeMonitor)(const wchar_t*);
+    const wchar_t* stage=L"initialization";
     IDesktopWallpaper* Desktop() {
         if (!desktop) Require(connect(desktop.ReleaseAndGetAddressOf()));
         return desktop.Get();
     }
     HRESULT ConnectionResult(HRESULT result){if(LostDesktop(result))desktop.Reset();return result;}
+    HRESULT Attached(const wchar_t* id){
+        RECT rect{};const auto result=Desktop()->GetMonitorRECT(id,&rect);
+        return result==E_FAIL?activeMonitor(id):result;
+    }
     static std::wstring Take(PWSTR value) { std::wstring text = value ? value : L""; CoTaskMemFree(value); return text; }
 public:
-    explicit NativeWallpaperBackend(fs::path value,ComPtr<IDesktopWallpaper> api={},std::wstring (*copy)()=SystemWallpaperImage,HRESULT (*create)(IDesktopWallpaper**)=CreateDesktop)
-        : folder(std::move(value)),desktop(std::move(api)),copyPath(copy),connect(create) {}
+    explicit NativeWallpaperBackend(fs::path value,ComPtr<IDesktopWallpaper> api={},std::wstring (*copy)()=SystemWallpaperImage,HRESULT (*create)(IDesktopWallpaper**)=CreateDesktop,HRESULT (*active)(const wchar_t*)=ActiveMonitor)
+        : folder(std::move(value)),desktop(std::move(api)),copyPath(copy),connect(create),activeMonitor(active) {}
+    const wchar_t* Stage() const noexcept override {return stage;}
     HRESULT Load(WallpaperState& state) override {
+        stage=L"load recovery";
         try {
             const auto path = folder / L"state.bin";
             if (!fs::exists(path)) { state = {}; return S_OK; }
@@ -140,10 +173,12 @@ public:
         } catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Save(const WallpaperState& state) override {
+        stage=L"save recovery";
         try { WriteAtomic(folder / L"state.bin", Encode(state)); return S_OK; }
         catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Assets(std::wstring& light, std::wstring& dark) override {
+        stage=L"extract images";
         try {
             light = (folder / L"jelly-light.png").wstring(); dark = (folder / L"jelly-dark.png").wstring();
             if (assetsReady && fs::exists(light) && fs::exists(dark)) return S_OK;
@@ -173,27 +208,39 @@ public:
     HRESULT CaptureOnce(WallpaperDesktop& value, bool backup) {
         try {
             WallpaperDesktop next;
+            stage=L"read position";
             DESKTOP_WALLPAPER_POSITION position{}; Require(Desktop()->GetPosition(&position)); next.position = position;
+            stage=L"enumerate displays";
             UINT count = 0; Require(Desktop()->GetMonitorDevicePathCount(&count)); if (!count || count > 64) return E_FAIL;
             for (UINT i = 0; i < count; ++i) {
                 PWSTR id = nullptr, image = nullptr;
                 Require(Desktop()->GetMonitorDevicePathAt(i, &id)); const auto name = Take(id);
-                RECT rect{};const HRESULT connected=Desktop()->GetMonitorRECT(name.c_str(),&rect);Require(connected);
+                stage=L"check display";const HRESULT connected=Attached(name.c_str());Require(connected);
                 const bool attached=connected!=S_FALSE;
                 // Old display assignments can reference removed files. Do not
                 // back them up or alter them when applying to the laptop screen.
                 if(backup && !attached)continue;
-                const HRESULT picture=Desktop()->GetWallpaper(name.c_str(), &image);
+                stage=L"read wallpaper";const HRESULT picture=Desktop()->GetWallpaper(name.c_str(), &image);
                 if(FAILED(picture)){CoTaskMemFree(image);if(!attached)continue;Require(picture);}
                 WallpaperMonitor monitor{name, Take(image), L"",attached};
+                next.monitors.push_back(std::move(monitor));
+            }
+            if(std::none_of(next.monitors.begin(),next.monitors.end(),[](const auto& monitor){return monitor.attached;}))return HRESULT_FROM_WIN32(ERROR_NOT_READY);
+            const auto attachedCount=std::count_if(next.monitors.begin(),next.monitors.end(),[](const auto& monitor){return monitor.attached;});
+            for(auto& monitor:next.monitors){
                 if (backup && !monitor.image.empty()) {
+                    stage=L"backup source";
                     std::string bytes;auto extension=fs::path(monitor.image).extension().wstring();
                     try{bytes=ReadBytes(monitor.image);}catch(HRESULT originalError){
-                        // SPI has only one image. Use it only when Windows
-                        // confirms that this exact source is the common image.
-                        // Never guess a per-monitor or slideshow cache file.
-                        PWSTR common=nullptr;const auto result=Desktop()->GetWallpaper(nullptr,&common);const auto source=Take(common);Require(result);
-                        if(result!=S_OK || _wcsicmp(source.c_str(),monitor.image.c_str())!=0)throw originalError;
+                        // SPI represents the current desktop picture. With one
+                        // attached display it is unambiguous even if obsolete
+                        // assignments make GetWallpaper(NULL) return S_FALSE.
+                        // Multiple active displays still require an exact
+                        // confirmed common source. Do not guess cache filenames.
+                        if(attachedCount!=1){
+                            PWSTR common=nullptr;const auto result=Desktop()->GetWallpaper(nullptr,&common);const auto source=Take(common);
+                            if(result!=S_OK || _wcsicmp(source.c_str(),monitor.image.c_str())!=0)throw originalError;
+                        }
                         const auto cached=copyPath?copyPath():std::wstring{};
                         if(cached.empty() || _wcsicmp(cached.c_str(),monitor.image.c_str())==0)throw originalError;
                         try{bytes=ReadBytes(cached);}catch(...){throw originalError;}
@@ -203,21 +250,22 @@ public:
                         else if(bytes.size()>=2 && bytes.compare(0,2,"BM")==0)extension=L".bmp";
                     }
                     const fs::path path = folder / (L"original-" + Digest(bytes) + extension);
+                    stage=L"write backup";
                     if (!fs::exists(path) || ReadBytes(path) != bytes) WriteAtomic(path, bytes);
                     monitor.backup = path.wstring();
                 }
-                next.monitors.push_back(std::move(monitor));
             }
-            if(std::none_of(next.monitors.begin(),next.monitors.end(),[](const auto& monitor){return monitor.attached;}))return HRESULT_FROM_WIN32(ERROR_NOT_READY);
             value = std::move(next); return S_OK;
         } catch (HRESULT error) { return error; } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
     HRESULT Apply(const std::wstring& image,const std::vector<std::wstring>& monitors) override {
         try {
             std::vector<std::wstring> connected;
-            for(const auto& id:monitors){RECT rect{};const auto result=Desktop()->GetMonitorRECT(id.c_str(),&rect);Require(result);if(result!=S_FALSE)connected.push_back(id);}
+            stage=L"check apply display";
+            for(const auto& id:monitors){const auto result=Attached(id.c_str());Require(result);if(result!=S_FALSE)connected.push_back(id);}
             if(connected.empty())return HRESULT_FROM_WIN32(ERROR_NOT_READY);
-            Require(Desktop()->SetPosition(DWPOS_FILL));
+            stage=L"set position";Require(Desktop()->SetPosition(DWPOS_FILL));
+            stage=L"set wallpaper";
             for(const auto& id:connected)Require(Desktop()->SetWallpaper(id.c_str(),image.c_str()));
             return S_OK;
         }
@@ -225,6 +273,7 @@ public:
     }
     HRESULT Restore(const WallpaperDesktop& previous, const std::vector<std::wstring>& monitors, bool position) override {
         try {
+            stage=L"restore image";
             for (const auto& id : monitors) for (const auto& monitor : previous.monitors) if (_wcsicmp(id.c_str(), monitor.id.c_str()) == 0) {
                 // Windows can replace its cached source image. Prefer the
                 // untouched original file only when its bytes still match.
@@ -236,7 +285,7 @@ public:
                 }
                 Require(Desktop()->SetWallpaper(id.c_str(), image.c_str()));
             }
-            if (position) Require(Desktop()->SetPosition(static_cast<DESKTOP_WALLPAPER_POSITION>(previous.position)));
+            if (position) {stage=L"restore position";Require(Desktop()->SetPosition(static_cast<DESKTOP_WALLPAPER_POSITION>(previous.position)));}
             return S_OK;
         } catch (HRESULT error) { return ConnectionResult(error); } catch(const fs::filesystem_error& error){return FileError(error);} catch (...) { return E_FAIL; }
     }
@@ -251,6 +300,7 @@ struct WallpaperManager::Impl {
     UINT64 generation = 0;
     std::atomic<WallpaperStatus> status{WallpaperStatus::Off};
     std::atomic<HRESULT> error{S_OK};
+    std::atomic<const wchar_t*> stage{L"initialization"};
     std::unique_ptr<WallpaperBackend> injected;
     std::thread worker;
     Impl(HWND value, bool theme, std::unique_ptr<WallpaperBackend> backend)
@@ -267,7 +317,7 @@ struct WallpaperManager::Impl {
             {
                 std::lock_guard lock(mutex);
                 if (!generation) { desired = engine.Enabled(); pending = SUCCEEDED(result) && desired; }
-                if (FAILED(result)) { error = result; status = WallpaperStatus::ErrorOff; }
+                if (FAILED(result)) { error = result;stage=backend->Stage(); status = WallpaperStatus::ErrorOff; }
                 else if (!pending) status = engine.Enabled() ? WallpaperStatus::On : WallpaperStatus::Off;
             }
             PostMessageW(owner, WallpaperChangedMessage, 0, 0);
@@ -281,7 +331,7 @@ struct WallpaperManager::Impl {
                 if (loaded) result = engine.Update(enable, theme);
                 lock.lock();
                 if (request == generation) {
-                    desired = engine.Enabled(); error = result;
+                    desired = engine.Enabled(); error = result;stage=engine.ErrorStage();
                     status = FAILED(result) ? (desired ? WallpaperStatus::ErrorOn : WallpaperStatus::ErrorOff)
                         : desired ? WallpaperStatus::On : WallpaperStatus::Off;
                 }
@@ -297,6 +347,7 @@ WallpaperManager::WallpaperManager(HWND owner, bool light, std::unique_ptr<Wallp
 WallpaperManager::~WallpaperManager() = default;
 WallpaperStatus WallpaperManager::Status() const { return impl->status.load(); }
 HRESULT WallpaperManager::Error() const { return impl->error.load(); }
+const wchar_t* WallpaperManager::ErrorStage() const { return impl->stage.load(); }
 void WallpaperManager::Toggle(bool light) {
     std::lock_guard lock(impl->mutex);
     if (WallpaperBusy(impl->status)) return;

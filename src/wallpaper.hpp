@@ -37,6 +37,7 @@ struct WallpaperState { bool enabled = false; WallpaperDesktop previous; };
 // Separate the persistent ownership policy from Windows/file side effects.
 struct WallpaperBackend {
     virtual ~WallpaperBackend() = default;
+    virtual const wchar_t* Stage() const noexcept { return L"wallpaper"; }
     virtual HRESULT Load(WallpaperState&) = 0;
     virtual HRESULT Save(const WallpaperState&) = 0;
     virtual HRESULT Capture(WallpaperDesktop&, bool backup) = 0;
@@ -47,10 +48,12 @@ struct WallpaperBackend {
 class WallpaperEngine {
     WallpaperBackend& backend;
     WallpaperState state;
+    const wchar_t* failureStage=nullptr;
 public:
     explicit WallpaperEngine(WallpaperBackend& value) : backend(value) {}
     HRESULT Load() { return backend.Load(state); }
     bool Enabled() const { return state.enabled; }
+    const wchar_t* ErrorStage() const noexcept {return failureStage?failureStage:backend.Stage();}
     HRESULT Update(bool enabled, bool light);
 };
 
@@ -64,6 +67,7 @@ public:
     ~WallpaperManager();
     WallpaperStatus Status() const;
     HRESULT Error() const;
+    const wchar_t* ErrorStage() const;
     void Toggle(bool light);
     void Refresh(bool light);
 };
