@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "localization.hpp"
 #include "cursor_pack.hpp"
 #include "cursors.hpp"
 #include "../third_party/miniz/miniz.h"
@@ -191,23 +192,7 @@ DWORD OpenCursorGuide() {
         const auto directory = CursorDataFolder();
         if (directory.empty() || Reparse(directory) || Reparse(fs::path(directory).parent_path())) return ERROR_BAD_PATHNAME;
         fs::create_directories(directory);
-        const std::wstring guide = L"jellyflower - unlock cursor colors\r\n\r\n"
-            L"Cursor Concept 3 HDPi is made by JepriCreations. Get your own full pack here:\r\n"
-            L"https://jepricreations.com/products/cursor-concept-3-hdpi\r\n\r\n"
-            L"1. Download the complete Cursor Concept 3 HDPi ZIP from your account on the creator's website.\r\n"
-            L"2. Copy the original .zip file into this folder (also opened for you):\r\n\r\n" + directory + L"\r\n\r\n"
-            L"   You can paste that path into File Explorer's address bar. Keep the file zipped; any .zip filename is fine.\r\n"
-            L"3. Leave jellyflower running. Within ten seconds it validates the pack and enables the cursor choices.\r\n"
-            L"4. Open jellyflower > cursor and pick a color. Default (system) follows Windows light/dark mode.\r\n\r\n"
-            L"Your Windows cursor stays active until you choose a custom cursor. Disable selects Microsoft's standard cursors.\r\n"
-            L"The full pack includes light, dark, blueberry, green tea, mint, strawberry, thai tea, vanilla, and yogurt.\r\n"
-            L"The free light/dark ZIP is a different pack and will not unlock these choices. Use the full HDPi ZIP linked above.\r\n"
-            L"No need to extract files, run install.cmd, or install an INF file. Jellyflower reads only the cursor files.\r\n"
-            L"The ZIP and imported cursors stay on your computer, survive jellyflower updates, and are never uploaded.\r\n\r\n"
-            L"If import fails, check the original ZIP contains cursor/assets/<color>/arrow.cur and the other cursor files.\r\n"
-            L"Replace an incomplete download with a fresh ZIP. A failed import keeps your existing pack and cursor.\r\n\r\n"
-            L"Creator: https://jepricreations.com  |  https://www.deviantart.com/jepricreations\r\n"
-            L"Cursor files are licensed by their creator and are not bundled with jellyflower.\r\n";
+        const std::wstring guide = CursorGuideText(directory);
         const auto text = std::string("\xef\xbb\xbf") + Utf8(guide);
         const auto path = fs::path(directory) / L"unlock colors.txt";
         const auto pending = fs::path(directory) / (L"guide-" + std::to_wstring(GetTickCount64()) + L".tmp");

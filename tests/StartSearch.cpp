@@ -44,7 +44,7 @@ void RenderChecks(const sx::Controls::Grid& pane,const sx::Controls::Canvas& ico
         Check(found,"full-width header divider renders with themed stroke");
     }
 }
-int main(){
+int main(){ acrylic::SetTextLanguage(acrylic::Language::English);
     try{
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         winrt::init_apartment(winrt::apartment_type::single_threaded);auto manager=sx::Hosting::WindowsXamlManager::InitializeForCurrentThread();
@@ -110,6 +110,11 @@ int main(){
             search.Restore();heading.Name(L"PinnedListHeaderText");Layout(pane);Check(header.Margin().Left==32 && header.Margin().Right==28,"native asymmetric header margins restore");
             search.Refresh(true,false,FixtureGreeting());search.Refresh(true,true,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"greeting stays unchanged in light mode");search.Refresh(true,false,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"greeting stays unchanged in dark mode");nativePlaceholder.Text(L"new stock localized text");Check(nativePlaceholder.Text()==FixtureGreeting(),"shell localization changes retain custom placeholder");search.Restore();Check(nativePlaceholder.Text()==L"new stock localized text","restoration uses the latest native text");
             for(unsigned period=0;period<3;++period){const auto greeting=SearchGreeting(L"Jelly",period);search.Refresh(true,false,greeting);Check(nativePlaceholder.Text()==greeting && sx::Automation::AutomationProperties::GetName(button)==L"search","clock-driven greetings retain native accessible search action");}search.Refresh(true,false,L"Good afternoon, Jelly 🧸");Check(nativePlaceholder.Text()==L"Good afternoon, Jelly 🧸","controller-supplied greeting updates the placeholder");search.Refresh(true,false,FixtureGreeting());Check(nativePlaceholder.Text()==FixtureGreeting(),"native greeting can be restored without replacing the header");search.Restore();
+            for(const auto language:{Language::French,Language::Korean,Language::English}){
+                SetTextLanguage(language);const auto translated=SearchGreeting(L"Jelly",0);
+                search.Refresh(true,false,translated);
+                Check(nativePlaceholder.Text()==translated && sx::Automation::AutomationProperties::GetName(button)==Tr(TextId::Search),"live language selection updates greeting and accessible search action together");
+            }search.Restore();
             sx::Data::Binding binding;binding.Source(winrt::box_value(L"bound stock text"));nativePlaceholder.SetBinding(sx::Controls::TextBlock::TextProperty(),binding);search.Refresh(true,true,FixtureGreeting());search.Restore();Check(nativePlaceholder.GetBindingExpression(sx::Controls::TextBlock::TextProperty()).ParentBinding()==binding,"original text binding restored");
             search.Refresh(true,false,FixtureGreeting());button.Template(Template());Layout(pane);search.Refresh(true,false,FixtureGreeting());Layout(pane);Check(search.Applied() && FindStartElement(button,L"PlaceholderText").as<sx::Controls::TextBlock>().Text()==FixtureGreeting(),"replacement native templates are rediscovered without duplicate overlays");
         }

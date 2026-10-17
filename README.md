@@ -26,6 +26,7 @@ A small Windows 11 app for a frosted taskbar, a cleaner Start menu, and a deskto
 - Optional cursor colors with hover previews, using your own separately licensed cursor pack.
 - Windows auto hide, controlled right from the taskbar menu.
 - Automatic launch at login and updates you can download and install inside the app.
+- English, French, and Korean text, selected automatically from your Windows display language.
 
 ## Download and install
 
@@ -38,6 +39,8 @@ The installer is currently unsigned. Windows 11's standard taskbar is the main t
 ## Make it yours
 
 Click the flower under **show hidden icons** to open the menu. Click it again or click outside to close it. Settings keep the menu open while you try them.
+
+Jellyflower follows Windows' display language without an extra language setting. English, French, and Korean are included; other languages fall back to the first supported Windows display-language preference, then English. The clock follows your separate Windows regional date and time settings. Long menu labels fade at the edge and scroll on hover; reduced motion keeps them still.
 
 | Menu | What you can change |
 | --- | --- |
@@ -60,6 +63,7 @@ Choose **general > exit** to close jellyflower and restore its taskbar, clock, S
 - [Pure acrylic contrast](docs/ADAPTIVE_CONTRAST.md): supported monochrome icons and auto hide.
 - [Battery saver](docs/INVESTIGATION.md): what the app controls and what Windows controls.
 - [Updates](docs/UPDATES.md): in-app updates and release details.
+- [Languages](docs/LOCALIZATION.md): language selection, translations, and testing.
 
 ## Build from source
 
@@ -71,7 +75,7 @@ Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CM
 
 Double-click `dist\x64\jellyflower-setup-x64.exe` to install. To build ARM64, install its C++ tools and run `Build.ps1 -Architecture ARM64`. Checked-in ICO files and native cursor geometry mean Python and SVG libraries are optional, only needed for regenerating artwork. The C++ runtime is linked statically; Windows supplies the remaining libraries.
 
-To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge-v17.dll`, `jellyflower-start-v19.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second taskbar recovery timer complements system and shell events; automatic theme scheduling uses its separate event timer. Other shell liveness/clock timers still run, so this change alone is not a measured battery-life improvement. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
+To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge-v18.dll`, `jellyflower-start-v20.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second taskbar recovery timer complements system and shell events; automatic theme scheduling uses its separate event timer. Other shell liveness/clock timers still run, so this change alone is not a measured battery-life improvement. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
 
 The GitHub workflow builds x64 and ARM64 and publishes tagged releases. `Publish.ps1` publishes the first local x64 build using the maintainer's normal GitHub CLI login. [UPDATES.md](docs/UPDATES.md) documents the release process.
 

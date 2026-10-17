@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include <windows.h>
+#include "localization.hpp"
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,19 +13,24 @@ enum class WallpaperStatus : UINT { Off, On, Applying, Restoring, ErrorOff, Erro
 inline bool WallpaperBusy(WallpaperStatus state) {
     return state == WallpaperStatus::Applying || state == WallpaperStatus::Restoring;
 }
-inline constexpr const wchar_t* WallpaperErrorLabels[]{L"try again",L"image missing",L"not allowed",L"file in use",L"storage full",L"image too large",L"backup issue",L"error 88888888",L"error aaaaaaaa",L"error bbbbbbbb",L"error cccccccc",L"error dddddddd",L"error eeeeeeee",L"error ffffffff"};
+inline std::vector<std::wstring> WallpaperStatusLabels() {
+    std::vector<std::wstring> labels;
+    for(const auto id:{TextId::TryAgain,TextId::ImageMissing,TextId::NotAllowed,TextId::FileInUse,TextId::StorageFull,TextId::ImageTooLarge,TextId::BackupIssue})labels.emplace_back(Tr(id));
+    for(const auto code:{L"88888888",L"aaaaaaaa",L"bbbbbbbb",L"cccccccc",L"dddddddd",L"eeeeeeee",L"ffffffff"})labels.push_back(Text(TextId::ErrorCode,{{L"code",code}}));
+    return labels;
+}
 inline const wchar_t* WallpaperLabel(WallpaperStatus state,HRESULT error=S_OK) {
     if(state==WallpaperStatus::ErrorOff || state==WallpaperStatus::ErrorOn){
-        if(error==HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || error==HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND))return WallpaperErrorLabels[1];
-        if(error==E_ACCESSDENIED || error==HRESULT_FROM_WIN32(ERROR_ACCESS_DISABLED_BY_POLICY))return WallpaperErrorLabels[2];
-        if(error==HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) || error==HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION))return WallpaperErrorLabels[3];
-        if(error==HRESULT_FROM_WIN32(ERROR_DISK_FULL) || error==HRESULT_FROM_WIN32(ERROR_HANDLE_DISK_FULL))return WallpaperErrorLabels[4];
-        if(error==HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE))return WallpaperErrorLabels[5];
-        if(error==E_INVALIDARG)return WallpaperErrorLabels[6];
-        if(FAILED(error)){thread_local wchar_t detail[24]{};swprintf_s(detail,L"error %08lx",static_cast<unsigned long>(error));return detail;}
-        return WallpaperErrorLabels[0];
+        if(error==HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) || error==HRESULT_FROM_WIN32(ERROR_PATH_NOT_FOUND))return Tr(TextId::ImageMissing);
+        if(error==E_ACCESSDENIED || error==HRESULT_FROM_WIN32(ERROR_ACCESS_DISABLED_BY_POLICY))return Tr(TextId::NotAllowed);
+        if(error==HRESULT_FROM_WIN32(ERROR_SHARING_VIOLATION) || error==HRESULT_FROM_WIN32(ERROR_LOCK_VIOLATION))return Tr(TextId::FileInUse);
+        if(error==HRESULT_FROM_WIN32(ERROR_DISK_FULL) || error==HRESULT_FROM_WIN32(ERROR_HANDLE_DISK_FULL))return Tr(TextId::StorageFull);
+        if(error==HRESULT_FROM_WIN32(ERROR_FILE_TOO_LARGE))return Tr(TextId::ImageTooLarge);
+        if(error==E_INVALIDARG)return Tr(TextId::BackupIssue);
+        if(FAILED(error)){thread_local std::wstring detail;wchar_t code[9]{};swprintf_s(code,L"%08lx",static_cast<unsigned long>(error));detail=Text(TextId::ErrorCode,{{L"code",code}});return detail.c_str();}
+        return Tr(TextId::TryAgain);
     }
-    return state==WallpaperStatus::On || state==WallpaperStatus::Applying?L"on":L"off";
+    return OnOff(state==WallpaperStatus::On || state==WallpaperStatus::Applying);
 }
 // Attachment is a live observation, not part of the persisted v1 backup format.
 struct WallpaperMonitor { std::wstring id, image, backup; bool attached=true; };

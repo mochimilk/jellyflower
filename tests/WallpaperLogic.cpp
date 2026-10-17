@@ -228,7 +228,7 @@ void Worker() {
     Check(app.Status() == WallpaperStatus::Off && inspect->desktop.monitors[0].image == L"original-left.jpg", "async disable restores desktop");
 }
 }
-int wmain(int argc, wchar_t** argv) {
+int wmain(int argc, wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language::English);
     try {
         Check(argc == 3, "pass a fresh workspace output directory and source asset directory");
         Policy(); Failures(); StorageAndAssets(argv[1], argv[2]); DetachedDisplays(fs::path(argv[1])/L"detached",argv[2]);GenericDetachedFailure(fs::path(argv[1])/L"generic-detached",argv[2]); Reconnect(fs::path(argv[1])/L"reconnect"); Worker();

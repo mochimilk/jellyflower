@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "popup.hpp"
+#include "localization.hpp"
+#include "search_text.hpp"
 #include "wallpaper.hpp"
 #include "tray.hpp"
 #include "cursors.hpp"
@@ -33,7 +35,7 @@ constexpr UINT_PTR HoverTimer = 1;
 constexpr UINT_PTR ChildCloseTimer = 2, TrayDeactivateTimer = 3;
 constexpr UINT_PTR UpdateSpinnerTimer = 4;
 constexpr UINT_PTR ColorPreviewTimer = 5;
-constexpr UINT_PTR EntranceTimer = 6;
+constexpr UINT_PTR EntranceTimer = 6, TextTickerTimer = 7;
 // Documented Windows 11 DWM values; compatible with Windows 10 SDK headers.
 constexpr auto CornerPreference = static_cast<DWMWINDOWATTRIBUTE>(33);
 constexpr auto ImmersiveDarkMode = static_cast<DWMWINDOWATTRIBUTE>(20);
@@ -41,30 +43,30 @@ constexpr auto BorderColor = static_cast<DWMWINDOWATTRIBUTE>(34);
 constexpr DWORD RoundCorners = 2;
 struct Row { UINT command; std::wstring label; bool divider = false, checked = false; std::wstring secondary; bool enabled = true; };
 std::vector<Row> CursorRows(UINT mask, UINT selected) {
-    std::vector<Row> rows{{CursorCommandBase, L"default (system)", false, selected == CursorDefault, L"", (mask & 1) != 0}};
+    std::vector<Row> rows{{CursorCommandBase, Tr(TextId::DefaultSystem), false, selected == CursorDefault, L"", (mask & 1) != 0}};
     for (size_t i = 0; i < CursorColors.size(); ++i)
-        rows.push_back({CursorCommandBase + static_cast<UINT>(i) + 1, CursorColors[i].label, i == 0, selected == i + 1, L"", (mask & (1u << (i + 1))) != 0});
-    rows.push_back({CursorCommandBase + CursorDisabled, L"disable", true, selected == CursorDisabled});
+        rows.push_back({CursorCommandBase + static_cast<UINT>(i) + 1, CursorColorLabel(i), i == 0, selected == i + 1, L"", (mask & (1u << (i + 1))) != 0});
+    rows.push_back({CursorCommandBase + CursorDisabled, Tr(TextId::Disable), true, selected == CursorDisabled});
     return rows;
 }
 bool HasCursorPack(UINT mask) { return (mask & ((1u << CursorDisabled) - 1)) != 0; }
 std::vector<Row> RootRows(bool light, UINT mask) {
-    return {{TrayThemeCommand, L"system", false, false, light ? L"light" : L"dark"},
-        {TrayTaskbarCommand, L"taskbar"}, {TrayWallpaperMenuCommand,L"wallpaper"},
-        HasCursorPack(mask) ? Row{TrayCursorCommand, L"cursor"} : Row{TrayCursorUnlockCommand, L"colors", false, false, L"unlock"},
-        {TrayGeneralCommand, L"general", true}};
+    return {{TrayThemeCommand, Tr(TextId::System), false, false, light ? Tr(TextId::Light) : Tr(TextId::Dark)},
+        {TrayTaskbarCommand, Tr(TextId::Taskbar)}, {TrayWallpaperMenuCommand,Tr(TextId::Wallpaper)},
+        HasCursorPack(mask) ? Row{TrayCursorCommand, Tr(TextId::Cursor)} : Row{TrayCursorUnlockCommand, Tr(TextId::Colors), false, false, Tr(TextId::Unlock)},
+        {TrayGeneralCommand, Tr(TextId::General), true}};
 }
 std::vector<Row> GeneralRows() {
-    return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, L"exit", true}};
+    return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, Tr(TextId::Exit), true}};
 }
 std::vector<Row> TaskbarRows(AcrylicMode mode,bool date){
-    return {{TrayToggleCommand,L"acrylic",false,false,AcrylicModeName(mode)},
-        {TrayDateCommand,L"date",false,false,date?L"on":L"off"},
-        {TrayAutoHideCommand,L"auto hide",false,false,L"off",false}};
+    return {{TrayToggleCommand,Tr(TextId::Acrylic),false,false,AcrylicModeLabel(mode)},
+        {TrayDateCommand,Tr(TextId::Date),false,false,date?Tr(TextId::On):Tr(TextId::Off)},
+        {TrayAutoHideCommand,Tr(TextId::AutoHide),false,false,Tr(TextId::Off),false}};
 }
 std::vector<Row> WallpaperRows(){
-    return {{TrayWallpaperCommand,L"jellyflower",false,false,L"off"},
-        {TrayWallpaperThemeCommand,L"theme",false,false,L"system"}};
+    return {{TrayWallpaperCommand,L"jellyflower",false,false,Tr(TextId::Off)},
+        {TrayWallpaperThemeCommand,Tr(TextId::Theme),false,false,Tr(TextId::System)}};
 }
 std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     // FromHICON loses the alpha channel on some Windows/GDI+ combinations.
@@ -175,6 +177,8 @@ struct Popup {
     UINT dpi = 96, result = 0, cursorMode = 0, hoverDelay = 400;
     RECT trayBounds{};
     int hovered = -1, childIndex = -1, suppressedHover = -1, rowHeight = 40;
+    ULONGLONG tickerStarted=0;
+    bool tickerActive=false,tickerMotion=true;
     UINT kind = 0;
     UINT previewMode = CursorPreviewNone, previewAttempted = 0;
     std::array<HCURSOR,CursorDisabled+1> previewCursors{};
@@ -241,7 +245,7 @@ struct Popup {
         PreviewCursor(-1);
         CompleteEntrance();
         closing = true;
-        if (window) KillTimer(window, UpdateSpinnerTimer);
+        if (window) { KillTimer(window, UpdateSpinnerTimer);KillTimer(window,TextTickerTimer);tickerActive=false; }
         if (child) child->HideBranch();
         if (window) ShowWindow(window, SW_HIDE);
     }
@@ -255,7 +259,7 @@ struct Popup {
         for (size_t i = 0; i < rows.size(); ++i) {
             auto& row = rows[i];
             if (row.command == TrayDateCommand) {
-                row.secondary = date ? L"on" : L"off";
+                row.secondary = date ? Tr(TextId::On) : Tr(TextId::Off);
                 if (i < buttons.size()) SetWindowTextW(buttons[i], (row.label + L", " + row.secondary).c_str());
             }
         }
@@ -265,7 +269,7 @@ struct Popup {
     void UpdateAcrylic(AcrylicMode selected){
         mode=selected;
         for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayToggleCommand){
-            rows[i].secondary=AcrylicModeName(mode);
+            rows[i].secondary=AcrylicModeLabel(mode);
             if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
             RepaintRow(static_cast<int>(i));
         }
@@ -275,7 +279,7 @@ struct Popup {
         if(kind==TrayTaskbarCommand){
             const auto state=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,0,0));
             for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayAutoHideCommand){
-                auto& row=rows[i];row.secondary=(state&1)?L"on":L"off";row.enabled=(state&2)!=0;
+                auto& row=rows[i];row.secondary=(state&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(state&2)!=0;
                 if(i<buttons.size()){SetWindowTextW(buttons[i],(row.label+L", "+row.secondary).c_str());EnableWindow(buttons[i],row.enabled);}
                 RepaintRow(static_cast<int>(i));
             }
@@ -335,7 +339,7 @@ struct Popup {
                 RepaintRow(static_cast<int>(i));
             }
             for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayWallpaperThemeCommand){
-                rows[i].secondary=wallpaperAuto?L"auto":L"system";
+                rows[i].secondary=wallpaperAuto?Tr(TextId::Auto):Tr(TextId::System);
                 if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
                 RepaintRow(static_cast<int>(i));
             }
@@ -368,8 +372,8 @@ struct Popup {
                 auto& row = rows[i];
                 if (row.command != TrayCursorCommand && row.command != TrayCursorUnlockCommand) continue;
                 row.command = hasCursorPack ? TrayCursorCommand : TrayCursorUnlockCommand;
-                row.label = hasCursorPack ? L"cursor" : L"colors";
-                row.secondary = hasCursorPack ? L"" : L"unlock";
+                row.label = hasCursorPack ? Tr(TextId::Cursor) : Tr(TextId::Colors);
+                row.secondary = hasCursorPack ? L"" : Tr(TextId::Unlock);
                 if (i < buttons.size()) {
                     SetWindowLongPtrW(buttons[i], GWLP_ID, row.command);
                     SetWindowTextW(buttons[i], (row.label + (row.secondary.empty() ? L"" : L", " + row.secondary)).c_str());
@@ -444,9 +448,9 @@ struct Popup {
                     autoSelected?IDI_SUNSET_DARK:systemLight?IDI_SUN_DARK:IDI_MOON_DARK))return false;
             RefreshCursorIcon();
             for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayThemeCommand){
-                rows[i].label=L"system";
-                rows[i].secondary=autoSelected?L"auto":automatic==AutoThemeStatus::Denied?L"location off"
-                    :automatic==AutoThemeStatus::Unavailable?L"no location":automatic==AutoThemeStatus::Error?L"try again":systemLight?L"light":L"dark";
+                rows[i].label=Tr(TextId::System);
+                rows[i].secondary=autoSelected?Tr(TextId::Auto):automatic==AutoThemeStatus::Denied?Tr(TextId::LocationOff)
+                    :automatic==AutoThemeStatus::Unavailable?Tr(TextId::NoLocation):automatic==AutoThemeStatus::Error?Tr(TextId::TryAgain):systemLight?Tr(TextId::Light):Tr(TextId::Dark);
                 if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
             }
         }else if(kind==TrayTaskbarCommand){
@@ -624,6 +628,7 @@ struct Popup {
         }
         if (hovered == index && !keyboard) return;
         const int previous=hovered;hovered = index;
+        KillTimer(window,TextTickerTimer);tickerActive=false;tickerStarted=GetTickCount64();
         keyboard = false;
         RepaintRow(previous);RepaintRow(index);
         KillTimer(window, HoverTimer);
@@ -703,10 +708,17 @@ struct Popup {
         }
         return false;
     }
-    void DrawLabel(HDC dc, RECT bounds, const std::wstring& label, COLORREF ink, UINT flags) {
-        if(!menuText.Draw(dc,bounds,label,ink,flags)) {
+    void DrawLabel(HDC dc, RECT bounds, const std::wstring& label, COLORREF ink, UINT flags, bool hover=false, ULONGLONG frameTime=0) {
+        if(bounds.right<=bounds.left)return;
+        const int overflow=menuText.Width(label)-(bounds.right-bounds.left);
+        float offset=0;
+        if(overflow>0 && hover && tickerMotion && !highContrast){
+            if(!tickerActive){if(!tickerStarted)tickerStarted=frameTime;tickerActive=SetTimer(window,TextTickerTimer,33,nullptr)!=0;}
+            offset=MenuTickerOffset(frameTime-tickerStarted,overflow,Px(28));
+        }
+        if(!menuText.Draw(dc,bounds,label,ink,flags,offset,overflow>0 && !highContrast?Px(12):0)) {
             ++textFallbacks;
-            MenuSurface::Text(dc,bounds,label,font,ink,flags);
+            MenuSurface::Text(dc,bounds,label,font,ink,flags|DT_END_ELLIPSIS);
         }
     }
     COLORREF LabelInk(const Row& row, bool highlighted) const {
@@ -736,16 +748,23 @@ struct Popup {
         SetTextColor(item.hDC, ink);
         RECT bounds = item.rcItem;
         bounds.left += Px(34);
-        bounds.right -= Px(24);
+        bounds.right -= Px(HasSubmenu(row.command) || row.command==TrayGithubCommand?12+MenuGlyphSize+12:12);
+        bool rowOverflows=false;
         if (!row.secondary.empty()) {
             RECT status = item.rcItem; status.right -= Px(12);
             const int statusWidth=menuText.Width(row.secondary);
             SIZE fallback{};if(!statusWidth) GetTextExtentPoint32W(item.hDC,row.secondary.c_str(),static_cast<int>(row.secondary.size()),&fallback);
-            status.left = status.right - (statusWidth?statusWidth:fallback.cx);
-            DrawLabel(item.hDC, status, row.secondary, row.enabled?SecondaryInk(highlighted):LabelInk(row,false), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            // Reserve room for the primary label even on a narrow work area.
+            const int available=std::max<int>(0,status.right-bounds.left-Px(12));
+            const int statusLimit=std::max(0,available-std::min(menuText.Width(row.label),available/2));
+            status.left=status.right-std::min<int>(statusWidth?statusWidth:fallback.cx,statusLimit);
+            rowOverflows=(statusWidth?statusWidth:fallback.cx)>statusLimit;
+            DrawLabel(item.hDC, status, row.secondary, row.enabled?SecondaryInk(highlighted):LabelInk(row,false), DT_RIGHT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,hovered==index && !keyboard,frameTime);
             bounds.right = std::min(bounds.right, status.left - Px(12));
         }
-        DrawLabel(item.hDC, bounds, row.label, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+        DrawLabel(item.hDC, bounds, row.label, ink, DT_LEFT | DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,hovered==index && !keyboard,frameTime);
+        rowOverflows|=menuText.Width(row.label)>bounds.right-bounds.left;
+        if(hovered==index && tickerActive && (!rowOverflows || highContrast || !tickerMotion)){KillTimer(window,TextTickerTimer);tickerActive=false;}
         // Font line boxes include unused space. Align every glyph to the
         // label's visible ink instead, using the selected font at this DPI.
         const int cy = menuText.InkCenter(row.label,bounds);
@@ -821,6 +840,7 @@ struct Popup {
     }
     bool Create(HWND owner, POINT anchor, bool submenu) {
         if (!UpdateTheme(systemLight)) return false;
+        tickerMotion=MenuAnimationsEnabled();
         font = CreateSystemMenuFont(dpi);
         if (!background || !highlight || !separator || !font) return false;
         menuText.Initialize(font); // GDI remains a readable fallback if graphics initialization fails.
@@ -833,10 +853,18 @@ struct Popup {
         int width = Px(parent ? 228 : 296);
         // Reserve the longest status, using the inherited Windows font at this
         // DPI rather than squeezing a new long label into a fixed submenu.
-        if (kind == TrayWallpaperMenuCommand) for(const auto label:WallpaperErrorLabels)
+        if (kind == TrayWallpaperMenuCommand) for(const auto label:WallpaperStatusLabels())
             width = std::max(width, menuText.Width(L"jellyflower")
                 + menuText.Width(label) + 2 * Px(Padding) + Px(34) + 2 * Px(12));
-        if(kind==TrayGeneralCommand)width=std::max(width,menuText.Width(std::wstring(L"v")+AppVersion)+menuText.Width(L"downloading...")+2*Px(Padding)+Px(34)+2*Px(12));
+        if(kind==TrayGeneralCommand)width=std::max(width,menuText.Width(std::wstring(L"v")+AppVersion)+menuText.Width(Tr(TextId::Downloading))+2*Px(Padding)+Px(34)+2*Px(12));
+        const int chrome=2*Px(Padding)+Px(34)+Px(12)+Px(24);
+        for(const auto& row:rows)
+            width=std::max(width,menuText.Width(row.label)+menuText.Width(row.secondary)+chrome);
+        if(!parent)for(const auto id:{TextId::LocationOff,TextId::NoLocation,TextId::Light,TextId::Dark,TextId::Auto,TextId::TryAgain})
+            width=std::max(width,menuText.Width(Tr(TextId::System))+menuText.Width(Tr(id))+chrome);
+        if(kind==TrayGeneralCommand)for(const auto status:{UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing})
+            width=std::max(width,menuText.Width(std::wstring(L"v")+AppVersion)+menuText.Width(UpdateStatusLabel(status))+chrome);
+        width=std::min(width,static_cast<int>(area.right-area.left));
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
@@ -850,7 +878,7 @@ struct Popup {
         const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(MenuEdgeGap), area.top,
             std::max(area.top, area.bottom - height));
         restingBounds = {x, y, x + width, y + height};
-        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? L"cursor" : kind == TrayGeneralCommand ? L"general" : kind==TrayTaskbarCommand?L"taskbar":kind==TrayWallpaperMenuCommand?L"wallpaper":L"jellyflower",
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? Tr(TextId::Cursor) : kind == TrayGeneralCommand ? Tr(TextId::General) : kind==TrayTaskbarCommand?Tr(TextId::Taskbar):kind==TrayWallpaperMenuCommand?Tr(TextId::Wallpaper):L"jellyflower",
             WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;
@@ -957,6 +985,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     case WM_TIMER:
         if (wParam == EntranceTimer) {
             popup->AdvanceEntrance(GetTickCount64());
+        } else if(wParam==TextTickerTimer){
+            if(popup->hovered>=0 && !popup->keyboard && !popup->closing && IsWindowVisible(window))popup->RepaintRow(popup->hovered);
+            else {KillTimer(window,TextTickerTimer);popup->tickerActive=false;}
         } else if (wParam == ColorPreviewTimer) {
             ++popup->colorFrame;
             popup->RepaintCommand(TrayCursorUnlockCommand);
@@ -991,7 +1022,9 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_SETTINGCHANGE: case WM_THEMECHANGED: {
         auto* root = popup->Root();
-        if (!MenuAnimationsEnabled()) root->CompleteEntrance();
+        popup->tickerMotion=MenuAnimationsEnabled();
+        if(!popup->tickerMotion){KillTimer(window,TextTickerTimer);popup->tickerActive=false;}
+        if (!popup->tickerMotion) root->CompleteEntrance();
         if (!root->done) root->UpdateTheme(SendMessageW(root->controller, TrayThemeQueryMessage, 0, 0) != 0);
         return 0;
     }
@@ -1017,12 +1050,16 @@ void RefreshTaskbarMenu(HWND owner){
 void RefreshCursorMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done) activePopup->RefreshCursors();
 }
+void RefreshLanguageMenu(HWND owner) {
+    if(activePopup && activePopup->controller==owner)activePopup->Finish();
+}
 void RefreshThemeMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done)
         activePopup->UpdateTheme(SendMessageW(owner, TrayThemeQueryMessage, 0, 0) != 0);
 }
 UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode, const RECT& trayBounds) {
     if (activePopup) { activePopup->Finish(); return 0; }
+    if(RefreshLanguage())PostMessageW(owner,SearchIdentityReadyMessage,0,0);
     WNDCLASSW wc{};
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpfnWndProc = PopupProc;

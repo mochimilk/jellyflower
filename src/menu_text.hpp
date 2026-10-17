@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "menu_surface.hpp"
+#include "menu_overflow.hpp"
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -80,21 +81,25 @@ public:
             return bounds.top+static_cast<int>(std::lround((height-ink.top+ink.bottom)/2));
         return (bounds.top+bounds.bottom)/2;
     }
-    bool Draw(HDC destination, const RECT& bounds, const std::wstring& text, COLORREF color, UINT flags) {
+    bool Draw(HDC destination, const RECT& bounds, const std::wstring& text, COLORREF color, UINT flags, float offset=0, int fade=0) {
         const LONG width=bounds.right-bounds.left,height=bounds.bottom-bounds.top;
         if(width<=0 || height<=0 || text.empty()) return true;
-        const auto layout=Layout(text,static_cast<float>(width),static_cast<float>(height),flags);
+        const int naturalWidth=fade?Width(text):width;
+        const auto layout=Layout(text,static_cast<float>(std::max<LONG>(width,naturalWidth)),static_cast<float>(height),fade?flags&~DT_RIGHT:flags);
         if(!layout || !Target()) return false;
         const RECT local{0,0,width,height};MenuSurface layer(destination,local,false);
         if(!layer.pixels || FAILED(target_->BindDC(layer.Dc(),&local))) return false;
         brush_->SetColor(D2D1::ColorF(GetRValue(color)/255.0f,GetGValue(color)/255.0f,GetBValue(color)/255.0f));
         target_->BeginDraw();target_->Clear(D2D1::ColorF(0,0));
-        target_->DrawTextLayout(D2D1::Point2F(),layout.Get(),brush_.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        target_->PushAxisAlignedClip(D2D1::RectF(0,0,static_cast<float>(width),static_cast<float>(height)),D2D1_ANTIALIAS_MODE_ALIASED);
+        target_->DrawTextLayout(D2D1::Point2F(-offset,0),layout.Get(),brush_.Get(),D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        target_->PopAxisAlignedClip();
         const auto result=target_->EndDraw();
         if(FAILED(result)) {
             if(result==D2DERR_RECREATE_TARGET) {brush_.Reset();target_.Reset();}
             return false;
         }
+        if(fade)FadeMenuText(layer.pixels,width,height,fade,offset>0,naturalWidth-offset>width+.5f);
         const BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
         const bool copied=AlphaBlend(destination,bounds.left,bounds.top,width,height,layer.Dc(),0,0,width,height,blend)!=FALSE;
         GdiFlush();return copied;

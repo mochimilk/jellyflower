@@ -317,7 +317,7 @@ void Compositor(HWND controller,const std::filesystem::path& destination) {
     }
 }
 }
-int wmain(int argc,wchar_t** argv) {
+int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language::English);
     try {
         Check(argc==2 || argc==3,"output directory argument");SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         std::filesystem::create_directories(argv[1]);
@@ -356,7 +356,7 @@ int wmain(int argc,wchar_t** argv) {
             popup.OpenChild(1,true);auto& taskbar=*popup.child;const HWND taskbarWindow=taskbar.window;
             Check(taskbar.rows.size()==3 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayAutoHideCommand,"taskbar order is acrylic, date, auto hide");
             Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.dateIcons[0] && taskbar.dateIcons[1],"taskbar submenu owns its themed setting icons");
-            for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeName(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
+            for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeLabel(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
             taskbar.Activate(1,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && taskbar.rows[1].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
             taskbar.Activate(1,false);Check(dateEnabled && popup.clockDate && taskbar.clockDate && taskbar.rows[1].secondary==L"on","nested date on persists in the existing branch");
             Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"bottom taskbar enables auto hide");
@@ -377,7 +377,7 @@ int wmain(int argc,wchar_t** argv) {
             wallpapers.Activate(1,false);Check(!wallpaperAutomatic && wallpapers.rows[1].secondary==L"system" && wallpapers.window==wallpaperWindow,"wallpaper theme cycles between system and auto in place");
             wallpaperState=WallpaperStatus::ErrorOn;wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"error 80004005" && IsWindowEnabled(wallpapers.buttons[0]),"unknown error retains inline code and retry");
             RECT wallpaperBounds{};GetClientRect(wallpapers.buttons[0],&wallpaperBounds);
-            for(const auto label:WallpaperErrorLabels)Check(wallpapers.menuText.Width(L"jellyflower")+wallpapers.menuText.Width(label)+wallpapers.Px(34)+2*wallpapers.Px(12)<=wallpaperBounds.right,"wallpaper error statuses fit at every DPI");
+            for(const auto label:WallpaperStatusLabels())Check(wallpapers.menuText.Width(L"jellyflower")+wallpapers.menuText.Width(label)+wallpapers.Px(34)+2*wallpapers.Px(12)<=wallpaperBounds.right,"wallpaper error statuses fit at every DPI");
             wallpaperError=HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"image missing","missing image remains readable in the new submenu");
             wallpaperError=E_ACCESSDENIED;wallpapers.RefreshWallpaper();Check(wallpapers.rows[0].secondary==L"not allowed","permission error remains inline");wallpaperError=E_FAIL;
             wallpaperState=WallpaperStatus::Off;wallpapers.RefreshWallpaper();
@@ -507,6 +507,34 @@ int wmain(int argc,wchar_t** argv) {
             Popup nested;nested.parent=&edge;nested.controller=controller;nested.dpi=dpi;nested.rows=CursorRows(1u<<CursorDisabled,CursorDisabled);
             Check(nested.Create(edge.window,{rect.right,rect.top},true),"nested edge popup created");nested.BeginEntrance();Check(!nested.entering,"nested hover menu does not repeat root entrance");
         }
+        for(const auto language:{Language::French,Language::Korean})for(const bool localLight:{false,true})for(const UINT localDpi:{96u,120u,144u,168u,192u}){
+            SetTextLanguage(language);light=localLight;automatic=AutoThemeStatus::Manual;state=UpdateStatus::Idle;wallpaperState=WallpaperStatus::Off;
+            Popup local;local.controller=controller;local.dpi=localDpi;local.systemLight=light;local.rows=RootRows(light,1u<<CursorDisabled);
+            Check(local.Create(controller,{800,800},false),"localized root creates with inherited Windows font");
+            auto fits=[](Popup& menu){for(size_t i=0;i<menu.rows.size();++i){RECT bounds{};GetClientRect(menu.buttons[i],&bounds);const auto& row=menu.rows[i];Check(menu.menuText.Width(row.label)+menu.menuText.Width(row.secondary)+menu.Px(34)+menu.Px(24)<=bounds.right,"localized primary/secondary text fit each DPI");}};
+            fits(local);
+            const auto suffix=std::wstring(language==Language::French?L"fr-":L"ko-")+(light?L"light-":L"dark-")+std::to_wstring(localDpi)+L".bmp";
+            Capture(local,std::filesystem::path(argv[1])/(L"localized-root-"+suffix));
+            local.Activate(1,true);Check(local.child && local.child->rows[2].label==Tr(TextId::AutoHide),"translated taskbar submenu");fits(*local.child);
+            Capture(*local.child,std::filesystem::path(argv[1])/(L"localized-taskbar-"+suffix));
+            local.CloseChild(false);local.Activate(2,true);fits(*local.child);
+            for(const auto id:{TextId::TryAgain,TextId::ImageMissing,TextId::NotAllowed,TextId::FileInUse,TextId::StorageFull,TextId::ImageTooLarge,TextId::BackupIssue}){local.child->rows[0].secondary=Tr(id);fits(*local.child);}
+            local.CloseChild(false);local.Activate(4,true);
+            for(const auto status:{UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing}){state=status;local.RefreshUpdate();fits(*local.child);}
+            local.child->rows[0].label=L"a deliberately long overflowing menu label that needs a hover ticker";
+            local.child->tickerMotion=true;local.child->Hover(0);local.child->hovered=-1;local.child->RepaintRow(0);
+            Capture(*local.child,std::filesystem::path(argv[1])/(L"overflow-fade-"+suffix));
+            local.child->Hover(0);Capture(*local.child,std::filesystem::path(argv[1])/(L"overflow-start-"+suffix));
+            Check(local.child->tickerActive,"overflow starts a hover-only timer");
+            local.child->tickerStarted=GetTickCount64()-3000;Capture(*local.child,std::filesystem::path(argv[1])/(L"overflow-scroll-"+suffix));
+            local.child->Hover(-1);Check(!local.child->tickerActive,"leaving row stops ticker timer");
+            local.child->Hover(0);local.child->rows[0].label=L"github";Capture(*local.child,std::filesystem::path(argv[1])/(L"overflow-fit-"+suffix));
+            Check(!local.child->tickerActive,"a label becoming short stops its timer without pointer exit");
+            local.child->rows[0].label=L"a deliberately long overflowing menu label that needs a hover ticker";local.child->tickerMotion=false;
+            Capture(*local.child,std::filesystem::path(argv[1])/(L"overflow-reduced-motion-"+suffix));Check(!local.child->tickerActive,"reduced motion keeps overflow still");
+
+        }
+        SetTextLanguage(Language::English);
         if(argc==3 && wcscmp(argv[2],L"--compositor")==0) Compositor(controller,argv[1]);
         DestroyWindow(controller);
         std::cout<<"PASS: Windows menu typography at 96/120/144/168/192 DPI in both themes; native DirectWrite alpha/ink alignment, taskbar/date/auto-hide and independent wallpaper submenus, general submenu/update propagation/spinner frames/red exit, branch switching, acrylic/fallback, cursor actions and keyboard selection.\n";

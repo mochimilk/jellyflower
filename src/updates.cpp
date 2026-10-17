@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "localization.hpp"
 #include "updates.hpp"
 #include "version.hpp"
 #include "update_download.hpp"
@@ -122,13 +123,13 @@ UpdateResult CheckForUpdates() {
 }
 const wchar_t* UpdateStatusLabel(UpdateStatus status) noexcept {
     switch (status) {
-    case UpdateStatus::Checking: return L"checking...";
-    case UpdateStatus::Downloading: return L"downloading...";
-    case UpdateStatus::Ready: case UpdateStatus::Installing: return L"installing...";
-    case UpdateStatus::Current: return L"up to date";
-    case UpdateStatus::Available: return L"download";
-    case UpdateStatus::NoRelease: return L"no release yet";
-    case UpdateStatus::Error: return L"try again";
+    case UpdateStatus::Checking: return Tr(TextId::Checking);
+    case UpdateStatus::Downloading: return Tr(TextId::Downloading);
+    case UpdateStatus::Ready: case UpdateStatus::Installing: return Tr(TextId::Installing);
+    case UpdateStatus::Current: return Tr(TextId::UpToDate);
+    case UpdateStatus::Available: return Tr(TextId::Download);
+    case UpdateStatus::NoRelease: return Tr(TextId::NoRelease);
+    case UpdateStatus::Error: return Tr(TextId::TryAgain);
     default: return L"";
     }
 }

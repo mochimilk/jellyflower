@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "tray.hpp"
+#include "localization.hpp"
 #include "popup.hpp"
 #include "theme.hpp"
 #include "resource.h"
@@ -46,9 +47,10 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode) {
     if(window_!=owner){Remove();brandTheme_=-1;}
     window_ = owner;
     const bool light = LightTaskbar();
-    if (brandTheme_ != static_cast<int>(light)) {
+    const auto language=GetLanguage();
+    if (brandTheme_ != static_cast<int>(light) || brandLanguage_!=language) {
         RefreshAppBranding(owner, light);
-        brandTheme_ = static_cast<int>(light);
+        brandTheme_ = static_cast<int>(light);brandLanguage_=language;
     }
     const int resource = light ? IDI_TRAY_LIGHT : IDI_TRAY_DARK;
     const HWND taskbar = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -67,12 +69,19 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode) {
     // Re-sending NIF_ICON replaces Explorer's bitmap even when the HICON is
     // unchanged. Keep routine foreground/recovery refreshes presentation-free.
     // TaskbarCreated explicitly clears present_ through ShellRestarted().
-    if(present_ && !artworkChanged)return;
+    if(present_ && !artworkChanged && tipLanguage_==language)return;
+    if(present_ && !artworkChanged){
+        auto tip=Data(owner);tip.uFlags|=NIF_TIP|NIF_SHOWTIP;
+        wcsncpy_s(tip.szTip,Tr(TextId::TrayTip),_TRUNCATE);
+        if(Shell_NotifyIconW(NIM_MODIFY,&tip)){tipLanguage_=language;return;}
+        present_=false;
+    }
     auto data = Data(owner);
     data.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     data.uCallbackMessage = TrayMessage;
     data.hIcon = icon_;
-    wcscpy_s(data.szTip, L"ur cute :3");
+    wcsncpy_s(data.szTip,Tr(TextId::TrayTip),_TRUNCATE);
+    tipLanguage_=language;
     if (Shell_NotifyIconW(NIM_MODIFY, &data)) {
         present_ = true;
         return;
@@ -87,27 +96,26 @@ void TrayIcon::CursorError(DWORD error, bool saveFailure) const {
     auto data = Data(window_);
     data.uFlags |= NIF_INFO;
     data.dwInfoFlags = NIIF_WARNING;
-    wcscpy_s(data.szInfoTitle, saveFailure ? L"cursor preference could not be saved" : L"cursor could not be changed");
-    swprintf_s(data.szInfo, error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND
-        ? L"Choose cursor > unlock colors for ZIP download and import instructions. Windows error: %lu."
-        : L"Windows denied the operation or could not load this cursor. Use your normal Windows desktop session. Windows error: %lu.", error);
+    wcsncpy_s(data.szInfoTitle,Tr(saveFailure?TextId::CursorSaveError:TextId::CursorChangeError),_TRUNCATE);
+    const auto body=Text(error==ERROR_FILE_NOT_FOUND || error==ERROR_PATH_NOT_FOUND?TextId::CursorMissingBody:TextId::CursorDeniedBody,{{L"error",std::to_wstring(error)}});
+    wcsncpy_s(data.szInfo,body.c_str(),_TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 void TrayIcon::ThemeError(DWORD error, bool partial, bool notification) const {
     auto data = Data(window_);
     data.uFlags |= NIF_INFO;
     data.dwInfoFlags = NIIF_WARNING;
-    wcscpy_s(data.szInfoTitle, notification ? L"theme changed; apps could not be notified" : L"windows mode could not be changed");
-    swprintf_s(data.szInfo, partial ? L"The system and app modes may differ. Check Windows Settings > Personalization > Colors. Windows error: %lu."
-        : notification ? L"The preference was saved. Some apps may need to be reopened. Windows error: %lu."
-        : L"Windows could not save the preference. Check Windows Settings > Personalization > Colors. Windows error: %lu.", error);
+    wcsncpy_s(data.szInfoTitle,Tr(notification?TextId::ThemeNotifyError:TextId::ThemeChangeError),_TRUNCATE);
+    const auto body=Text(partial?TextId::ThemePartialBody:notification?TextId::ThemeNotifyBody:TextId::ThemeSaveBody,{{L"error",std::to_wstring(error)}});
+    wcsncpy_s(data.szInfo,body.c_str(),_TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 void TrayIcon::DateError(DWORD error) const {
     auto data = Data(window_);
     data.uFlags |= NIF_INFO; data.dwInfoFlags = NIIF_WARNING;
-    wcscpy_s(data.szInfoTitle, L"date setting could not be saved");
-    swprintf_s(data.szInfo, L"Windows denied saving the date preference. Your previous choice is unchanged. Windows error: %lu.", error);
+    wcsncpy_s(data.szInfoTitle,Tr(TextId::DateSaveError),_TRUNCATE);
+    const auto body=Text(TextId::DateSaveBody,{{L"error",std::to_wstring(error)}});
+    wcsncpy_s(data.szInfo,body.c_str(),_TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 void TrayIcon::UpdateNotice(const wchar_t* title, const wchar_t* body, bool error) const {

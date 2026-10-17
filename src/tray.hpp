@@ -45,6 +45,7 @@ private:
     HICON icon_ = nullptr;
     bool present_ = false;
     int resource_ = 0, pixels_ = 0;
+    Language tipLanguage_=Language::Count,brandLanguage_=Language::Count;
     int brandTheme_ = -1;
 };
 } // namespace acrylic

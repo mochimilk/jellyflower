@@ -327,7 +327,7 @@ public:
             const auto slash = path.find_last_of(L'\\');
             if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
             path.resize(slash + 1);
-            path += L"jellyflower-bridge-v17.dll";
+            path += L"jellyflower-bridge-v18.dll";
             bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
         }
@@ -376,9 +376,9 @@ public:
         DWORD importError = 0;
         if (cursors->TakeImportResult(importError)) {
             Log(L"Cursor ZIP import error=" + std::to_wstring(importError));
-            if (importError) tray.UpdateNotice(L"cursor zip could not be imported",
-                L"Use the original, complete Cursor Concept 3 HDPi ZIP. Choose colors / unlock for instructions. Your current cursor is unchanged.", true);
-            else tray.UpdateNotice(L"cursor colors unlocked", L"Your pack is ready. Open cursor to choose a color or follow Windows light/dark mode.");
+            if (importError) tray.UpdateNotice(Tr(TextId::ImportError),
+                Tr(TextId::ImportErrorBody), true);
+            else tray.UpdateNotice(Tr(TextId::ImportReady), Tr(TextId::ImportReadyBody));
             RefreshCursorMenu(window);
         }
         if (cursors->Error() != cursorBefore && cursors->Error()) {
@@ -601,7 +601,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         if (wParam == TrayCursorUnlockCommand) {
             const DWORD error = OpenCursorGuide();
-            if (error) self->tray.UpdateNotice(L"cursor guide could not be opened", L"The cursor files folder could not be created or opened. Check your account's folder permissions.", true);
+            if (error) self->tray.UpdateNotice(Tr(TextId::GuideError), Tr(TextId::GuideErrorBody), true);
             return self->cursors->Mode();
         }
         if (wParam == TrayUpdateCommand) {
@@ -664,7 +664,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == self->taskbarCreated || message == WM_DISPLAYCHANGE
         || message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DWMCOMPOSITIONCHANGED
         || message == WM_DPICHANGED) {
-        if (message == WM_SETTINGCHANGE) self->RefreshAutoTheme();
+        if (message == WM_SETTINGCHANGE) {
+            if(RefreshLanguage()) { RefreshLanguageMenu(window); self->tray.Refresh(window,self->mode); }
+            self->RefreshAutoTheme();
+        }
         if (self->wallpaper && (message == WM_SETTINGCHANGE || message == WM_THEMECHANGED || message == WM_DISPLAYCHANGE))
             self->RefreshWallpaperTheme(false,false,message==WM_SETTINGCHANGE || message==WM_DISPLAYCHANGE);
         RefreshTaskbarMenu(window);

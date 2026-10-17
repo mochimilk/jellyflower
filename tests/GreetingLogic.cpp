@@ -8,7 +8,7 @@ void Check(bool yes,const char* text){if(!yes)throw std::runtime_error(text);}
 unsigned readyMessages=0;
 LRESULT CALLBACK ReadyWindow(HWND window,UINT message,WPARAM w,LPARAM l){if(message==SearchIdentityReadyMessage){++readyMessages;return 0;}return DefWindowProcW(window,message,w,l);}
 void Pump(){MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}}
-int main(int argc,char** argv){try{
+int main(int argc,char** argv){ acrylic::SetTextLanguage(acrylic::Language::English);try{
     for(unsigned hour=0;hour<24;++hour){const unsigned expected=hour<5 || hour>=18?2:hour<12?0:1;Check(SearchGreetingPeriod(hour)==expected,"every local-clock hour selects the intended greeting");}
     Check(SearchGreeting(L"Jelly",0)==L"Good morning, Jelly \U0001f90d","morning white heart");
     Check(SearchGreeting(L"Jelly",1)==L"Good afternoon, Jelly \U0001f9f8","afternoon teddy bear");

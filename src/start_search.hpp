@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include "localization.hpp"
 #include "start_properties.hpp"
 #include "start_metrics.hpp"
 #include "search_art.hpp"
@@ -112,7 +113,7 @@ public:
     StartSearch(const StartSearch&) = delete;
     StartSearch& operator=(const StartSearch&) = delete;
     ~StartSearch() { Restore(); }
-    void Refresh(bool enabled, bool light, std::wstring_view text=L"Search") {
+    void Refresh(bool enabled, bool light, std::wstring_view text=Tr(TextId::Search)) {
         if (!enabled) { Restore(); return; }
         if (!Discover()) { if (applied_) Restore(); return; }
         if (!heading_.get()) heading_ = FindStartElement(pane_, L"PinnedListHeaderText");
@@ -132,7 +133,7 @@ public:
                 values_.Set(outline_, sx::Controls::Border::BorderBrushProperty(), clear);
                 values_.Set(outline_, sx::Controls::Border::BorderThicknessProperty(), winrt::box_value(sx::Thickness{}));
                 values_.Set(placeholder_, sx::Controls::TextBlock::TextProperty(), winrt::box_value(placeholderText_));
-                values_.Set(button_, sx::Automation::AutomationProperties::NameProperty(), winrt::box_value(L"search"));
+                values_.Set(button_, sx::Automation::AutomationProperties::NameProperty(), winrt::box_value(Tr(TextId::Search)));
                 for (const auto name : {L"SearchGlyph",L"SearchIconOff",L"SearchIconOn",L"UnderlineContainer",L"BorderUnderline"})
                     if (const auto element = FindStartElement(template_, name)) values_.Set(element, sx::UIElement::OpacityProperty(), winrt::box_value(0.0));
                 textShift_ = Shift(presenter_);
@@ -147,7 +148,10 @@ public:
                 layout_ = button_.LayoutUpdated([this](auto&&, auto&&) { Position(); });
             } catch (...) { Restore(); throw; }
         }
-        if(textChanged)values_.Update(placeholder_,sx::Controls::TextBlock::TextProperty(),winrt::box_value(placeholderText_));
+        if(textChanged){
+            values_.Update(placeholder_,sx::Controls::TextBlock::TextProperty(),winrt::box_value(placeholderText_));
+            values_.Update(button_,sx::Automation::AutomationProperties::NameProperty(),winrt::box_value(Tr(TextId::Search)));
+        }
         Ink(); Position();
     }
     void Restore() noexcept {

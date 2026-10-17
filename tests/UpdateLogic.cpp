@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../src/updates.hpp"
+#include "../src/localization.hpp"
 #include "../src/update_download.hpp"
 #include <winrt/base.h>
 #include <iostream>
@@ -11,7 +12,7 @@ std::string Release(const std::string& tag, const std::string& architecture = "x
     return "{\"tag_name\":\"" + tag + "\",\"draft\":false,\"prerelease\":false,\"assets\":[{\"name\":\"jellyflower-setup-" + architecture
         + ".exe\",\"state\":\"uploaded\",\"size\":123,\"digest\":\"sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\",\"browser_download_url\":\"" + host + "/releases/download/" + tag + "/jellyflower-setup-" + architecture + ".exe\"}]}";
 }
-int wmain(int argc, wchar_t** argv) {
+int wmain(int argc, wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language::English);
     try {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         struct Apartment { ~Apartment() { winrt::uninit_apartment(); } } apartment;

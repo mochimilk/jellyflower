@@ -2,6 +2,8 @@
 
 [Back to the overview](../README.md)
 
+Menus, greetings, help and installer messages follow your Windows display language in English, French or Korean. [Language behavior and testing](LOCALIZATION.md). The clock follows Windows regional date/time settings.
+
 ## Download and install
 
 Download [jellyflower-setup-x64.exe](https://github.com/mochimilk/jellyflower/releases/latest/download/jellyflower-setup-x64.exe) from [GitHub Releases](https://github.com/mochimilk/jellyflower/releases), then double-click it. No compiler, PowerShell commands, administrator rights, or runtime download is required.
@@ -74,7 +76,7 @@ No cursor pack files are distributed in the app or source archive, or installed 
 
 Releases are hosted at [mochimilk/jellyflower](https://github.com/mochimilk/jellyflower/releases). Checks happen only when requested and run in the background. The menu reports results without system notifications. An available update uses an open package; selecting it downloads and verifies the native installer, then quietly replaces and relaunches the app. The spinner stays animated during checking/downloading/installing. No browser, administrator rights, account, or token is needed. Saved preferences and your cursor pack survive. A failed download leaves the running app alone; setup retains the previous files and attempts to restore registration/relaunch on an installation failure. See [UPDATES.md](UPDATES.md).
 
-Each setup stages a separate version folder before stopping the old controller. Windows pins the Explorer helper until Explorer exits; keep old version folders until then. Controller/menu-only changes take effect immediately. The current Explorer helper is v17. Normally stopped v15/v16 helpers are restored before the new helper attaches, so those upgrades do not need an Explorer restart. Live or unknown incompatible helpers remain guarded and may require signing out and back in. Start/Search uses its separate v19 helper. A normal installer displays the reminder when needed; in-app updates never restart Explorer. The replacement briefly restores the shell while the old controller exits. Setup releases its installation lock before displaying completion, fixing false Windows error 170 on subsequent updates.
+Each setup stages a separate version folder before stopping the old controller. Windows pins the Explorer helper until Explorer exits; keep old version folders until then. Controller/menu-only changes take effect immediately. The current Explorer helper is v18. Normally stopped v15/v16/v17 helpers are restored before the new helper attaches, allowing compatible upgrades without forcing an Explorer restart. Windows can still retain an old diagnostics connection; sign out and back in once if taskbar styling remains unapplied after updating. Live or unknown incompatible helpers remain guarded and may require signing out and back in. Start/Search uses its separate v20 helper. A normal installer displays the reminder when needed; in-app updates never restart Explorer. The replacement briefly restores the shell while the old controller exits. Setup releases its installation lock before displaying completion, fixing false Windows error 170 on subsequent updates.
 
 ## jellyflower wallpaper
 

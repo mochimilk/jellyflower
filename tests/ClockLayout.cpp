@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include <unknwn.h>
 #include "../src/clock.hpp"
+#include "../src/clock_text.hpp"
 #include <windows.ui.xaml.hosting.desktopwindowxamlsource.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>
@@ -35,17 +36,17 @@ controls::TextBlock Line(const controls::StackPanel& panel) {
 }
 void Run() {
     SYSTEMTIME sample{2026, 6, 1, 22, 9, 41, 0, 0};
-    Check(acrylic::FormatClock(sample) == L"Mon Jun 22  9:41 am", "screenshot format with lowercase am");
-    Check(acrylic::FormatClock(sample, false) == L"9:41 am", "date off");
+    Check(acrylic::LocalizedClock(sample,true,L"en-US") == L"Mon Jun 22  9:41 am", "screenshot format with lowercase am");
+    Check(acrylic::LocalizedClock(sample, false,L"en-US") == L"9:41 am", "date off");
     sample.wHour = 0; sample.wMinute = 5;
-    Check(acrylic::FormatClock(sample) == L"Mon Jun 22  12:05 am", "midnight");
+    Check(acrylic::LocalizedClock(sample,true,L"en-US") == L"Mon Jun 22  12:05 am", "midnight");
     sample.wHour = 12;
-    Check(acrylic::FormatClock(sample) == L"Mon Jun 22  12:05 pm", "noon");
+    Check(acrylic::LocalizedClock(sample,true,L"en-US") == L"Mon Jun 22  12:05 pm", "noon");
     sample.wHour = 23; sample.wMonth = 12; sample.wDay = 1; sample.wDayOfWeek = 0;
-    Check(acrylic::FormatClock(sample) == L"Sun Dec 1  11:05 pm", "day/month/hour without leading zero");
+    Check(acrylic::LocalizedClock(sample,true,L"en-US") == L"Tue Dec 1  11:05 pm", "day/month/hour without leading zero");
     sample.wMonth = 0;
-    Check(acrylic::FormatClock(sample).empty(), "invalid calendar input");
-    Check(acrylic::FormatClock(sample, false) == L"11:05 pm", "time-only ignores unused calendar fields");
+    Check(acrylic::LocalizedClock(sample,true,L"en-US").empty(), "invalid calendar input");
+    Check(acrylic::LocalizedClock(sample, false,L"en-US") == L"11:05 pm", "time-only ignores unused calendar fields");
     const HWND host = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, L"STATIC", L"Clock layout test",
         WS_POPUP, 0, 0, 400, 48, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
     Check(host != nullptr, "host window");

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "branding.hpp"
+#include "localization.hpp"
 #include "resource.h"
 #include <shlobj.h>
 #include <shobjidl.h>
@@ -32,6 +33,7 @@ void RefreshAppBranding(HWND window, bool light) {
                 std::wstring icon(self); icon.resize(icon.find_last_of(L'\\') + 1);
                 icon += light ? L"app-light.ico" : L"app-dark.ico";
                 if (GetFileAttributesW(icon.c_str()) != INVALID_FILE_ATTRIBUTES && SUCCEEDED(link->SetIconLocation(icon.c_str(), 0))
+                    && SUCCEEDED(link->SetDescription(Tr(TextId::ShortcutDescription)))
                     && SUCCEEDED(file->Save(shortcut.c_str(), TRUE))) SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW, shortcut.c_str(), nullptr);
             }
         }

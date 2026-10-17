@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
+#include "localization.hpp"
 #include <windows.h>
 
 namespace acrylic {
@@ -15,6 +16,9 @@ constexpr const wchar_t* AcrylicLabel(AcrylicMode mode) noexcept {
 }
 constexpr const wchar_t* AcrylicModeName(AcrylicMode mode) noexcept {
     return mode == AcrylicMode::System ? L"system" : mode == AcrylicMode::Pure ? L"pure" : L"off";
+}
+inline const wchar_t* AcrylicModeLabel(AcrylicMode mode) noexcept {
+    return Tr(mode==AcrylicMode::System?TextId::System:mode==AcrylicMode::Pure?TextId::Pure:TextId::Off);
 }
 struct AcrylicRecipe { double tint, luminosity; DWORD legacyColor; };
 constexpr AcrylicRecipe Recipe(AcrylicMode mode, bool light) noexcept {

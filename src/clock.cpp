@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "clock.hpp"
+#include "clock_text.hpp"
 #include "adaptive_material.hpp"
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.Automation.h>
@@ -46,16 +47,7 @@ struct Property {
 };
 }
 std::wstring FormatClock(const SYSTEMTIME& time, bool date) {
-    constexpr const wchar_t* days[]{L"Sun", L"Mon", L"Tue", L"Wed", L"Thu", L"Fri", L"Sat"};
-    constexpr const wchar_t* months[]{L"Jan", L"Feb", L"Mar", L"Apr", L"May", L"Jun",
-        L"Jul", L"Aug", L"Sep", L"Oct", L"Nov", L"Dec"};
-    if (date && (time.wDayOfWeek > 6 || time.wMonth < 1 || time.wMonth > 12)) return {};
-    wchar_t value[64]{};
-    const unsigned hour = time.wHour % 12 ? time.wHour % 12 : 12;
-    if (date) swprintf_s(value, L"%s %s %u  %u:%02u %s", days[time.wDayOfWeek], months[time.wMonth - 1],
-        static_cast<unsigned>(time.wDay), hour, static_cast<unsigned>(time.wMinute), time.wHour < 12 ? L"am" : L"pm");
-    else swprintf_s(value, L"%u:%02u %s", hour, static_cast<unsigned>(time.wMinute), time.wHour < 12 ? L"am" : L"pm");
-    return value;
+    return LocalizedClock(time,date);
 }
 bool IsClockPanel(const controls::StackPanel& panel) {
     return panel && FindText(panel, L"DateInnerTextBlock") && FindText(panel, L"TimeInnerTextBlock");

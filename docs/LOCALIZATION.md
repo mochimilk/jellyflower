@@ -1,0 +1,25 @@
+# Languages
+
+jellyflower includes English, French and Korean translations. It selects the first supported language from the user's Windows display-language list with `GetUserPreferredUILanguages(MUI_LANGUAGE_NAME)`. Regional variants such as `fr-FR`, `fr-CA`, `ko-KR` and `en-GB` share their language's translation. If none matches, the app uses English. A failed language-list query falls back to `GetUserDefaultUILanguage`.
+
+The selection follows **Settings > Time & language > Language & region > Windows display language**, rather than keyboard layout, installation language or geographic location. Apply the sign-out Windows requests when changing its display language. jellyflower also rechecks on Windows settings broadcasts and when opening its menu; no extra polling timer, online translator or download is used.
+
+The shared catalog in [localization.hpp](../src/localization.hpp) covers menu labels, cursor colors, secondary statuses, update/error messages, tray tooltip, Start/Search greetings and accessible Search label, cursor import instructions, shortcut description, and installer/uninstaller dialogs. The product name, creator attribution, URLs, paths, command-line arguments, registry values, diagnostic fields and logs remain stable. Native Windows app names, account names, calendar tooltips and other shell-owned labels remain under Windows' control. The user's name is preserved; Korean greetings place it before the greeting and add the appropriate honorific. Anonymous greetings omit the name.
+
+The clock uses Windows NLS date/time formatting with the user's **regional format**, which is separate from the display language. Weekday/month names, date order, 12/24-hour preference and day-period markers therefore follow regional settings. The single-line format omits seconds and the year. Alphabetic am/pm markers remain lowercase. A French UI with an English regional format can correctly have English date words, just like the native Windows clock.
+
+Start/Search helper v20 stores all nine language/time-of-day greeting strings once. An atomic selector changes the active language and greeting without rewriting UTF-16 strings while another process reads them. Explorer helper v18 supplies the regional clock formatting. Normally stopped compatible earlier helpers restore their presentation before attachment; unknown or live incompatible helpers remain guarded. Windows can retain an older diagnostics connection even after its visual properties restore. If taskbar changes do not apply after upgrading, sign out and back in once (or restart Explorer yourself). In-app updates do not force an Explorer restart.
+
+Menu widths are measured with the inherited Windows font, including the longest translated secondary statuses. If a label still overflows a constrained work area, only its text layer fades at the edge. Hovering starts a 30 fps ticker after a short pause, using cached DirectWrite layouts. Leaving the row or closing the menu cancels its timer. Labels that fit have no ticker timer. Windows reduced motion and high contrast keep text still; high contrast also keeps text at full opacity.
+
+## Verification
+
+- `Localization.exe` checks ordered language matching and fallback, translation completeness, matching named placeholders, French/Korean greetings, Unicode names/paths, help text, installer/error formatting, regional clocks, and ticker/fade arithmetic. It changes only process-local test state.
+- `MenuPresentation.exe <output-folder>` checks English behavior plus French/Korean menus in light/dark themes at 96, 120, 144, 168 and 192 DPI. It measures label/status widths, renders overflow fade/ticker frames, and checks the timer stops on pointer exit. These are fixture windows; no system theme or cursor settings change.
+- `TrayRefresh.exe` checks that changing language refreshes the tooltip without reloading or resending tray artwork. Existing Start/Search and clock fixtures check native input, layout and restoration.
+- On a separate Windows account or VM, select French or Korean as the display language and sign out/in when prompted. Open every menu and cursor guide; verify the greeting at each local-time boundary, check the version row, and inspect error labels. Repeat with each regional format and 12/24-hour preference. Check that native app names and user names are retained.
+- Switch only the keyboard layout: jellyflower should keep the display language. Try an unsupported display language: it should choose the first supported display fallback or English. Disable Windows animations: overflow should remain faded and still.
+
+The automated checks exercise NLS and translations without changing this computer's Windows display language. Actual language-pack sign-in behavior remains a desktop/VM check. New languages require a complete catalog translation; Windows does not translate third-party strings automatically.
+
+Windows language behavior: [GetUserPreferredUILanguages](https://learn.microsoft.com/windows/win32/api/winnls/nf-winnls-getuserpreferreduilanguages), [language and regional settings](https://learn.microsoft.com/windows/apps/design/globalizing/manage-language-and-region).

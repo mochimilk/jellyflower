@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "startup.hpp"
+#include "localization.hpp"
 #include "shared.hpp"
 #include <taskschd.h>
 #include <sddl.h>
@@ -135,7 +136,7 @@ std::wstring LogonTaskXml(const std::wstring& executable, const std::wstring& si
     const auto user = Xml(sid), path = Xml(executable), folder = Xml(std::filesystem::path(executable).parent_path().wstring());
     return L"<?xml version=\"1.0\" encoding=\"UTF-16\"?>"
         L"<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">"
-        L"<RegistrationInfo><Description>jellyflower: apply the taskbar appearance at sign-in</Description></RegistrationInfo>"
+        L"<RegistrationInfo><Description>" + Xml(Tr(TextId::StartupDescription)) + L"</Description></RegistrationInfo>"
         L"<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + user + L"</UserId></LogonTrigger></Triggers>"
         L"<Principals><Principal id=\"user\"><UserId>" + user + L"</UserId>"
         L"<LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>"

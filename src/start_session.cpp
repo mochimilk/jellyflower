@@ -43,9 +43,9 @@ void Notify(DWORD target) {
 }
 HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     // Earlier helpers stay pinned after an in-app update. Wait for their
-    // restorations before v19 saves original shell properties; never unload them.
+    // restorations before v20 saves original shell properties; never unload them.
     struct LegacyState { volatile LONG magic,pid,epoch,running,enabled,light,attached,count,result,searches,spacing; };
-    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17",L"v18"}) {
+    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17",L"v18",L"v19"}) {
         Handle retired(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,(L"Local\\jellyflower.Start."+std::wstring(version)+L"."+std::to_wstring(pid)).c_str()));
         if(!retired) continue;
         const std::wstring_view generation(version);
@@ -75,11 +75,11 @@ HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     const auto initialize=reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(GetProcAddress(xaml,"InitializeXamlDiagnosticsEx"));
     wchar_t file[32768]{};const DWORD length=GetModuleFileNameW(nullptr,file,32768);
     if(initialize && length && length<32768) {
-        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v19.dll";
+        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v20.dll";
         if(host==ShellHost::Search) {
             result=SearchHelperAccess(process,path.c_str());if(FAILED(result))return result;
         }
-        wchar_t data[64]{};swprintf_s(data,L"JFStart19 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
+        wchar_t data[64]{};swprintf_s(data,L"JFStart20 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
         // Initialization runs on a fresh background thread. Probe existing
         // endpoint names until one accepts; never create/replace Start.
         for(unsigned index=1;index<=64;++index) {
@@ -115,8 +115,9 @@ void StartSession::Refresh(bool light,HWND notify) {
         const bool existingMapping=GetLastError()==ERROR_ALREADY_EXISTS;
         if(process_ && mapping_) state_=static_cast<StartState*>(MapViewOfFile(mapping_.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(StartState)));
         if(!state_) {Release();return;}
-        if(!existingMapping)for(unsigned period=0;period<3;++period)
-            wcsncpy_s(state_->greetings[period],SearchGreeting(*first,period).c_str(),_TRUNCATE);
+        if(!existingMapping)for(unsigned language=0;language<static_cast<unsigned>(Language::Count);++language)
+            for(unsigned period=0;period<3;++period)
+                wcsncpy_s(state_->greetings[3*language+period],SearchGreeting(*first,period,static_cast<Language>(language)).c_str(),_TRUNCATE);
         const auto lifetime=DuplicateTo(GetCurrentProcess(),process_.get(),SYNCHRONIZE);
         if(!lifetime){Release();return;}
         CloseRemote(process_.get(),reinterpret_cast<HANDLE>(static_cast<uintptr_t>(InterlockedExchange64(&state_->ownerHandle,reinterpret_cast<LONG64>(lifetime)))));
@@ -128,7 +129,7 @@ void StartSession::Refresh(bool light,HWND notify) {
     const LONG enabled=EffectsEnabled() ? 1:0;
     const bool changed=InterlockedExchange(&state_->enabled,enabled)!=enabled;
     const bool themeChanged=InterlockedExchange(&state_->light,light ? 1:0)!=(light ? 1:0);
-    const auto period=static_cast<LONG>(LocalSearchGreetingPeriod());
+    const auto period=static_cast<LONG>(3*static_cast<unsigned>(GetLanguage())+LocalSearchGreetingPeriod());
     const bool greetingChanged=InterlockedExchange(&state_->greetingPeriod,period)!=period;
     if(newOwner || changed || themeChanged || greetingChanged) Notify(pid_);
     if(Read(state_->attached)==1 || worker_.joinable() || (lastAttempt_ && GetTickCount64()-lastAttempt_<30000)) return;

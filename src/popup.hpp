@@ -4,6 +4,7 @@
 #include "appearance.hpp"
 
 namespace acrylic {
+void RefreshLanguageMenu(HWND owner);
 void RefreshUpdateMenu(HWND owner);
 void RefreshCursorMenu(HWND owner);
 void RefreshThemeMenu(HWND owner);
