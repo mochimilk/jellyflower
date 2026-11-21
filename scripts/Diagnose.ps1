@@ -17,3 +17,5 @@ Write-Host 'bridgeRetained means a live Explorer connection is being kept across
 Write-Host 'clockDate reports the saved date toggle. The single-line clock uses the native Windows system font.'
 
 Write-Host 'startSurfaces/startAttached count accepted Start background layers/connection. Inspect Start visually; startLastResult reports an HRESULT.'
+
+Write-Host 'trayOnlyJellyflower reports the saved tray choice. hiddenTrayParts counts collapsed tray parts; trayJellyflowerIcons counts taskbars where the flower was found (the chevron stays visible where it is 0). trayLastResult reports an HRESULT.'

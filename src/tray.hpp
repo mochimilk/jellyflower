@@ -22,7 +22,9 @@ inline constexpr UINT TrayGithubCommand = 11;
 inline constexpr UINT TrayWallpaperCommand = 12, TrayWallpaperQueryMessage = WM_APP + 51;
 inline constexpr UINT TrayTaskbarCommand = 13, TrayAutoHideCommand = 14;
 inline constexpr UINT TrayWallpaperMenuCommand = 15, TrayWallpaperThemeCommand = 16;
+// wParam 0: auto-hide state. wParam 1: jellyflower-only tray state.
 inline constexpr UINT TrayTaskbarQueryMessage = WM_APP + 52;
+inline constexpr UINT TrayOnlyCommand = 17;
 inline constexpr wchar_t GithubUrl[] = L"https://github.com/mochimilk/jellyflower";
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
 inline constexpr UINT TrayCursorPreviewMessage = WM_APP + 50;

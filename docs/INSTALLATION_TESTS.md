@@ -240,3 +240,16 @@ Disable auto, turn wallpaper off, switch wallpaper theme to system, or exit whil
 4. In a test profile, remove only jelly-light.png/jelly-dark.png while jellyflower is running, then enable/refresh. Re-extract the exact bundled images without a download. Retain original backups, v1 state and outside wallpaper choices. Existing slideshow/Spotlight settings and policies are not rewritten.
 
 Run WallpaperLogic with a fresh workspace directory and the asset directory. It uses fake desktop setters for failure/recovery coverage, plus one read-only real desktop capture. Actual wallpaper setters, physical displays, rotating-provider restoration and the other laptop remain manual acceptance checks.
+
+## 0.20.0 jellyflower-only tray acceptance
+
+1. Update from 0.19.0 with its version row. If the taskbar styling does not return after the relaunch, sign out and back in once, then confirm `--diagnose` reports `bridgeState` 2 with no revision mismatch.
+2. Put the flower on the taskbar (Settings > Personalization > Taskbar > Other system tray icons). Open taskbar and confirm the order acrylic, date, tray, auto hide, with `tray` reading `all` beside the flower glyph.
+3. Select tray. The row reads `jellyflower` and the menu stays open. Within a second the notification area shows only the flower: no other app icons, chevron, language indicator, Quick Settings (network/volume/battery) or clock. The show-desktop corner still works. Diagnostics report `trayOnlyJellyflower` true, `trayJellyflowerIcons` 1 and `trayLastResult` 0.
+4. Click the flower: the menu opens above it. Press Win+A, Win+N and Win+Space: Quick Settings, notifications/calendar and the input switcher open normally.
+5. While minimal, start an app that adds a tray icon, plug in or unplug power, change volume, receive a notification, start microphone use and switch input language. Nothing but the flower should appear, apart from a brief flash for a newly added icon.
+6. Move the flower to the overflow (turn it off in Other system tray icons). The chevron returns and the flower is reachable under it; everything else stays hidden. Turn it back on: the chevron goes again.
+7. On a second monitor whose taskbar shows its clock, confirm that tray is empty while the primary keeps the flower.
+8. Select tray again (`all`), then separately exit, and separately end jellyflower.exe in Task Manager. Each time the stock tray returns within a few seconds with the current icons, network/volume/battery state, clock and the chevron only when hidden icons exist.
+9. Relaunch: `jellyflower` is remembered. Restart Explorer and sign out/in: the minimal tray reapplies without Explorer crashing at startup.
+10. On Windows 10 or a legacy taskbar, the tray row is greyed out and dispatches nothing.

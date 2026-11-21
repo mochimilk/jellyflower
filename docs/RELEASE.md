@@ -1,11 +1,11 @@
-jellyflower 0.19.0
+jellyflower 0.20.0
 
-jellyflower now follows your Windows display language in English, French or Korean. Menus, cursor colors, greetings, update/error messages, tray tooltip, cursor import guide and installer dialogs all use the selected language. No extra language switch or translation download is needed. Other languages use the first supported Windows display-language fallback, then English.
+The taskbar menu has a new **tray** row. Switch it from `all` to `jellyflower` and the notification area shows only the flower: other app icons, the show-hidden-icons chevron, the language/input indicator, the microphone and location indicators, Quick Settings (network, volume, battery) and the clock disappear. Switch it back, or exit jellyflower, and Windows' own tray returns exactly as it was. The choice is remembered.
 
-The single-line clock now follows Windows regional settings for month and weekday names, date order, 12/24-hour time and day-period markers. French and Korean greetings preserve your name and use the appropriate wording and order. Windows still supplies native app names, user information and calendar behavior.
+Windows' own shortcuts are left alone: Win+A for Quick Settings, Win+N for notifications and the calendar, and Win+Space for input language. The show-desktop corner is left in place.
 
-Long menu labels fade at the edge and scroll like a ticker on hover. Labels that fit stay still, leaving a row stops the timer, and reduced motion keeps text still. Translated labels and secondary states are measured at the current display scale, and the ticker uses cached text layouts and repaints only its row.
+The flower needs to be on the taskbar itself for the chevron to go. If it lives under show hidden icons, turn it on in **Settings > Personalization > Taskbar > Other system tray icons**. Until then jellyflower keeps the chevron, so its menu is always one click away.
 
-Explorer helper v18 and Start/Search helper v20 load the new clock and language behavior during compatible in-app upgrades. Normally stopped compatible earlier helpers restore their styling before attachment; unknown or live incompatible helpers remain guarded. Windows may still retain an older diagnostics connection. If the taskbar does not apply after updating, sign out and back in once. Updates do not force an Explorer restart.
+Explorer helper v19 carries the new tray styling; Start/Search helper v20 is unchanged. A normally stopped 0.19.0 helper restores its styling before v19 attaches. Windows may keep the older helper's diagnostics connection, so if the taskbar styling does not apply after updating, sign out and back in once. Updates do not restart Explorer.
 
-See docs/LOCALIZATION.md for supported languages, regional-format behavior, validation and limitations. The app does not change your Windows language, keyboard layout or regional settings.
+The row is unavailable on legacy taskbars without the Windows 11 XAML tray. Unfamiliar tray layouts are left alone.

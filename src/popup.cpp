@@ -62,6 +62,7 @@ std::vector<Row> GeneralRows() {
 std::vector<Row> TaskbarRows(AcrylicMode mode,bool date){
     return {{TrayToggleCommand,Tr(TextId::Acrylic),false,false,AcrylicModeLabel(mode)},
         {TrayDateCommand,Tr(TextId::Date),false,false,date?Tr(TextId::On):Tr(TextId::Off)},
+        {TrayOnlyCommand,Tr(TextId::Tray),false,false,Tr(TextId::All)},
         {TrayAutoHideCommand,Tr(TextId::AutoHide),false,false,Tr(TextId::Off),false}};
 }
 std::vector<Row> WallpaperRows(){
@@ -164,7 +165,7 @@ struct Popup {
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
     HICON githubIcon = nullptr, wallpaperIcon = nullptr;
-    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon;
+    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -278,8 +279,12 @@ struct Popup {
     void RefreshTaskbar(){
         if(kind==TrayTaskbarCommand){
             const auto state=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,0,0));
-            for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayAutoHideCommand){
-                auto& row=rows[i];row.secondary=(state&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(state&2)!=0;
+            const auto tray=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,1,0));
+            for(size_t i=0;i<rows.size();++i){
+                auto& row=rows[i];
+                if(row.command==TrayAutoHideCommand){row.secondary=(state&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(state&2)!=0;}
+                else if(row.command==TrayOnlyCommand){row.secondary=(tray&1)?L"jellyflower":Tr(TextId::All);row.enabled=(tray&2)!=0;}
+                else continue;
                 if(i<buttons.size()){SetWindowTextW(buttons[i],(row.label+L", "+row.secondary).c_str());EnableWindow(buttons[i],row.enabled);}
                 RepaintRow(static_cast<int>(i));
             }
@@ -403,7 +408,8 @@ struct Popup {
     bool UpdateIndicators() {
         return checkIcon.Load(IDI_CHECK_LIGHT, Px(MenuGlyphSize), text, highlightedText)
             && chevronIcon.Load(IDI_CHEVRON_RIGHT_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true))
-            && (kind!=TrayTaskbarCommand || autoHideIcon.Load(IDI_ACRYLIC_PURE_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT)))
+            && (kind!=TrayTaskbarCommand || (autoHideIcon.Load(IDI_ACRYLIC_PURE_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
+                && trayOnlyIcon.Load(IDI_FLOWER_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
             && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
     }
     bool UpdateTheme(bool systemMode) {
@@ -671,7 +677,7 @@ struct Popup {
                 root->RefreshUpdate();
             } else if (command == TrayWallpaperCommand || command==TrayWallpaperThemeCommand) {
                 root->RefreshWallpaper();
-            } else if(command==TrayAutoHideCommand){
+            } else if(command==TrayAutoHideCommand || command==TrayOnlyCommand){
                 root->RefreshTaskbar();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
@@ -773,7 +779,8 @@ struct Popup {
             : row.command == TrayDateCommand ? dateIcons[clockDate ? 1 : 0] : row.command == TrayGeneralCommand ? generalIcon : row.command == TrayUpdateCommand
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
                 : row.command == TrayGithubCommand ? githubIcon : (row.command == TrayWallpaperCommand || row.command==TrayWallpaperMenuCommand) ? wallpaperIcon
-                : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayTaskbarCommand?acrylicIcons[2]:nullptr;
+                : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayOnlyCommand?trayOnlyIcon.Get(!row.enabled)
+                : row.command==TrayTaskbarCommand?acrylicIcons[2]:nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.

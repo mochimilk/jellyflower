@@ -14,7 +14,7 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
 HRESULT wallpaperError=E_FAIL;
-bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true;UINT autoHideActions=0;
+bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true;UINT autoHideActions=0,trayActions=0;
 AcrylicMode selectedAcrylic=AcrylicMode::System;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
@@ -193,7 +193,8 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
         return static_cast<UINT>(wallpaperState);
     }
     if(message==TraySettingMessage && parameter==TrayWallpaperThemeCommand){wallpaperAutomatic=!wallpaperAutomatic;return wallpaperAutomatic;}
-    if(message==TrayTaskbarQueryMessage)return (autoHide?1u:0u)|(taskbarBottom?2u:0u);
+    if(message==TrayTaskbarQueryMessage)return parameter==1?(trayOnly?1u:0u)|(trayXaml?2u:0u):(autoHide?1u:0u)|(taskbarBottom?2u:0u);
+    if(message==TraySettingMessage && parameter==TrayOnlyCommand){++trayActions;if(trayXaml)trayOnly=!trayOnly;return (trayOnly?1u:0u)|(trayXaml?2u:0u);}
     if(message==TraySettingMessage && parameter==TrayAutoHideCommand){++autoHideActions;if(taskbarBottom)autoHide=!autoHide;return (autoHide?1u:0u)|(taskbarBottom?2u:0u);}
     if(message==TraySettingMessage && parameter==TrayToggleCommand){selectedAcrylic=NextAcrylicMode(selectedAcrylic);return static_cast<UINT>(selectedAcrylic);}
     if(message==TraySettingMessage && parameter==TrayGithubCommand) {++githubOpens;return 1;}
@@ -351,21 +352,27 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
             const HWND same=popup.window;
-            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;
+            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;trayOnly=false;trayXaml=true;
             Check(popup.rows[1].command==TrayTaskbarCommand && popup.rows[2].command==TrayWallpaperMenuCommand && HasSubmenu(TrayTaskbarCommand) && HasSubmenu(TrayWallpaperMenuCommand),"root groups taskbar and wallpaper settings");
             popup.OpenChild(1,true);auto& taskbar=*popup.child;const HWND taskbarWindow=taskbar.window;
-            Check(taskbar.rows.size()==3 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayAutoHideCommand,"taskbar order is acrylic, date, auto hide");
+            Check(taskbar.rows.size()==4 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayOnlyCommand && taskbar.rows[3].command==TrayAutoHideCommand,"taskbar order is acrylic, date, tray, auto hide");
             Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.dateIcons[0] && taskbar.dateIcons[1],"taskbar submenu owns its themed setting icons");
             for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeLabel(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
             taskbar.Activate(1,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && taskbar.rows[1].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
             taskbar.Activate(1,false);Check(dateEnabled && popup.clockDate && taskbar.clockDate && taskbar.rows[1].secondary==L"on","nested date on persists in the existing branch");
-            Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"bottom taskbar enables auto hide");
-            taskbar.Activate(2,false);Check(autoHide && taskbar.rows[2].secondary==L"on" && !popup.done,"auto hide toggles native preference in place");
-            taskbarBottom=false;popup.RefreshTaskbar();const auto previousActions=autoHideActions;taskbar.Activate(2,false);
-            Check(!taskbar.rows[2].enabled && !IsWindowEnabled(taskbar.buttons[2]) && autoHideActions==previousActions && autoHide,"non-bottom row greys out and cannot dispatch a change");
+            Check(taskbar.rows[2].label==Tr(TextId::Tray) && taskbar.rows[2].secondary==Tr(TextId::All) && taskbar.rows[2].enabled && taskbar.trayOnlyIcon,"tray row starts with the stock notification area and its flower icon");
+            taskbar.Activate(2,false);Check(trayOnly && taskbar.rows[2].secondary==L"jellyflower" && !popup.done && taskbar.window==taskbarWindow,"tray switches to jellyflower only in place");
+            taskbar.Activate(2,false);Check(!trayOnly && taskbar.rows[2].secondary==Tr(TextId::All) && !popup.done,"tray switches back to all icons in place");
+            trayXaml=false;popup.RefreshTaskbar();{const auto previousTray=trayActions;taskbar.Activate(2,false);
+            Check(!taskbar.rows[2].enabled && !IsWindowEnabled(taskbar.buttons[2]) && trayActions==previousTray,"legacy taskbars grey out the tray row");}
+            trayXaml=true;popup.RefreshTaskbar();Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"XAML taskbar re-enables the tray row");
+            Check(taskbar.rows[3].enabled && IsWindowEnabled(taskbar.buttons[3]),"bottom taskbar enables auto hide");
+            taskbar.Activate(3,false);Check(autoHide && taskbar.rows[3].secondary==L"on" && !popup.done,"auto hide toggles native preference in place");
+            taskbarBottom=false;popup.RefreshTaskbar();const auto previousActions=autoHideActions;taskbar.Activate(3,false);
+            Check(!taskbar.rows[3].enabled && !IsWindowEnabled(taskbar.buttons[3]) && autoHideActions==previousActions && autoHide,"non-bottom row greys out and cannot dispatch a change");
             {const auto gray=GetSysColor(COLOR_GRAYTEXT);for(const auto pixel:IconPixels(taskbar.autoHideIcon.Get(true))){const auto alpha=pixel>>24;Check(((pixel>>16)&255)==(GetRValue(gray)*alpha+127)/255 && ((pixel>>8)&255)==(GetGValue(gray)*alpha+127)/255 && (pixel&255)==(GetBValue(gray)*alpha+127)/255,"disabled auto-hide icon uses the same gray ink as its label");}}
             Capture(taskbar,std::filesystem::path(argv[1])/(std::wstring(light?L"taskbar-light-":L"taskbar-dark-")+std::to_wstring(dpi)+L".bmp"));
-            taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(2,false);Check(!autoHide && taskbar.rows[2].secondary==L"off","external edge changes re-enable the current state");
+            taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(3,false);Check(!autoHide && taskbar.rows[3].secondary==L"off","external edge changes re-enable the current state");
             SubmenuToggleChecks(popup,1);
             popup.OpenChild(2,true);auto& wallpapers=*popup.child;const HWND wallpaperWindow=wallpapers.window;
             Check(wallpapers.rows.size()==2 && wallpapers.rows[0].label==L"jellyflower" && wallpapers.rows[1].command==TrayWallpaperThemeCommand,"wallpaper has jellyflower toggle then theme row");
@@ -515,7 +522,7 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             fits(local);
             const auto suffix=std::wstring(language==Language::French?L"fr-":L"ko-")+(light?L"light-":L"dark-")+std::to_wstring(localDpi)+L".bmp";
             Capture(local,std::filesystem::path(argv[1])/(L"localized-root-"+suffix));
-            local.Activate(1,true);Check(local.child && local.child->rows[2].label==Tr(TextId::AutoHide),"translated taskbar submenu");fits(*local.child);
+            local.Activate(1,true);Check(local.child && local.child->rows[3].label==Tr(TextId::AutoHide) && local.child->rows[2].label==Tr(TextId::Tray),"translated taskbar submenu");fits(*local.child);
             Capture(*local.child,std::filesystem::path(argv[1])/(L"localized-taskbar-"+suffix));
             local.CloseChild(false);local.Activate(2,true);fits(*local.child);
             for(const auto id:{TextId::TryAgain,TextId::ImageMissing,TextId::NotAllowed,TextId::FileInUse,TextId::StorageFull,TextId::ImageTooLarge,TextId::BackupIssue}){local.child->rows[0].secondary=Tr(id);fits(*local.child);}

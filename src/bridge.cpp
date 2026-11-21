@@ -8,6 +8,7 @@
 #include "adaptive_session.hpp"
 #include "volume.hpp"
 #include "chevron.hpp"
+#include "tray_only.hpp"
 #include "acrylic_material.hpp"
 #include <unknwn.h>
 #include <shobjidl.h>
@@ -71,6 +72,7 @@ void RefreshBackgrounds() noexcept;
 void RefreshClocks() noexcept;
 void RefreshVolumes() noexcept;
 void RefreshChevrons() noexcept;
+void RefreshTrays() noexcept;
 
 class Background : public std::enable_shared_from_this<Background> {
 public:
@@ -182,6 +184,7 @@ void RefreshBackgrounds() noexcept {
         RefreshClocks();
         RefreshVolumes();
         RefreshChevrons();
+        RefreshTrays();
         RefreshAdaptive(module,state,AdaptiveOwnerAlive);
     } catch (...) { Result(winrt::to_hresult()); }
 }
@@ -376,6 +379,72 @@ void CALLBACK ChevronTimer(HWND, UINT, UINT_PTR timer, DWORD) {
         strong->Refresh(); break;
     }
 }
+class Tray;
+auto& Trays() {
+    thread_local auto* records = new std::unordered_map<InstanceHandle, std::shared_ptr<Tray>>;
+    return *records;
+}
+void CALLBACK TrayTimer(HWND, UINT, UINT_PTR, DWORD);
+// One per taskbar notification area. Changes are applied only from timers and
+// refresh messages, never inside Explorer's element-added callback.
+class Tray {
+    TrayOnlyView view;
+    LONG hidden = 0;
+    bool found = false;
+public:
+    UINT_PTR timer = 0, soon = 0;
+    explicit Tray(const xaml::FrameworkElement& frame) : view(frame) {}
+    void Start() {
+        EnsureBridgeNotifyWindow(module, RefreshBackgrounds);
+        timer = SetTimer(nullptr, 0, 2000, TrayTimer);
+        if (!timer) winrt::throw_last_error();
+        Soon();
+    }
+    // New icons and replaced stacks are hidden shortly after they arrive.
+    void Soon() noexcept { if (!soon) soon = SetTimer(nullptr, 0, 50, TrayTimer); }
+    void Refresh() noexcept {
+        const bool enabled = owner.Alive() && (Read(state->trayOptions) & 1) != 0;
+        HRESULT result = S_OK;
+        try { view.Refresh(enabled); result = view.Error(); }
+        catch (...) {
+            // An unreadable shell layout must leave the stock tray usable.
+            result = winrt::to_hresult();
+            view.Restore();
+        }
+        if (state) InterlockedExchange(&state->trayResult, result);
+        Count();
+    }
+    void Count() noexcept {
+        const auto nextHidden = static_cast<LONG>(view.Hidden());
+        const bool nextFound = view.Found();
+        if (state) {
+            if (nextHidden != hidden) InterlockedExchangeAdd(&state->trayHidden, nextHidden - hidden);
+            if (nextFound != found) { if (nextFound) InterlockedIncrement(&state->trayFlower); else InterlockedDecrement(&state->trayFlower); }
+        }
+        hidden = nextHidden; found = nextFound;
+    }
+    ~Tray() {
+        if (timer) KillTimer(nullptr, timer);
+        if (soon) KillTimer(nullptr, soon);
+        view.Restore();
+        Count();
+    }
+};
+void RefreshTrays() noexcept {
+    try {
+        std::vector<std::shared_ptr<Tray>> snapshot;
+        for (const auto& item : Trays()) snapshot.push_back(item.second);
+        for (const auto& tray : snapshot) tray->Refresh();
+    } catch (...) { if (state) InterlockedExchange(&state->trayResult, winrt::to_hresult()); }
+}
+void CALLBACK TrayTimer(HWND, UINT, UINT_PTR timer, DWORD) {
+    for (const auto& item : Trays()) {
+        if (item.second->soon == timer) { KillTimer(nullptr, timer); item.second->soon = 0; }
+        else if (item.second->timer != timer) continue;
+        const auto strong = item.second;
+        strong->Refresh(); break;
+    }
+}
 struct Strings {
     VisualElement element;
     ~Strings() {
@@ -446,6 +515,20 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
         try { chevron->Start(); }
         catch (...) { chevrons.erase(handle); throw; }
     }
+    void TryTray(const xaml::DependencyObject& object) {
+        const auto frame = FindTrayFrame(object);
+        if (!frame) return;
+        InstanceHandle handle = 0;
+        winrt::check_hresult(diagnostics->GetHandleFromIInspectable(
+            reinterpret_cast<::IInspectable*>(winrt::get_abi(frame)), &handle));
+        auto& trays = Trays();
+        const auto found = trays.find(handle);
+        if (found != trays.end()) { found->second->Soon(); return; }
+        auto tray = std::make_shared<Tray>(frame);
+        trays.emplace(handle, tray);
+        try { tray->Start(); }
+        catch (...) { trays.erase(handle); throw; }
+    }
     HRESULT STDMETHODCALLTYPE OnVisualTreeChange(ParentChildRelation, VisualElement element,
         VisualMutationType mutation) noexcept override {
         try {
@@ -477,6 +560,12 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
                     const auto strong = chevron->second;
                     chevrons.erase(chevron);
                 }
+                auto& trays = Trays();
+                const auto tray = trays.find(element.Handle);
+                if (tray != trays.end()) {
+                    const auto strong = tray->second;
+                    trays.erase(tray);
+                }
                 return S_OK;
             }
             if (mutation != Add) return S_OK;
@@ -487,6 +576,16 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
                 try{winrt::Windows::Foundation::IInspectable object{nullptr};winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
                     RefreshAdaptive(module,state,AdaptiveOwnerAlive);TrackAdaptive(element.Handle,object.as<xaml::DependencyObject>());
                 }catch(...){if(state)InterlockedExchange(&state->adaptiveResult,winrt::to_hresult());}
+            }
+            const bool trayCandidate = type == L"SystemTray.SystemTrayFrame" || type == L"SystemTray.NotifyIconView"
+                || type == L"SystemTray.Stack" || type == L"SystemTray.OmniButton";
+            if (trayCandidate) {
+                try {
+                    winrt::Windows::Foundation::IInspectable object{nullptr};
+                    winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,
+                        reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+                    TryTray(object.as<xaml::DependencyObject>());
+                } catch (...) { if (state) InterlockedExchange(&state->trayResult, winrt::to_hresult()); }
             }
             const bool chevronCandidate = type == L"SystemTray.ChevronIconView"
                 || (type == L"Windows.UI.Xaml.Controls.TextBlock" && element.Name

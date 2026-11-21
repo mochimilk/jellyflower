@@ -97,6 +97,27 @@ int main() {
             if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
         }
     }
+    {
+        const auto name=L"Local\\AcrylicTaskbar.Bridge.v18."+std::to_wstring(pid);
+        acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,4096,name.c_str()));
+        retiring=static_cast<volatile LONG*>(MapViewOfFile(old.get(),FILE_MAP_ALL_ACCESS,0,0,17*sizeof(LONG)));
+        Check(retiring!=nullptr,"known v18 fixture mapping");
+        if(retiring){
+            InterlockedExchange(&retiring[0],0x41544241);
+            Check(acrylic::OlderBridgePresent(pid),"v18 mapping with another generation's magic remains blocked");
+            InterlockedExchange(&retiring[0],0x41544242);InterlockedExchange(&retiring[14],1);
+            Check(acrylic::OlderBridgePresent(pid),"unrestored v18 adaptive foreground remains blocked");
+            WNDCLASSW wc{};wc.hInstance=GetModuleHandleW(nullptr);wc.lpfnWndProc=RetireProc;wc.lpszClassName=L"AcrylicTaskbar.BridgeNotify.v18";RegisterClassW(&wc);
+            const HWND receiver=CreateWindowExW(0,wc.lpszClassName,nullptr,0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,nullptr);
+            Check(receiver && !acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[14])==0,"stopped v18 presentation is synchronously restored before v19 attaches");
+            InterlockedExchange(&retiring[11],1);
+            Check(acrylic::OlderBridgePresent(pid),"stopped v18 with a hidden speaker remains blocked");
+            InterlockedExchange(&retiring[11],0);
+            InterlockedExchange(&retiring[8],1);InterlockedExchange(&retiring[15],1);
+            Check(acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[15])==1,"live v18 is never retired by another controller");
+            if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
+        }
+    }
     HANDLE ready[2]{CreateEventW(nullptr, TRUE, FALSE, nullptr), CreateEventW(nullptr, TRUE, FALSE, nullptr)};
     std::atomic<bool> created[2]{};
     std::thread workers[2];

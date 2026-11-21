@@ -16,6 +16,7 @@
 #include "wallpaper.hpp"
 #include "wallpaper_theme.hpp"
 #include "taskbar_options.hpp"
+#include "tray_options.hpp"
 #include "start_session.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
@@ -124,7 +125,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[32]{};
+    LONG values[36]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -177,6 +178,10 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"adaptiveTrayGlyphs\": " << values[29]
         << ",\n  \"adaptiveTrayBitmaps\": " << values[30]
         << ",\n  \"adaptiveLastResult\": " << values[31]
+        << ",\n  \"trayOnlyJellyflower\": " << (values[32] ? "true" : "false")
+        << ",\n  \"hiddenTrayParts\": " << values[33]
+        << ",\n  \"trayJellyflowerIcons\": " << values[34]
+        << ",\n  \"trayLastResult\": " << values[35]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -253,6 +258,7 @@ public:
     }
     std::unique_ptr<CursorManager> cursors;
     ClockOptions clock = LoadClockOptions();
+    bool trayOnly = LoadTrayOnly();
     DWORD build = BuildNumber();
     LONG backend = Waiting, applied = 0, lastResult = S_OK;
     UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
@@ -321,13 +327,14 @@ public:
             previousBridgeState = Idle;
         }
         InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
+        InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
         SetBridgeMode(shared, explorerPid, mode, newOwner);
         if (!bridgeDll) {
             auto path = ExePath();
             const auto slash = path.find_last_of(L'\\');
             if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
             path.resize(slash + 1);
-            path += L"jellyflower-bridge-v18.dll";
+            path += L"jellyflower-bridge-v19.dll";
             bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
         }
@@ -414,6 +421,7 @@ public:
                 // The shell is rebuilding its HWNDs; publish settings without
                 // ending ownership or restoring the surviving XAML elements.
                 InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
+                InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
                 SetBridgeMode(shared, explorerPid, mode);
                 applied = Read(shared->appliedCount);
                 lastResult = Read(shared->lastResult);
@@ -507,6 +515,24 @@ public:
         }
         return clock.Packed();
     }
+    // Bit 0: jellyflower only. Bit 1: the XAML taskbar can apply it.
+    UINT TrayState() const {
+        return (trayOnly ? 1u : 0u) | (backend != Legacy && backend != Unsupported ? 2u : 0u);
+    }
+    UINT ChangeTrayOnly() {
+        const DWORD error = SaveTrayOnly(!trayOnly);
+        if (error) {
+            Log(L"Tray setting error=" + std::to_wstring(error));
+            tray.UpdateNotice(Tr(TextId::TraySaveError), Text(TextId::TraySaveBody, {{L"error", std::to_wstring(error)}}).c_str(), true);
+        } else {
+            trayOnly = !trayOnly;
+            Log(std::wstring(L"Tray only jellyflower=") + (trayOnly ? L"on" : L"off"));
+            Refresh();
+            if (shared) InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
+            SetBridgeMode(shared, explorerPid, mode, true);
+        }
+        return TrayState();
+    }
     ~Controller() {
         ReleaseBridge();
         RestoreLegacy();
@@ -556,6 +582,10 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == IslandsQuery) return self->observedIslands;
         if (wParam == RetainedQuery) return self->bridgeRetained;
         if (wParam == ClockDateQuery) return self->clock.date;
+        if (wParam == TrayOnlyQuery) return self->trayOnly;
+        if (wParam == TrayHiddenQuery) return self->shared ? Read(self->shared->trayHidden) : 0;
+        if (wParam == TrayFlowerQuery) return self->shared ? Read(self->shared->trayFlower) : 0;
+        if (wParam == TrayResultQuery) return self->shared ? Read(self->shared->trayResult) : S_OK;
         if (wParam == TrayQuery) return self->tray.Present();
         if (wParam == CursorModeQuery) return self->cursors->Mode();
         if (wParam == CursorAppliedQuery) return self->cursors->Applied();
@@ -575,6 +605,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayTaskbarQueryMessage) {
+        if (wParam == 1) return self->TrayState();
         return ReadTaskbarOptions().Packed();
     } else if (message == TrayWallpaperQueryMessage) {
         if(wParam==2)return static_cast<UINT>(self->wallpaperTheme);
@@ -609,6 +640,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             return static_cast<UINT>(self->updates.Status());
         }
         if (wParam == TrayDateCommand) return self->ChangeDate();
+        if (wParam == TrayOnlyCommand) return self->ChangeTrayOnly();
         if (wParam == TrayThemeCommand) {
             const auto state = self->autoTheme->Status();
             if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {
