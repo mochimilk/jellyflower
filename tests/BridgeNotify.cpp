@@ -11,7 +11,7 @@ thread_local int index = 0;
 int failures = 0;
 volatile LONG* retiring=nullptr;
 LRESULT CALLBACK RetireProc(HWND window,UINT message,WPARAM wParam,LPARAM lParam){
-    if(message==acrylic::BridgeRefreshMessage && retiring){InterlockedExchange(&retiring[14],0);InterlockedExchange(&retiring[15],0);return 0;}
+    if(message==acrylic::BridgeRefreshMessage && retiring){InterlockedExchange(&retiring[14],0);InterlockedExchange(&retiring[15],0);InterlockedExchange(&retiring[18],0);return 0;}
     return DefWindowProcW(window,message,wParam,lParam);
 }
 void Check(bool value, const char* name) {
@@ -115,6 +115,27 @@ int main() {
             InterlockedExchange(&retiring[11],0);
             InterlockedExchange(&retiring[8],1);InterlockedExchange(&retiring[15],1);
             Check(acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[15])==1,"live v18 is never retired by another controller");
+            if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
+        }
+    }
+    {
+        const auto name=L"Local\\AcrylicTaskbar.Bridge.v19."+std::to_wstring(pid);
+        acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,4096,name.c_str()));
+        retiring=static_cast<volatile LONG*>(MapViewOfFile(old.get(),FILE_MAP_ALL_ACCESS,0,0,21*sizeof(LONG)));
+        Check(retiring!=nullptr,"known v19 fixture mapping");
+        if(retiring){
+            InterlockedExchange(&retiring[0],0x41544242);
+            Check(acrylic::OlderBridgePresent(pid),"v19 mapping with another generation's magic remains blocked");
+            InterlockedExchange(&retiring[0],0x41544243);InterlockedExchange(&retiring[18],2);
+            Check(acrylic::OlderBridgePresent(pid),"unrestored v19 jellyflower-only tray remains blocked");
+            WNDCLASSW wc{};wc.hInstance=GetModuleHandleW(nullptr);wc.lpfnWndProc=RetireProc;wc.lpszClassName=L"AcrylicTaskbar.BridgeNotify.v19";RegisterClassW(&wc);
+            const HWND receiver=CreateWindowExW(0,wc.lpszClassName,nullptr,0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,nullptr);
+            Check(receiver && !acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[18])==0,"stopped v19 presentation, tray included, is synchronously restored before v20 attaches");
+            InterlockedExchange(&retiring[7],1);
+            Check(acrylic::OlderBridgePresent(pid),"stopped v19 with a hidden border remains blocked");
+            InterlockedExchange(&retiring[7],0);
+            InterlockedExchange(&retiring[8],1);InterlockedExchange(&retiring[18],1);
+            Check(acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[18])==1,"live v19 is never retired by another controller");
             if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
         }
     }

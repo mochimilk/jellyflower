@@ -17,9 +17,13 @@
 #include "wallpaper_theme.hpp"
 #include "taskbar_options.hpp"
 #include "tray_options.hpp"
+#include "dock_options.hpp"
+#include "taskbar_slot.hpp"
 #include "keyboard_options.hpp"
 #include "keyboard_field.hpp"
 #include "start_session.hpp"
+#include "compact.hpp"
+#include "compact_screen.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <algorithm>
@@ -127,7 +131,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[41]{};
+    LONG values[50]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -189,6 +193,15 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"keyboardSymmetricGrids\": " << values[38]
         << ",\n  \"keyboardLastResult\": " << values[39]
         << ",\n  \"keyboardField\": \"" << (values[40] == 2 ? "text" : values[40] == 1 ? "empty" : values[40] == 0 ? "unknown" : "off") << "\""
+        << ",\n  \"compactDisplays\": " << values[41]
+        << ",\n  \"statusBar\": " << (values[42] ? "true" : "false")
+        << ",\n  \"compactLastResult\": " << values[43]
+        << ",\n  \"floatingDock\": " << (values[44] ? "true" : "false")
+        << ",\n  \"dockTaskbars\": " << values[45]
+        << ",\n  \"clickThroughTaskbars\": " << values[46]
+        << ",\n  \"dockLastResult\": " << values[47]
+        << ",\n  \"taskbarHeight\": " << values[48]
+        << ",\n  \"taskbarHeightResult\": " << values[49]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -209,6 +222,11 @@ public:
     // Watches the focused text field only while the keyboard layout is on.
     std::unique_ptr<KeyboardFieldWatcher> field;
     bool keyboardLayout = LoadKeyboardLayout();
+    // Margins and the status bar on displays narrower than Start (compact.hpp).
+    CompactScreen compact;
+    bool statusBar = LoadStatusBar();
+    LONG loggedCompactDisplays = 0;
+    HRESULT loggedCompactResult = S_OK;
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
     std::unique_ptr<WallpaperManager> wallpaper;
@@ -270,6 +288,12 @@ public:
     std::unique_ptr<CursorManager> cursors;
     ClockOptions clock = LoadClockOptions();
     bool trayOnly = LoadTrayOnly();
+    bool dock = LoadDock();
+    MinSizeLookup minSize;
+    MinSizeSlot minSizeSlot;
+    HRESULT minSizeResult = E_PENDING;
+    bool minSizeReady = false;
+    LONG loggedDockResult = S_OK;
     DWORD build = BuildNumber();
     LONG backend = Waiting, applied = 0, lastResult = S_OK;
     UINT taskbarCreated = RegisterWindowMessageW(L"TaskbarCreated");
@@ -303,6 +327,18 @@ public:
     bool bridgeRetained = false;
     std::vector<HWND> changedLegacyTaskbars;
 
+    // On exit, hand the taskbar back before the flower leaves the tray: the
+    // helper's adaptive overlay sits inside the icon, and Explorer crashed
+    // once (in CUIElement::LeaveImpl) removing the icon with it attached.
+    // Waits a second at most for the helper to report everything restored.
+    void QuiesceBridge() {
+        if (!shared) return;
+        InterlockedExchange(&shared->running, 0);
+        SetBridgeMode(shared, explorerPid, AcrylicMode::Off, true);
+        const auto deadline = GetTickCount64() + 1000;
+        while (GetTickCount64() < deadline && (Read(shared->adaptiveBitmaps) || Read(shared->adaptiveGlyphs)
+            || Read(shared->dockCount) || Read(shared->dockRegions) || Read(shared->barHeightShown))) Sleep(20);
+    }
     void ReleaseBridge() {
         if (shared) InterlockedExchange(&shared->running, 0);
         SetBridgeMode(shared, explorerPid, AcrylicMode::Off, true);
@@ -338,14 +374,15 @@ public:
             previousBridgeState = Idle;
         }
         InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
-        InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
-        SetBridgeMode(shared, explorerPid, mode, newOwner);
+        InterlockedExchange(&shared->trayOptions, TrayOptions());
+        const bool dockChanged = PublishDock();
+        SetBridgeMode(shared, explorerPid, mode, newOwner || dockChanged);
         if (!bridgeDll) {
             auto path = ExePath();
             const auto slash = path.find_last_of(L'\\');
             if (slash == std::wstring::npos) { lastResult = E_FAIL; return; }
             path.resize(slash + 1);
-            path += L"jellyflower-bridge-v19.dll";
+            path += L"jellyflower-bridge-v20.dll";
             bridgeDll = LoadLibraryExW(path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
             if (!bridgeDll) { lastResult = HRESULT_FROM_WIN32(GetLastError()); return; }
         }
@@ -396,7 +433,10 @@ public:
             keyboard.Refresh(SystemLightTheme(), window, keyboardLayout);
             keyboard.KeyboardField(field ? static_cast<LONG>(field->State()) : 0);
         }
-        tray.Refresh(window, mode);
+        RefreshCompact();
+        // With the status bar's menu button, the notification icon steps off
+        // the taskbar but stays registered for notices.
+        tray.Refresh(window, mode, StatusBarMenu());
         const DWORD cursorBefore = cursors->Error();
         cursors->Refresh();
         DWORD importError = 0;
@@ -411,6 +451,28 @@ public:
             Log(L"Cursor error=" + std::to_wstring(cursors->Error()));
             tray.CursorError(cursors->Error(), cursors->SaveFailed());
         }
+    }
+    void RefreshCompact() {
+        compact.Refresh(statusBar, wallpaperLight);
+        PublishTrayOptions();
+        const LONG displays = compact.Displays();
+        const HRESULT result = compact.Result();
+        if (displays == loggedCompactDisplays && result == loggedCompactResult) return;
+        Log(L"Compact displays=" + std::to_wstring(displays) + L" result=" + std::to_wstring(result));
+        // The status bar row is only enabled while a display is compact.
+        if (displays != loggedCompactDisplays && window) RefreshTaskbarMenu(window);
+        loggedCompactDisplays = displays;
+        loggedCompactResult = result;
+    }
+    // The jellyflower menu opens from the status bar on a compact display, so
+    // the taskbar needs neither our icon nor the hidden-icons chevron.
+    bool StatusBarMenu() const { return statusBar && compact.Displays() > 0; }
+    // Bit 0: only jellyflower's notification icon. Bit 1: its menu is in the
+    // status bar, so jellyflower-only hides the chevron as well.
+    LONG TrayOptions() const { return (trayOnly ? 1 : 0) | (StatusBarMenu() ? 2 : 0); }
+    void PublishTrayOptions() {
+        if (shared && InterlockedExchange(&shared->trayOptions, TrayOptions()) != TrayOptions())
+            SetBridgeMode(shared, explorerPid, mode, true);
     }
     void RefreshTaskbar() {
         HWND primary = FindWindowW(L"Shell_TrayWnd", nullptr);
@@ -440,8 +502,8 @@ public:
                 // The shell is rebuilding its HWNDs; publish settings without
                 // ending ownership or restoring the surviving XAML elements.
                 InterlockedExchange(&shared->clockOptions, static_cast<LONG>(clock.Packed()));
-                InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
-                SetBridgeMode(shared, explorerPid, mode);
+                InterlockedExchange(&shared->trayOptions, TrayOptions());
+                SetBridgeMode(shared, explorerPid, mode, PublishDock());
                 applied = Read(shared->appliedCount);
                 lastResult = Read(shared->lastResult);
             }
@@ -538,6 +600,58 @@ public:
     UINT TrayState() const {
         return (trayOnly ? 1u : 0u) | (backend != Legacy && backend != Unsupported ? 2u : 0u);
     }
+    // Publishes the dock and, while it is on, Windows' auto-hide state, which
+    // decides whether the hidden taskbar's edge stays in the click region.
+    // Returns whether the helper needs a refresh.
+    bool PublishDock() {
+        if (!shared) return false;
+        const LONG result = Read(shared->dockResult);
+        if (result != loggedDockResult) {
+            Log(L"Floating dock result=" + std::to_wstring(result) + L" docks=" + std::to_wstring(Read(shared->dockCount))
+                + L" click-through=" + std::to_wstring(Read(shared->dockRegions)));
+            loggedDockResult = result;
+        }
+        const LONG options = dock ? 1 | (ReadTaskbarOptions().autoHide ? 2 : 0) : 0;
+        bool changed = InterlockedExchange(&shared->dockOptions, options) != options;
+        // The taller bar needs where Taskbar.dll keeps GetMinSize. It is looked
+        // up only once the dock is on: from the cache, or from Microsoft's
+        // public symbols, downloaded once per Taskbar.dll version.
+        if (dock && !minSizeReady) {
+            // Say so before the network is used: the first time, and after a
+            // Windows update changes Taskbar.dll.
+            if (!minSize.Started() && !MinSizeCached()) tray.UpdateNotice(Tr(TextId::DockSymbols), Tr(TextId::DockSymbolsBody));
+            minSize.Start();
+            if (minSize.Ready(minSizeSlot, minSizeResult)) {
+                minSizeReady = true;
+                Log(L"Taskbar GetMinSize slot=" + std::to_wstring(minSizeSlot.slot) + L" result=" + std::to_wstring(minSizeResult));
+            }
+        }
+        const bool tall = dock && minSizeReady && SUCCEEDED(minSizeResult);
+        const auto publish = [&](volatile LONG& field, LONG value) { changed |= InterlockedExchange(&field, value) != value; };
+        publish(shared->minSizeSlot, tall ? static_cast<LONG>(minSizeSlot.slot) : 0);
+        publish(shared->minSizeFunction, tall ? static_cast<LONG>(minSizeSlot.function) : 0);
+        publish(shared->barHeight, tall ? DockBarHeight : 0);
+        return changed;
+    }
+    // Bit 0: the floating dock is on. Bit 1: the XAML taskbar can apply it.
+    UINT DockState() const {
+        return (dock ? 1u : 0u) | (backend != Legacy && backend != Unsupported ? 2u : 0u);
+    }
+    UINT ChangeDock() {
+        const DWORD error = SaveDock(!dock);
+        if (error) {
+            Log(L"Dock setting error=" + std::to_wstring(error));
+            tray.UpdateNotice(Tr(TextId::DockSaveError), Text(TextId::DockSaveBody, {{L"error", std::to_wstring(error)}}).c_str(), true);
+        } else {
+            dock = !dock;
+            Log(std::wstring(L"Floating dock=") + (dock ? L"on" : L"off"));
+            // A failed lookup (offline, say) is tried again the next time.
+            if (dock && minSizeReady && FAILED(minSizeResult)) { minSize = MinSizeLookup{}; minSizeReady = false; }
+            PublishDock();
+            SetBridgeMode(shared, explorerPid, mode, true);
+        }
+        return DockState();
+    }
     UINT ChangeKeyboard() {
         const DWORD error = SaveKeyboardLayout(!keyboardLayout);
         if (error) {
@@ -550,6 +664,22 @@ public:
         }
         return keyboardLayout ? 1 : 0;
     }
+    // Bit 0: the status bar is on. Bit 1: a display is compact, so it shows.
+    UINT StatusBarState() const {
+        return (statusBar ? 1u : 0u) | (compact.Displays() > 0 ? 2u : 0u);
+    }
+    UINT ChangeStatusBar() {
+        const DWORD error = SaveStatusBar(!statusBar);
+        if (error) {
+            Log(L"Status bar setting error=" + std::to_wstring(error));
+            tray.UpdateNotice(Tr(TextId::StatusBarSaveError), Text(TextId::StatusBarSaveBody, {{L"error", std::to_wstring(error)}}).c_str(), true);
+        } else {
+            statusBar = !statusBar;
+            Log(std::wstring(L"Status bar=") + (statusBar ? L"on" : L"off"));
+            Refresh(); // Also brings the notification icon back, or hides it.
+        }
+        return StatusBarState();
+    }
     UINT ChangeTrayOnly() {
         const DWORD error = SaveTrayOnly(!trayOnly);
         if (error) {
@@ -559,7 +689,7 @@ public:
             trayOnly = !trayOnly;
             Log(std::wstring(L"Tray only jellyflower=") + (trayOnly ? L"on" : L"off"));
             Refresh();
-            if (shared) InterlockedExchange(&shared->trayOptions, trayOnly ? 1 : 0);
+            if (shared) InterlockedExchange(&shared->trayOptions, TrayOptions());
             SetBridgeMode(shared, explorerPid, mode, true);
         }
         return TrayState();
@@ -574,8 +704,9 @@ public:
 };
 Controller* controller = nullptr;
 void CALLBACK ForegroundChanged(HWINEVENTHOOK, DWORD, HWND, LONG, LONG, DWORD, DWORD) {
-    if (controller && controller->window && controller->backend == Legacy)
-        SetTimer(controller->window, DebounceTimer, 200, nullptr);
+    if (!controller || !controller->window) return;
+    controller->compact.ForegroundChanged();
+    if (controller->backend == Legacy) SetTimer(controller->window, DebounceTimer, 200, nullptr);
 }
 LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     auto* self = reinterpret_cast<Controller*>(GetWindowLongPtrW(window, GWLP_USERDATA));
@@ -601,6 +732,16 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == KeyboardCountQuery) return self->keyboard.KeyboardCount();
         if (wParam == KeyboardResultQuery) return self->keyboard.Result();
         if (wParam == KeyboardFieldQuery) return self->field ? static_cast<LONG>(self->field->State()) : -1;
+        if (wParam == CompactDisplaysQuery) return self->compact.Displays();
+        if (wParam == StatusBarQuery) return self->statusBar;
+        if (wParam == CompactResultQuery) return self->compact.Result();
+        if (wParam == DockQuery) return self->dock;
+        if (wParam == DockCountQuery) return self->shared ? Read(self->shared->dockCount) : 0;
+        if (wParam == DockRegionQuery) return self->shared ? Read(self->shared->dockRegions) : 0;
+        if (wParam == DockResultQuery) return self->shared ? Read(self->shared->dockResult) : S_OK;
+        if (wParam == BarHeightQuery) return self->shared ? Read(self->shared->barHeightShown) : 0;
+        if (wParam == BarHeightResultQuery) return self->minSizeReady && FAILED(self->minSizeResult) ? self->minSizeResult
+            : self->shared ? Read(self->shared->barHeightResult) : S_OK;
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult
@@ -636,12 +777,26 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
             if (selected == TrayExitCommand) PostMessageW(window, WM_CLOSE, 0, 0);
         }
         return 0;
+    } else if (message == StatusBarMenuMessage) {
+        // The status bar's button: the same menu, dropping down below it. A
+        // second press while it is open arrives here too and closes it.
+        RECT button{};
+        UINT dpi = 96;
+        if (!self->compact.MenuButton(button, dpi)) return 0;
+        self->cursors->Refresh();
+        self->compact.MenuOpen(true);
+        const UINT selected = self->tray.Menu(self->mode, self->cursors->Mode(), &button, dpi);
+        self->compact.MenuOpen(false);
+        if (selected == TrayExitCommand) PostMessageW(window, WM_CLOSE, 0, 0);
+        return 0;
     } else if (message == TrayThemeQueryMessage) {
         return wParam ? static_cast<UINT>(self->autoTheme->Status()) : SystemLightTheme();
     } else if (message == TrayDateQueryMessage) {
         return self->clock.Packed();
     } else if (message == TrayTaskbarQueryMessage) {
         if (wParam == 1) return self->TrayState();
+        if (wParam == 2) return self->StatusBarState();
+        if (wParam == 3) return self->DockState();
         return ReadTaskbarOptions().Packed();
     } else if (message == TrayWallpaperQueryMessage) {
         if(wParam==2)return static_cast<UINT>(self->wallpaperTheme);
@@ -660,7 +815,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
     } else if (message == TrayCursorIconMessage) {
         return reinterpret_cast<LRESULT>(self->cursors->MenuIcon(static_cast<int>(wParam)));
     } else if (message == TraySettingMessage) {
-        if(wParam==TrayAutoHideCommand){const auto result=ToggleTaskbarAutoHide();if(result.error)Log(L"Taskbar auto hide error="+std::to_wstring(result.error));RefreshTaskbarMenu(window);return result.Packed();}
+        if(wParam==TrayAutoHideCommand){const auto result=ToggleTaskbarAutoHide();if(result.error)Log(L"Taskbar auto hide error="+std::to_wstring(result.error));
+            if(self->PublishDock())SetBridgeMode(self->shared,self->explorerPid,self->mode,true);RefreshTaskbarMenu(window);return result.Packed();}
         if(wParam==TrayWallpaperThemeCommand)return self->ChangeWallpaperTheme();
         if (wParam == TrayWallpaperCommand) {
             self->RefreshWallpaperTheme();
@@ -683,6 +839,8 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == TrayDateCommand) return self->ChangeDate();
         if (wParam == TrayOnlyCommand) return self->ChangeTrayOnly();
         if (wParam == TrayKeyboardCommand) return self->ChangeKeyboard();
+        if (wParam == TrayStatusBarCommand) return self->ChangeStatusBar();
+        if (wParam == TrayDockCommand) return self->ChangeDock();
         if (wParam == TrayThemeCommand) {
             const auto state = self->autoTheme->Status();
             if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {
@@ -747,6 +905,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         RefreshTaskbarMenu(window);
         if (message == self->taskbarCreated) {
             self->tray.ShellRestarted();
+            self->compact.ShellRestarted();
             self->attachStarted = GetTickCount64();
             self->Refresh();
             SetTimer(window, FastAttachTimer, 100, nullptr);
@@ -776,6 +935,12 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         self->wallpaperAutoTheme.reset();
         self->wallpaper.reset();
         self->autoTheme.reset();
+        // Hand the screen's edges back first. ABM_REMOVE runs on Explorer's
+        // taskbar thread and resizes every maximized window; finishing it while
+        // the helper is still steady keeps that work apart from the tray icon's
+        // removal and the helper's restore below.
+        self->compact.Remove();
+        self->QuiesceBridge();
         self->tray.Remove();
         self->window = nullptr;
         PostQuitMessage(0);
@@ -833,6 +998,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     const HWND window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, WindowClass, L"jellyflower",
         WS_POPUP, 0, 0, 0, 0, nullptr, nullptr, instance, &app);
     if (!window) return static_cast<int>(GetLastError());
+    app.compact.Owner(window);
     app.autoTheme = std::make_unique<AutoTheme>(window);
     app.wallpaper = std::make_unique<WallpaperManager>(window, SystemLightTheme());
     app.powerNotification = RegisterPowerSettingNotification(window, &PowerSavingGuid, DEVICE_NOTIFY_WINDOW_HANDLE);

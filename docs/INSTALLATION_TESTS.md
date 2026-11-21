@@ -287,3 +287,33 @@ Use a display narrower than about 666 DIP, such as a tablet in portrait at 300% 
 5. Rotate to landscape with Start closed, then open it: the native width and six pinned columns return. Rotate back: the narrow layout returns. Repeat once with Start open.
 6. Toggle light/dark, then choose general > exit (and separately end jellyflower.exe): Start returns to Windows' width, cut-off edge included, within a second or two.
 7. On a display where Start already fits (for example 1920x1080 at 100% or 150%), nothing changes from the previous release.
+
+## Floating dock acceptance (Explorer helper v20)
+
+1. Update from 0.21.0, or stop it and start the new build. `--diagnose` reports `bridgeState` 2 with no revision mismatch. If the taskbar styling does not return, sign out and back in once.
+2. Open taskbar: `floating` is the last row, reading `off` beside the dock glyph. Select it: the row reads `on` and the menu stays open.
+3. Within a second, Start and the app buttons sit in one rounded pill, 3 DIPs above the bottom edge of the screen, with a thin outline. Check acrylic `system`, `pure` and `off`, in light and dark. Hover highlights and running indicators stay inside the pill. Diagnostics report `floatingDock` true, `dockTaskbars` 1, `clickThroughTaskbars` 1 and `dockLastResult` 0.
+4. Click and tap beside the pill: the desktop gets the click (select a desktop icon there; right-click shows the desktop menu). Start, every app button, widgets and the notification area (flower, clock, Quick Settings, show desktop) still respond, including right-click jump lists, hover thumbnails and drag-reordering inside the pill.
+5. Open and close apps, and pin and unpin one: the pill grows and shrinks with the buttons, and a new button is never cut off.
+6. With tray `all`, the tray icons and clock sit at the right with no background, and the clock and supported monochrome icons follow the wallpaper's contrast. Switch between a light and a dark wallpaper.
+7. Turn auto hide on: the taskbar hides, moving the pointer to the bottom edge brings it back, maximized windows reach the bottom, and clicks beside the pill reach the window behind. Turn auto hide off.
+8. Change display scale (100%, 150%, 300%), rotate the screen, and switch taskbar alignment to left: the pill follows each layout.
+9. Restart Explorer: the dock reapplies without Explorer crashing, and the bar is never left cut to an old region.
+10. Turn floating off, then separately exit, and separately end jellyflower.exe in Task Manager. Each time the full-width taskbar returns within a few seconds, clickable across its whole width, with its stock top line.
+10a. With tray `jellyflower`, acrylic `system` and floating on, exit from the menu and with `--stop`, five times each. Explorer must never restart: no Explorer.EXE APPCRASH in Event Viewer (Windows Logs > Application, event 1000) and no new `explorer.exe.*.dmp` in `%LOCALAPPDATA%\CrashDumps`. A dev build once crashed Explorer here (`Windows.UI.Xaml.dll!CUIElement::LeaveImpl`, while the tray removed the flower with the dock's bare-tray contrast overlay attached); the controller now restores the helper before removing its icon.
+11. With two monitors, including two identical ones, both taskbars float and both are click-through.
+12. On Windows 10 or a legacy taskbar, the floating row is greyed out and dispatches nothing.
+13. Taller bar: the first time floating is turned on, a notice says the taskbar's symbols are being downloaded, then `MinSizeSlot` appears under `HKCU\Software\jellyflower` within a few seconds, `%LOCALAPPDATA%\jellyflower\symbols` is left empty, and the bar grows to 64 DIPs (192 pixels at 300%). `--diagnose` reports `taskbarHeight` 64 and `taskbarHeightResult` 0. Maximized windows end above the taller bar, and each app's hover and running highlight is a centered square. Offline on first use: the bar stays 48 and the dock still floats; turning floating off and on retries (with the notice again). With the slot cached, turning floating on shows no notice.
+14. Floating off, exit and ending jellyflower.exe each return the 48-DIP bar and the original work area within a few seconds. After a Windows update that changes Taskbar.dll, the slot is looked up again; a slot that no longer holds Windows' method is never written (`taskbarHeightResult` = ERROR_REVISION_MISMATCH).
+
+## Compact displays and status bar acceptance (0.22.0)
+
+1. On a display narrower than 666 DIP (a tablet in portrait, or a window-sized test display), start jellyflower. `--diagnose` reports `compactDisplays` 1, `statusBar` true and `compactLastResult` 0.
+2. Maximize a window: it stops 8 DIP from the sides and from the top of the taskbar and 40 DIP from the top of the screen. Snap two windows side by side: both stay inside the margins. Apps with their own title bars (VS Code, Edge, Settings) behave the same.
+3. The time is centered in the top margin with a small chevron, in the desktop theme's text color, with no background. Select it: the jellyflower menu drops down from it. The flower is gone from the tray, and in `jellyflower` tray mode the tray's chevron is hidden too. Notices still appear.
+4. Clicks and taps on the margins outside the time reach the desktop or the window behind.
+5. Play a video full screen or press F11: it covers the whole screen, status bar included. Leave full screen: the status bar returns.
+6. Turn **taskbar > status bar** off: the time disappears, the flower returns to the tray, and maximized windows don't move. Turn it back on.
+7. Rotate to landscape (or use a display 666 DIP or wider): the margins and status bar go away, and the status bar row greys out. Rotate back: they return.
+8. Exit jellyflower, and separately end jellyflower.exe in Task Manager: maximized windows grow back to the full work area within a few seconds. Restart Explorer: the margins return.
+9. Known issue: in VS Code, selecting its maximize button has sometimes maximized the window and then closed it. Check whether it still happens, with and without the margins.

@@ -42,7 +42,7 @@ void CALLBACK TaskbarEvent(HWINEVENTHOOK,DWORD,HWND window,LONG object,LONG chil
 void Session::Refresh()noexcept{
     if(refreshing || !state || !alive)return;refreshing=true;
     try{
-        const bool active=alive() && DecodeAcrylicMode(Read(state->active))==AcrylicMode::Pure;
+        const bool active=alive() && BareTray(*state);
         HIGHCONTRASTW contrast{sizeof(contrast)};const bool high=!SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0) || (contrast.dwFlags&HCF_HIGHCONTRASTON);
         const bool allowed=active && !high;
         const bool visible=allowed && !locked && TaskbarShown();
@@ -81,7 +81,7 @@ void RefreshAdaptive(HINSTANCE module,SharedState* state,bool(*alive)())noexcept
     auto& session=Current();session.state=state;session.alive=alive;
     // Default system mode tracks lightweight references only, with no bitmap
     // inspection, shader creation, extra timer, or foreground color changes.
-    if(!session.window && state && DecodeAcrylicMode(Read(state->active))==AcrylicMode::Pure){
+    if(!session.window && state && BareTray(*state)){
         WNDCLASSW wc{};wc.hInstance=module;wc.lpfnWndProc=Proc;wc.lpszClassName=NotifyClass;
         if(RegisterClassW(&wc) || GetLastError()==ERROR_CLASS_ALREADY_EXISTS)session.window=CreateWindowExW(0,NotifyClass,nullptr,0,0,0,0,0,HWND_MESSAGE,nullptr,module,nullptr);
         if(session.window){
@@ -91,7 +91,7 @@ void RefreshAdaptive(HINSTANCE module,SharedState* state,bool(*alive)())noexcept
                 if(bytes>=sizeof(WTSINFOEXW)){const auto info=reinterpret_cast<WTSINFOEXW*>(buffer);if(info->Level==1)session.locked=info->Data.WTSInfoExLevel1.SessionFlags==WTS_SESSIONSTATE_LOCK;}
                 WTSFreeMemory(buffer);
             }
-            // Refresh arms one shared liveness timer only while pure is active.
+            // Refresh arms one shared liveness timer only while the tray is bare.
         }
     }
     session.Refresh();

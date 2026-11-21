@@ -35,7 +35,7 @@ void Check(bool ok,const char* text){if(!ok)throw std::runtime_error(text);}
 #include "../src/tray.cpp"
 namespace acrylic {
 void RefreshAppBranding(HWND,bool){++branding;}
-UINT ShowTrayMenu(HWND,POINT,UINT,AcrylicMode,bool,UINT,const RECT&){return 0;}
+UINT ShowTrayMenu(HWND,POINT,UINT,AcrylicMode,bool,UINT,const RECT&,bool){return 0;}
 }
 int main(){acrylic::SetTextLanguage(acrylic::Language::English);try{
     const auto owner=reinterpret_cast<HWND>(1);

@@ -666,3 +666,25 @@ KeyboardLayout checks the pure arrangement. KeyboardMirror hosts the production 
 During development the user checked the keyboard and narrow Start by hand on a portrait 300% touch tablet (Windows 11 25H2, build 26200).
 
 Not run here: StartConnection against the real Start, Search and TextInputHost hosts, `tests\Smoke.ps1`, TaskbarSystem, TaskbarLifetime, the cursor-pack tests, and the local installer's update from 0.20.0. ARM64 is built only by CI. The 0.21.0 checklists in INSTALLATION_TESTS (swipe typing, Narrator, a custom keyboard theme, rotation with Start open, displays where Start already fits) remain the record for desktop results.
+
+## 0.22.0 floating dock validation (2026-11-21)
+
+Build: every target builds at x64 Release with `/W4`; `ctest -L unit` passes all 17 unit tests, including DockGeometry (pill padding, float gap, corners, region rectangles) and BarHeight (the `GetMinSize` slot is written only while it holds Windows' method, the stock method runs first, the height is idempotent and restore is exact; vtable scan and CodeView key). BridgeNotify retires a stopped v19 helper, tray counter included. The DockLayout, TrayOnlyLayout, AdaptiveContrast and ClockLayout island fixtures pass, and DockLayout covers the pill, the outline brush, following the layout, shell rewrites, held frame and tray heights, square highlights with app-icon corners, the empty-group fallback and every restore path. MenuPresentation renders the new floating row.
+
+Checked by hand on a portrait 300% touch tablet (Windows 11 25H2, build 26200, one display, acrylic system, dark theme):
+
+- v20 attached after a normally stopped v19 retired, with no sign-out.
+- The pill sits behind Start and the apps, and grows and shrinks as an app opens and closes. Clicks beside it reach the desktop; the pill and the tray still take input (checked with `WindowFromPoint`).
+- Explorer's own whole-window region on `Shell_TrayWnd` is restored exactly when the dock turns off.
+- First use downloaded Taskbar.dll's public symbols (7.5 MB), cached the slot and deleted the file; the bar became 192 pixels (64 DIPs) and the work area moved with it. The button highlights stay square with rounded corners.
+- An earlier build crashed Explorer once on exit (`Windows.UI.Xaml.dll!CUIElement::LeaveImpl`, while the tray removed the flower with the adaptive overlay attached). After the shutdown order changed, three exits with the dock on were clean. The root cause isn't proven.
+
+Not checked on a desktop: more than one display (including identical displays), 100% and 150% scale, a left-aligned taskbar, auto hide with the click-through region, light theme, acrylic `pure` and `off`, Explorer restarting while the dock is on, the offline first use, the first-download notice, a Windows update that changes Taskbar.dll, and ARM64.
+
+## 0.22.0 compact displays and status bar validation (2026-11-21)
+
+CompactLogic (CI) passes: the compact width rule, app-bar proposal and placement, the full-screen test, the minute timer and the status bar colors. The live CompactScreen test is not part of this record.
+
+Seen on the portrait 300% touch tablet (build 26200) while the dock was tested: maximized windows sat inside the side and top margins, and the work area ended 24 pixels (8 DIP) above the taskbar, including above the 64-DIP dock bar. In VS Code, selecting its maximize button has sometimes maximized the window and then closed it; the cause is not investigated.
+
+Not checked on a desktop for this release: the acceptance steps in INSTALLATION_TESTS (the status bar menu, notices with the flower hidden, full screen, turning the status bar off, rotation, exit and Explorer restart), more than one display, light theme, keyboard and screen-reader access (there is no keyboard path to the menu yet), and ARM64.

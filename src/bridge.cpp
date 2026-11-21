@@ -9,6 +9,8 @@
 #include "volume.hpp"
 #include "chevron.hpp"
 #include "tray_only.hpp"
+#include "dock.hpp"
+#include "bar_height.hpp"
 #include "acrylic_material.hpp"
 #include <unknwn.h>
 #include <shobjidl.h>
@@ -20,7 +22,10 @@
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Shapes.h>
+#include <winrt/Windows.UI.Xaml.Automation.Peers.h>
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <iterator>
 #include <memory>
 #include <string_view>
@@ -73,6 +78,8 @@ void RefreshClocks() noexcept;
 void RefreshVolumes() noexcept;
 void RefreshChevrons() noexcept;
 void RefreshTrays() noexcept;
+void RefreshDocks() noexcept;
+void SoonDocks() noexcept;
 
 class Background : public std::enable_shared_from_this<Background> {
 public:
@@ -133,7 +140,9 @@ public:
     }
     void Refresh() noexcept {
         try {
-            if (owner.Alive() && Read(state->active) != 0) {
+            // The dock reuses the stroke rectangle as its outline, so its fill
+            // stays clear while the dock is on, even with acrylic off.
+            if (owner.Alive() && (Read(state->active) != 0 || (border && DockOn(*state)))) {
                 if (!border && (light != SystemLightTheme() || mode != DecodeAcrylicMode(Read(state->active)))) UpdateTheme();
                 if (shape.Fill() != effect) {
                     updating = true;
@@ -177,6 +186,9 @@ public:
 };
 void RefreshBackgrounds() noexcept {
     try {
+        // Docks first: turning the dock off restores its outline's shape
+        // before the stroke rectangle gets its stock fill back.
+        RefreshDocks();
         // Retain records while Fill callbacks can mutate the visual tree.
         std::vector<std::shared_ptr<Background>> snapshot;
         for (const auto& item : Backgrounds()) snapshot.push_back(item.second);
@@ -220,7 +232,7 @@ public:
         try {
             HIGHCONTRASTW contrast{sizeof(contrast)};
             const bool high=!SystemParametersInfoW(SPI_GETHIGHCONTRAST,sizeof(contrast),&contrast,0) || (contrast.dwFlags&HCF_HIGHCONTRASTON);
-            view.Refresh(owner.Alive(), DecodeClockOptions(state ? static_cast<UINT>(Read(state->clockOptions)) : 1),state && DecodeAcrylicMode(Read(state->active))==AcrylicMode::Pure && !high);
+            view.Refresh(owner.Alive(), DecodeClockOptions(state ? static_cast<UINT>(Read(state->clockOptions)) : 1),state && BareTray(*state) && !high);
             if (state) InterlockedExchange(&state->clockResult, S_OK);
             Count();
         } catch (...) {
@@ -403,9 +415,11 @@ public:
     // New icons and replaced stacks are hidden shortly after they arrive.
     void Soon() noexcept { if (!soon) soon = SetTimer(nullptr, 0, 50, TrayTimer); }
     void Refresh() noexcept {
-        const bool enabled = owner.Alive() && (Read(state->trayOptions) & 1) != 0;
+        const LONG options = Read(state->trayOptions);
+        const bool enabled = owner.Alive() && (options & 1) != 0;
         HRESULT result = S_OK;
-        try { view.Refresh(enabled); result = view.Error(); }
+        // Bit 1: the menu opens from the compact status bar, so the chevron goes too.
+        try { view.Refresh(enabled, (options & 2) != 0); result = view.Error(); }
         catch (...) {
             // An unreadable shell layout must leave the stock tray usable.
             result = winrt::to_hresult();
@@ -439,6 +453,149 @@ void RefreshTrays() noexcept {
 }
 void CALLBACK TrayTimer(HWND, UINT, UINT_PTR timer, DWORD) {
     for (const auto& item : Trays()) {
+        if (item.second->soon == timer) { KillTimer(nullptr, timer); item.second->soon = 0; }
+        else if (item.second->timer != timer) continue;
+        const auto strong = item.second;
+        strong->Refresh(); break;
+    }
+}
+class Dock;
+auto& Docks() {
+    thread_local auto* records = new std::unordered_map<InstanceHandle, std::shared_ptr<Dock>>;
+    return *records;
+}
+void CALLBACK DockTimer(HWND, UINT, UINT_PTR, DWORD);
+// One per taskbar frame: the floating pill, and a window region that makes
+// the rest of the bar click-through. The region is set only from timers and
+// refresh messages, never inside a XAML callback.
+class Dock : public std::enable_shared_from_this<Dock> {
+    xaml::FrameworkElement frame;
+    DockView view;
+    DockRegion region;
+    bool counted = false, shaped = false;
+    int remeasures = 0;
+public:
+    UINT_PTR timer = 0, soon = 0, remeasure = 0;
+    explicit Dock(const xaml::FrameworkElement& element) : frame(element), view(element) {}
+    void Start() {
+        EnsureBridgeNotifyWindow(module, RefreshBackgrounds);
+        const std::weak_ptr<Dock> weak = shared_from_this();
+        view.OnMoved([weak] { if (const auto self = weak.lock()) self->Soon(); });
+        timer = SetTimer(nullptr, 0, 2000, DockTimer);
+        if (!timer) winrt::throw_last_error();
+        Soon();
+    }
+    // Buttons added or removed: follow them on the next turn of the loop.
+    void Soon() noexcept { if (!soon) soon = SetTimer(nullptr, 0, USER_TIMER_MINIMUM, DockTimer); }
+    // The stroke rectangle's stock brush, kept by the acrylic adapter while
+    // its own fill is clear. It follows light and dark like the stock line.
+    media::Brush StockStroke() const {
+        for (const auto& item : Backgrounds()) {
+            if (!item.second->border) continue;
+            auto parent = media::VisualTreeHelper::GetParent(item.second->shape);
+            for (unsigned depth = 0; parent && depth < 16; ++depth, parent = media::VisualTreeHelper::GetParent(parent))
+                if (parent == frame) return item.second->original;
+        }
+        return nullptr;
+    }
+    HRESULT Shape(bool wanted) noexcept {
+        if (!wanted || view.Hits().empty()) { region.Restore(); return S_OK; }
+        try {
+            const auto root = frame.XamlRoot();
+            if (!root) { region.Restore(); return S_OK; }
+            const double scale = root.RasterizationScale();
+            const auto size = root.Size();
+            POINT offset{};
+            HRESULT error = S_OK;
+            const SIZE island{std::lround(size.Width * scale), std::lround(size.Height * scale)};
+            HWND window = FindDockWindow(island, nullptr, GetCurrentThreadId(), offset, error);
+            if (!window && error == TYPE_E_AMBIGUOUSNAME) {
+                // Identical monitors: the frame's automation peer knows where on screen it is.
+                if (const auto peer = xaml::Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(frame)) {
+                    const auto bounds = peer.GetBoundingRectangle();
+                    const POINT center{std::lround(bounds.X + bounds.Width / 2), std::lround(bounds.Y + bounds.Height / 2)};
+                    window = FindDockWindow(island, &center, GetCurrentThreadId(), offset, error);
+                }
+            }
+            if (!window) { region.Restore(); return error; }
+            RECT bounds{};
+            if (!GetWindowRect(window, &bounds)) { region.Restore(); return HRESULT_FROM_WIN32(GetLastError()); }
+            const bool autoHide = (Read(state->dockOptions) & 2) != 0;
+            return region.Apply(window, DockRegionRects(view.Hits(), scale, offset, bounds.right - bounds.left, bounds.bottom - bounds.top, autoHide));
+        } catch (...) {
+            region.Restore();
+            return winrt::to_hresult();
+        }
+    }
+    void Refresh() noexcept {
+        const bool enabled = owner.Alive() && DockOn(*state);
+        HRESULT result = S_OK;
+        try {
+            view.Refresh(enabled, enabled ? StockStroke() : nullptr, enabled ? Read(state->barHeight) : 0);
+            result = view.Error();
+        } catch (...) {
+            result = winrt::to_hresult();
+            view.Restore();
+        }
+        const HRESULT shapedResult = Shape(enabled && view.Applied());
+        if (SUCCEEDED(result)) result = shapedResult;
+        if (state) InterlockedExchange(&state->dockResult, result);
+        SetHeight();
+        Count();
+    }
+    LONG Height() const noexcept { return view.Height(); }
+    // The taller window answers for every taskbar at once (one vtable slot in
+    // Taskbar.dll), so it takes the largest height any dock holds.
+    void SetHeight() noexcept {
+        if (!state) return;
+        LONG wanted = 0;
+        for (const auto& item : Docks()) wanted = (std::max)(wanted, item.second->Height());
+        const LONG before = BarHeight();
+        const HRESULT result = SetBarHeight(reinterpret_cast<BYTE*>(GetModuleHandleW(L"Taskbar.dll")),
+            static_cast<DWORD>(Read(state->minSizeSlot)), static_cast<DWORD>(Read(state->minSizeFunction)), wanted);
+        if (BarHeight() != before) Remeasure();
+        InterlockedExchange(&state->barHeightShown, BarHeight());
+        InterlockedExchange(&state->barHeightResult, result);
+    }
+    // Explorer measures the bar again; the second pass, once the frame has
+    // its new height, moves the work area too.
+    void Remeasure() noexcept {
+        remeasures = 2;
+        if (!remeasure) remeasure = SetTimer(nullptr, 0, 250, DockTimer);
+    }
+    void Remeasured() noexcept {
+        RemeasureTaskbar();
+        if (--remeasures > 0) return;
+        KillTimer(nullptr, remeasure);
+        remeasure = 0;
+    }
+    void Count() noexcept {
+        if (!state) return;
+        if (counted != view.Applied()) { counted = view.Applied(); counted ? InterlockedIncrement(&state->dockCount) : InterlockedDecrement(&state->dockCount); }
+        if (shaped != region.Applied()) { shaped = region.Applied(); shaped ? InterlockedIncrement(&state->dockRegions) : InterlockedDecrement(&state->dockRegions); }
+    }
+    ~Dock() {
+        if (timer) KillTimer(nullptr, timer);
+        if (soon) KillTimer(nullptr, soon);
+        if (remeasure) KillTimer(nullptr, remeasure);
+        region.Restore();
+        view.Restore();
+        Count();
+    }
+};
+void RefreshDocks() noexcept {
+    try {
+        std::vector<std::shared_ptr<Dock>> snapshot;
+        for (const auto& item : Docks()) snapshot.push_back(item.second);
+        for (const auto& dock : snapshot) dock->Refresh();
+    } catch (...) { if (state) InterlockedExchange(&state->dockResult, winrt::to_hresult()); }
+}
+void SoonDocks() noexcept {
+    for (const auto& item : Docks()) item.second->Soon();
+}
+void CALLBACK DockTimer(HWND, UINT, UINT_PTR timer, DWORD) {
+    for (const auto& item : Docks()) {
+        if (item.second->remeasure == timer) { const auto strong = item.second; strong->Remeasured(); break; }
         if (item.second->soon == timer) { KillTimer(nullptr, timer); item.second->soon = 0; }
         else if (item.second->timer != timer) continue;
         const auto strong = item.second;
@@ -515,6 +672,16 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
         try { chevron->Start(); }
         catch (...) { chevrons.erase(handle); throw; }
     }
+    void TryDock(const xaml::DependencyObject& object, InstanceHandle handle) {
+        const auto frame = object.try_as<xaml::FrameworkElement>();
+        if (!frame) return;
+        auto& docks = Docks();
+        if (docks.find(handle) != docks.end()) return;
+        auto dock = std::make_shared<Dock>(frame);
+        docks.emplace(handle, dock);
+        try { dock->Start(); }
+        catch (...) { docks.erase(handle); throw; }
+    }
     void TryTray(const xaml::DependencyObject& object) {
         const auto frame = FindTrayFrame(object);
         if (!frame) return;
@@ -566,6 +733,12 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
                     const auto strong = tray->second;
                     trays.erase(tray);
                 }
+                auto& docks = Docks();
+                const auto dock = docks.find(element.Handle);
+                if (dock != docks.end()) {
+                    const auto strong = dock->second;
+                    docks.erase(dock);
+                }
                 return S_OK;
             }
             if (mutation != Add) return S_OK;
@@ -576,6 +749,15 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
                 try{winrt::Windows::Foundation::IInspectable object{nullptr};winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
                     RefreshAdaptive(module,state,AdaptiveOwnerAlive);TrackAdaptive(element.Handle,object.as<xaml::DependencyObject>());
                 }catch(...){if(state)InterlockedExchange(&state->adaptiveResult,winrt::to_hresult());}
+            }
+            if (type == L"Taskbar.TaskbarFrame") {
+                try {
+                    winrt::Windows::Foundation::IInspectable object{nullptr};
+                    winrt::check_hresult(diagnostics->GetIInspectableFromHandle(element.Handle,
+                        reinterpret_cast<::IInspectable**>(winrt::put_abi(object))));
+                    TryDock(object.as<xaml::DependencyObject>(), element.Handle);
+                } catch (...) { if (state) InterlockedExchange(&state->dockResult, winrt::to_hresult()); }
+                return S_OK;
             }
             const bool trayCandidate = type == L"SystemTray.SystemTrayFrame" || type == L"SystemTray.NotifyIconView"
                 || type == L"SystemTray.Stack" || type == L"SystemTray.OmniButton";
@@ -635,6 +817,8 @@ struct Watcher : winrt::implements<Watcher, IVisualTreeServiceCallback2, winrt::
                 backgrounds.emplace(element.Handle, background);
                 try { background->Start(); }
                 catch (...) { backgrounds.erase(element.Handle); throw; }
+                // A frame seen before its background can take its shape now.
+                SoonDocks();
             }
         } catch (...) { Result(winrt::to_hresult()); }
         // A shell change/error must not propagate into Explorer's diagnostics.

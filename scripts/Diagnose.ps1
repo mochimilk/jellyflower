@@ -23,3 +23,9 @@ Write-Host 'trayOnlyJellyflower reports the saved tray choice. hiddenTrayParts c
 Write-Host 'keyboardLayout reports the saved touch keyboard choice. keyboardAttached is the touch keyboard host connection (attached only once symmetric is chosen); keyboardSymmetricGrids counts keyboard pages showing the symmetric layout (0 while the keyboard is hidden or on a page it leaves stock). keyboardLastResult reports an HRESULT.'
 
 Write-Host 'keyboardField is what the touch keyboard''s return key follows: empty (dimmed), text (accent), unknown (Windows'' look; passwords and apps that report no text), or off when the symmetric layout is off.'
+
+Write-Host 'compactDisplays counts displays narrower than Start that have window margins (0 on wider screens). statusBar reports the saved status bar choice; the margins stay when it is off. compactLastResult reports an HRESULT.'
+
+Write-Host 'floatingDock reports the saved dock choice. dockTaskbars counts taskbars drawn as a floating pill (0 while no app button is visible), clickThroughTaskbars those whose empty parts pass clicks through. dockLastResult reports an HRESULT: ERROR_ALREADY_EXISTS (0x800700B7) means another program shapes the taskbar and click-through was left off, TYPE_E_AMBIGUOUSNAME (0x8002802C) that two identical taskbars could not be told apart.'
+
+Write-Host 'taskbarHeight is the taller bar in DIPs (64 while floating is on, 0 for the stock bar). taskbarHeightResult reports an HRESULT: ERROR_NOT_FOUND (0x80070490) or an HTTP error if Taskbar.dll''s public symbols could not be found or downloaded, ERROR_REVISION_MISMATCH (0x8007049A) if the slot no longer holds Windows'' method. Either way the dock keeps floating at 48 DIPs.'

@@ -122,7 +122,7 @@ struct TrayOnlyView::Impl {
     }
     ~Impl() { Restore(); }
     // Known parts only: an unfamiliar layout keeps everything we do not recognize.
-    std::vector<xaml::FrameworkElement> Collect() {
+    std::vector<xaml::FrameworkElement> Collect(bool menuElsewhere) {
         std::vector<xaml::FrameworkElement> targets, icons;
         xaml::FrameworkElement chevron{nullptr};
         bool flower = false;
@@ -152,18 +152,19 @@ struct TrayOnlyView::Impl {
             for (int i = count - 1; i >= 0; --i) pending.push_back(media::VisualTreeHelper::GetChild(item, i));
         }
         targets.insert(targets.end(), icons.begin(), icons.end());
-        // Without our own icon on this taskbar, the chevron is the way to the menu.
-        if (flower && chevron) targets.push_back(chevron);
+        // Without our own icon on this taskbar, the chevron is the way to the
+        // menu, unless the status bar at the top of the screen opens it.
+        if ((flower || menuElsewhere) && chevron) targets.push_back(chevron);
         found = flower;
         return targets;
     }
     void Release(Part& part) noexcept {
         try { part.Restore(); } catch (...) { error = winrt::to_hresult(); }
     }
-    void Refresh(bool enabled) {
+    void Refresh(bool enabled, bool menuElsewhere) {
         error = S_OK;
         if (!enabled) { Restore(); return; }
-        const auto targets = Collect();
+        const auto targets = Collect(menuElsewhere);
         for (auto it = parts.begin(); it != parts.end();) {
             if (std::find(targets.begin(), targets.end(), (*it)->element) != targets.end()) { ++it; continue; }
             Release(**it);
@@ -185,7 +186,7 @@ struct TrayOnlyView::Impl {
 };
 TrayOnlyView::TrayOnlyView(const xaml::FrameworkElement& frame, TrayClassName className) : impl(std::make_unique<Impl>(frame, className)) {}
 TrayOnlyView::~TrayOnlyView() = default;
-void TrayOnlyView::Refresh(bool enabled) { impl->Refresh(enabled); }
+void TrayOnlyView::Refresh(bool enabled, bool menuElsewhere) { impl->Refresh(enabled, menuElsewhere); }
 void TrayOnlyView::Restore() noexcept { impl->Restore(); }
 unsigned TrayOnlyView::Hidden() const noexcept { return static_cast<unsigned>(impl->parts.size()); }
 bool TrayOnlyView::Found() const noexcept { return impl->found; }

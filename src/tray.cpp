@@ -43,7 +43,7 @@ void TrayIcon::Remove() noexcept {
         present_ = false;
     }
 }
-void TrayIcon::Refresh(HWND owner, AcrylicMode) {
+void TrayIcon::Refresh(HWND owner, AcrylicMode, bool hidden) {
     if(window_!=owner){Remove();brandTheme_=-1;}
     window_ = owner;
     const bool light = LightTaskbar();
@@ -69,15 +69,19 @@ void TrayIcon::Refresh(HWND owner, AcrylicMode) {
     // Re-sending NIF_ICON replaces Explorer's bitmap even when the HICON is
     // unchanged. Keep routine foreground/recovery refreshes presentation-free.
     // TaskbarCreated explicitly clears present_ through ShellRestarted().
-    if(present_ && !artworkChanged && tipLanguage_==language)return;
+    if(present_ && !artworkChanged && tipLanguage_==language && hidden_==hidden)return;
     if(present_ && !artworkChanged){
-        auto tip=Data(owner);tip.uFlags|=NIF_TIP|NIF_SHOWTIP;
+        auto tip=Data(owner);tip.uFlags|=NIF_TIP|NIF_SHOWTIP|NIF_STATE;
+        tip.dwState=hidden?NIS_HIDDEN:0;tip.dwStateMask=NIS_HIDDEN;
         wcsncpy_s(tip.szTip,Tr(TextId::TrayTip),_TRUNCATE);
-        if(Shell_NotifyIconW(NIM_MODIFY,&tip)){tipLanguage_=language;return;}
+        if(Shell_NotifyIconW(NIM_MODIFY,&tip)){tipLanguage_=language;hidden_=hidden;return;}
         present_=false;
     }
     auto data = Data(owner);
-    data.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+    data.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP | NIF_STATE;
+    data.dwState = hidden ? NIS_HIDDEN : 0;
+    data.dwStateMask = NIS_HIDDEN;
+    hidden_ = hidden;
     data.uCallbackMessage = TrayMessage;
     data.hIcon = icon_;
     wcsncpy_s(data.szTip,Tr(TextId::TrayTip),_TRUNCATE);
@@ -125,7 +129,13 @@ void TrayIcon::UpdateNotice(const wchar_t* title, const wchar_t* body, bool erro
     wcsncpy_s(data.szInfo, body, _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &data);
 }
-UINT TrayIcon::Menu(AcrylicMode mode, UINT cursorMode) const {
+UINT TrayIcon::Menu(AcrylicMode mode, UINT cursorMode, const RECT* below, UINT dpi) const {
+    if (below) {
+        const POINT anchor{(below->left + below->right) / 2, below->bottom};
+        const UINT selected = ShowTrayMenu(window_, anchor, dpi ? dpi : 96, mode, LightTaskbar(), cursorMode, *below, true);
+        PostMessageW(window_, WM_NULL, 0, 0);
+        return selected;
+    }
     POINT position{};
     NOTIFYICONIDENTIFIER identity{};
     identity.cbSize = sizeof(identity);

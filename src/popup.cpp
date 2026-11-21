@@ -65,7 +65,9 @@ std::vector<Row> TaskbarRows(AcrylicMode mode,bool date){
     return {{TrayToggleCommand,Tr(TextId::Acrylic),false,false,AcrylicModeLabel(mode)},
         {TrayDateCommand,Tr(TextId::Date),false,false,date?Tr(TextId::On):Tr(TextId::Off)},
         {TrayOnlyCommand,Tr(TextId::Tray),false,false,Tr(TextId::All)},
-        {TrayAutoHideCommand,Tr(TextId::AutoHide),false,false,Tr(TextId::Off),false}};
+        {TrayAutoHideCommand,Tr(TextId::AutoHide),false,false,Tr(TextId::Off),false},
+        {TrayStatusBarCommand,Tr(TextId::StatusBar),false,false,Tr(TextId::On),false},
+        {TrayDockCommand,Tr(TextId::Floating),false,false,Tr(TextId::Off),false}};
 }
 std::vector<Row> WallpaperRows(){
     return {{TrayWallpaperCommand,L"jellyflower",false,false,Tr(TextId::Off)},
@@ -167,7 +169,7 @@ struct Popup {
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
     HICON githubIcon = nullptr, wallpaperIcon = nullptr, keyboardIcon = nullptr;
-    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon;
+    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon, statusBarIcon, dockIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -194,6 +196,7 @@ struct Popup {
     RECT restingBounds{};
     ULONGLONG entranceStarted = 0;
     bool entering = false;
+    bool below = false; // The root menu opens below its anchor (the status bar) rather than above it.
     ~Popup() {
         PreviewCursor(-1);
         ClearPreviewCursors();
@@ -232,7 +235,8 @@ struct Popup {
         if (elapsed >= MenuEntranceDuration) { CompleteEntrance(); return; }
         const int offset = static_cast<int>(std::lround(Px(MenuEntranceDistance)
             * (1 - MenuEntranceProgress(static_cast<double>(elapsed) / MenuEntranceDuration))));
-        SetWindowPos(window, nullptr, restingBounds.left, restingBounds.top + offset, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        // Slide toward the anchor: up from the taskbar, down from the status bar.
+        SetWindowPos(window, nullptr, restingBounds.left, restingBounds.top + (below ? -offset : offset), 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     void BeginEntrance() {
         if (parent || highContrast || !MenuAnimationsEnabled()) return;
@@ -290,10 +294,16 @@ struct Popup {
         if(kind==TrayTaskbarCommand){
             const auto state=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,0,0));
             const auto tray=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,1,0));
+            const auto statusBar=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,2,0));
+            const auto dock=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,3,0));
             for(size_t i=0;i<rows.size();++i){
                 auto& row=rows[i];
                 if(row.command==TrayAutoHideCommand){row.secondary=(state&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(state&2)!=0;}
                 else if(row.command==TrayOnlyCommand){row.secondary=(tray&1)?L"jellyflower":Tr(TextId::All);row.enabled=(tray&2)!=0;}
+                // Only a display narrower than Start has a status bar to show.
+                else if(row.command==TrayStatusBarCommand){row.secondary=(statusBar&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(statusBar&2)!=0;}
+                // The floating dock needs the XAML taskbar.
+                else if(row.command==TrayDockCommand){row.secondary=(dock&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(dock&2)!=0;}
                 else continue;
                 if(i<buttons.size()){SetWindowTextW(buttons[i],(row.label+L", "+row.secondary).c_str());EnableWindow(buttons[i],row.enabled);}
                 RepaintRow(static_cast<int>(i));
@@ -419,7 +429,9 @@ struct Popup {
         return checkIcon.Load(IDI_CHECK_LIGHT, Px(MenuGlyphSize), text, highlightedText)
             && chevronIcon.Load(IDI_CHEVRON_RIGHT_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true))
             && (kind!=TrayTaskbarCommand || (autoHideIcon.Load(IDI_ACRYLIC_PURE_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
-                && trayOnlyIcon.Load(IDI_FLOWER_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
+                && trayOnlyIcon.Load(IDI_FLOWER_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
+                && statusBarIcon.Load(IDI_CLOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
+                && dockIcon.Load(IDI_DOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
             && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
     }
     bool UpdateTheme(bool systemMode) {
@@ -688,7 +700,7 @@ struct Popup {
                 root->RefreshUpdate();
             } else if (command == TrayWallpaperCommand || command==TrayWallpaperThemeCommand) {
                 root->RefreshWallpaper();
-            } else if(command==TrayAutoHideCommand || command==TrayOnlyCommand){
+            } else if(command==TrayAutoHideCommand || command==TrayOnlyCommand || command==TrayStatusBarCommand || command==TrayDockCommand){
                 root->RefreshTaskbar();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
@@ -793,6 +805,8 @@ struct Popup {
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
                 : row.command == TrayGithubCommand ? githubIcon : (row.command == TrayWallpaperCommand || row.command==TrayWallpaperMenuCommand) ? wallpaperIcon
                 : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayOnlyCommand?trayOnlyIcon.Get(!row.enabled)
+                : row.command==TrayStatusBarCommand?statusBarIcon.Get(!row.enabled)
+                : row.command==TrayDockCommand?dockIcon.Get(!row.enabled)
                 : row.command==TrayTaskbarCommand?acrylicIcons[2]:row.command==TrayKeyboardCommand?keyboardIcon:nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
@@ -888,14 +902,15 @@ struct Popup {
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
-        int x = anchor.x;
+        // From the status bar the menu drops down, centered under its button.
+        int x = !submenu && below ? anchor.x - width / 2 : anchor.x;
         if (submenu && x + width > area.right) {
             RECT ownerBounds{};
             GetWindowRect(owner, &ownerBounds);
             x = ownerBounds.left - width + Px(2);
         }
         x = std::clamp<LONG>(x, area.left, std::max(area.left, area.right - width));
-        const int y = std::clamp(submenu ? anchor.y : anchor.y - height - Px(MenuEdgeGap), area.top,
+        const int y = std::clamp(submenu ? anchor.y : below ? anchor.y + Px(MenuEdgeGap) : anchor.y - height - Px(MenuEdgeGap), area.top,
             std::max(area.top, area.bottom - height));
         restingBounds = {x, y, x + width, y + height};
         window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? Tr(TextId::Cursor) : kind == TrayGeneralCommand ? Tr(TextId::General) : kind==TrayTaskbarCommand?Tr(TextId::Taskbar):kind==TrayWallpaperMenuCommand?Tr(TextId::Wallpaper):L"jellyflower",
@@ -1077,7 +1092,7 @@ void RefreshThemeMenu(HWND owner) {
     if (activePopup && activePopup->controller == owner && !activePopup->done)
         activePopup->UpdateTheme(SendMessageW(owner, TrayThemeQueryMessage, 0, 0) != 0);
 }
-UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode, const RECT& trayBounds) {
+UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool light, UINT cursorMode, const RECT& trayBounds, bool below) {
     if (activePopup) { activePopup->Finish(); return 0; }
     if(RefreshLanguage())PostMessageW(owner,SearchIdentityReadyMessage,0,0);
     WNDCLASSW wc{};
@@ -1095,6 +1110,7 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     popup.controller = owner;
     popup.cursorMode = cursorMode;
     popup.trayBounds = trayBounds;
+    popup.below = below;
     const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayDateQueryMessage, 0, 0));
     popup.clockDate = (clockState & 1) != 0;
     SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &popup.hoverDelay, 0);

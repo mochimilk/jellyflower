@@ -14,7 +14,7 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
 HRESULT wallpaperError=E_FAIL;
-bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true,keyboardSymmetric=false;UINT autoHideActions=0,trayActions=0;
+bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true,keyboardSymmetric=false,statusBarOn=true,compactDisplay=true,dockOn=false;UINT autoHideActions=0,trayActions=0,statusBarActions=0,dockActions=0;
 AcrylicMode selectedAcrylic=AcrylicMode::System;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
@@ -193,6 +193,10 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
         return static_cast<UINT>(wallpaperState);
     }
     if(message==TraySettingMessage && parameter==TrayWallpaperThemeCommand){wallpaperAutomatic=!wallpaperAutomatic;return wallpaperAutomatic;}
+    if(message==TrayTaskbarQueryMessage && parameter==2)return (statusBarOn?1u:0u)|(compactDisplay?2u:0u);
+    if(message==TrayTaskbarQueryMessage && parameter==3)return (dockOn?1u:0u)|(trayXaml?2u:0u);
+    if(message==TraySettingMessage && parameter==TrayDockCommand){++dockActions;if(trayXaml)dockOn=!dockOn;return (dockOn?1u:0u)|(trayXaml?2u:0u);}
+    if(message==TraySettingMessage && parameter==TrayStatusBarCommand){++statusBarActions;if(compactDisplay)statusBarOn=!statusBarOn;return (statusBarOn?1u:0u)|(compactDisplay?2u:0u);}
     if(message==TrayTaskbarQueryMessage)return parameter==1?(trayOnly?1u:0u)|(trayXaml?2u:0u):(autoHide?1u:0u)|(taskbarBottom?2u:0u);
     if(message==TrayKeyboardQueryMessage)return keyboardSymmetric;
     if(message==TraySettingMessage && parameter==TrayKeyboardCommand){keyboardSymmetric=!keyboardSymmetric;return keyboardSymmetric;}
@@ -354,10 +358,10 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
             const HWND same=popup.window;
-            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;trayOnly=false;trayXaml=true;
+            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;trayOnly=false;trayXaml=true;statusBarOn=true;compactDisplay=true;dockOn=false;
             Check(popup.rows[1].command==TrayTaskbarCommand && popup.rows[2].command==TrayWallpaperMenuCommand && HasSubmenu(TrayTaskbarCommand) && HasSubmenu(TrayWallpaperMenuCommand),"root groups taskbar and wallpaper settings");
             popup.OpenChild(1,true);auto& taskbar=*popup.child;const HWND taskbarWindow=taskbar.window;
-            Check(taskbar.rows.size()==4 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayOnlyCommand && taskbar.rows[3].command==TrayAutoHideCommand,"taskbar order is acrylic, date, tray, auto hide");
+            Check(taskbar.rows.size()==6 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayOnlyCommand && taskbar.rows[3].command==TrayAutoHideCommand && taskbar.rows[4].command==TrayStatusBarCommand && taskbar.rows[5].command==TrayDockCommand,"taskbar order is acrylic, date, tray, auto hide, status bar, floating");
             Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.dateIcons[0] && taskbar.dateIcons[1],"taskbar submenu owns its themed setting icons");
             for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeLabel(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
             taskbar.Activate(1,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && taskbar.rows[1].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
@@ -375,6 +379,18 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             {const auto gray=GetSysColor(COLOR_GRAYTEXT);for(const auto pixel:IconPixels(taskbar.autoHideIcon.Get(true))){const auto alpha=pixel>>24;Check(((pixel>>16)&255)==(GetRValue(gray)*alpha+127)/255 && ((pixel>>8)&255)==(GetGValue(gray)*alpha+127)/255 && (pixel&255)==(GetBValue(gray)*alpha+127)/255,"disabled auto-hide icon uses the same gray ink as its label");}}
             Capture(taskbar,std::filesystem::path(argv[1])/(std::wstring(light?L"taskbar-light-":L"taskbar-dark-")+std::to_wstring(dpi)+L".bmp"));
             taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(3,false);Check(!autoHide && taskbar.rows[3].secondary==L"off","external edge changes re-enable the current state");
+            Check(taskbar.rows[4].label==Tr(TextId::StatusBar) && taskbar.rows[4].secondary==L"on" && taskbar.rows[4].enabled && taskbar.statusBarIcon,"status bar starts on, with its clock icon, on a compact display");
+            taskbar.Activate(4,false);Check(!statusBarOn && taskbar.rows[4].secondary==L"off" && !popup.done && taskbar.window==taskbarWindow,"status bar turns off in place");
+            taskbar.Activate(4,false);Check(statusBarOn && taskbar.rows[4].secondary==L"on" && !popup.done,"status bar turns back on in place");
+            compactDisplay=false;popup.RefreshTaskbar();{const auto previousStatus=statusBarActions;taskbar.Activate(4,false);
+            Check(!taskbar.rows[4].enabled && !IsWindowEnabled(taskbar.buttons[4]) && statusBarActions==previousStatus && statusBarOn,"without a compact display the status bar row greys out");}
+            compactDisplay=true;popup.RefreshTaskbar();Check(taskbar.rows[4].enabled && IsWindowEnabled(taskbar.buttons[4]),"a compact display re-enables the status bar row");
+            Check(taskbar.rows[5].label==Tr(TextId::Floating) && taskbar.rows[5].secondary==L"off" && taskbar.rows[5].enabled && taskbar.dockIcon,"floating starts off, with its dock icon");
+            taskbar.Activate(5,false);Check(dockOn && taskbar.rows[5].secondary==L"on" && !popup.done && taskbar.window==taskbarWindow,"floating dock turns on in place");
+            taskbar.Activate(5,false);Check(!dockOn && taskbar.rows[5].secondary==L"off" && !popup.done,"floating dock turns back off in place");
+            trayXaml=false;popup.RefreshTaskbar();{const auto previousDock=dockActions;taskbar.Activate(5,false);
+            Check(!taskbar.rows[5].enabled && !IsWindowEnabled(taskbar.buttons[5]) && dockActions==previousDock && !dockOn,"legacy taskbars grey out the floating row");}
+            trayXaml=true;popup.RefreshTaskbar();Check(taskbar.rows[5].enabled && IsWindowEnabled(taskbar.buttons[5]),"XAML taskbar re-enables the floating row");
             SubmenuToggleChecks(popup,1);
             popup.OpenChild(2,true);auto& wallpapers=*popup.child;const HWND wallpaperWindow=wallpapers.window;
             Check(wallpapers.rows.size()==2 && wallpapers.rows[0].label==L"jellyflower" && wallpapers.rows[1].command==TrayWallpaperThemeCommand,"wallpaper has jellyflower toggle then theme row");
@@ -519,6 +535,15 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             edge.highContrast=true;edge.BeginEntrance();Check(!edge.entering,"contrast fallback skips motion");
             Popup nested;nested.parent=&edge;nested.controller=controller;nested.dpi=dpi;nested.rows=CursorRows(1u<<CursorDisabled,CursorDisabled);
             Check(nested.Create(edge.window,{rect.right,rect.top},true),"nested edge popup created");nested.BeginEntrance();Check(!nested.entering,"nested hover menu does not repeat root entrance");
+            // The status bar's button opens the same menu from the top of the screen.
+            Popup top;top.controller=controller;top.dpi=dpi;top.below=true;top.rows=RootRows(false,1u<<CursorDisabled);
+            const LONG center=(monitor.rcWork.left+monitor.rcWork.right)/2;
+            Check(top.Create(controller,{center,monitor.rcWork.top},false),"status bar popup created");
+            RECT dropped{};GetWindowRect(top.window,&dropped);
+            Check(dropped.top==monitor.rcWork.top+top.Px(12) && std::abs((dropped.left+dropped.right)/2-center)<=1,"status bar menu drops 12 DIP below its button, centered on it");
+            top.entering=true;top.entranceStarted=1000;top.AdvanceEntrance(1000);GetWindowRect(top.window,&dropped);
+            Check(dropped.top==top.restingBounds.top-top.Px(32),"status bar menu slides down from above its resting position");
+            top.AdvanceEntrance(1250);GetWindowRect(top.window,&dropped);Check(!top.entering && EqualRect(&dropped,&top.restingBounds),"status bar entrance settles exactly");
         }
         for(const auto language:{Language::French,Language::Korean})for(const bool localLight:{false,true})for(const UINT localDpi:{96u,120u,144u,168u,192u}){
             SetTextLanguage(language);light=localLight;automatic=AutoThemeStatus::Manual;state=UpdateStatus::Idle;wallpaperState=WallpaperStatus::Off;

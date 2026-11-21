@@ -27,6 +27,12 @@ inline constexpr UINT TrayTaskbarQueryMessage = WM_APP + 52;
 inline constexpr UINT TrayOnlyCommand = 17;
 // Touch keyboard layout. The query returns 1 when the symmetric layout is on.
 inline constexpr UINT TrayKeyboardCommand = 18, TrayKeyboardQueryMessage = WM_APP + 53;
+// The status bar on compact displays. Its state is TrayTaskbarQueryMessage
+// wParam 2: bit 0 on, bit 1 a display is compact.
+inline constexpr UINT TrayStatusBarCommand = 19;
+// The floating dock. Its state is TrayTaskbarQueryMessage wParam 3: bit 0
+// on, bit 1 the XAML taskbar can apply it.
+inline constexpr UINT TrayDockCommand = 20;
 inline constexpr wchar_t GithubUrl[] = L"https://github.com/mochimilk/jellyflower";
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
 inline constexpr UINT TrayCursorPreviewMessage = WM_APP + 50;
@@ -35,10 +41,14 @@ inline constexpr UINT CursorPreviewNone = ~0u;
 class TrayIcon {
 public:
     ~TrayIcon();
-    void Refresh(HWND owner, AcrylicMode mode);
+    // hidden keeps the icon registered, so notices still show, but takes it
+    // off the taskbar: the status bar opens the menu instead.
+    void Refresh(HWND owner, AcrylicMode mode, bool hidden = false);
     void ShellRestarted() noexcept { present_ = false; }
     void Remove() noexcept;
-    UINT Menu(AcrylicMode mode, UINT cursorMode) const;
+    // Opens above the notification icon, or below `below` (screen pixels, at
+    // that display's dpi) when the status bar's button opened it.
+    UINT Menu(AcrylicMode mode, UINT cursorMode, const RECT* below = nullptr, UINT dpi = 0) const;
     void CursorError(DWORD error, bool saveFailure = false) const;
     void ThemeError(DWORD error, bool partial = false, bool notification = false) const;
     void DateError(DWORD error) const;
@@ -47,7 +57,7 @@ public:
 private:
     HWND window_ = nullptr;
     HICON icon_ = nullptr;
-    bool present_ = false;
+    bool present_ = false, hidden_ = false;
     int resource_ = 0, pixels_ = 0;
     Language tipLanguage_=Language::Count,brandLanguage_=Language::Count;
     int brandTheme_ = -1;

@@ -110,7 +110,15 @@ enum class Language : unsigned { English, French, Korean, Count };
  X(Keyboard, L"keyboard", L"clavier", L"키보드") \
  X(Symmetric, L"symmetric", L"symétrique", L"대칭") \
  X(KeyboardSaveError, L"keyboard setting could not be saved", L"préférence du clavier non enregistrée", L"키보드 설정을 저장하지 못했어요") \
- X(KeyboardSaveBody, L"Windows denied saving the keyboard preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence du clavier. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 키보드 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.")
+ X(KeyboardSaveBody, L"Windows denied saving the keyboard preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence du clavier. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 키보드 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.") \
+ X(StatusBar, L"status bar", L"barre d’état", L"상태 표시줄") \
+ X(StatusBarSaveError, L"status bar setting could not be saved", L"préférence de la barre d’état non enregistrée", L"상태 표시줄 설정을 저장하지 못했어요") \
+ X(StatusBarSaveBody, L"Windows denied saving the status bar preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence de la barre d’état. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 상태 표시줄 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.") \
+ X(Floating, L"floating", L"flottante", L"플로팅") \
+ X(DockSaveError, L"floating taskbar setting could not be saved", L"préférence de la barre des tâches flottante non enregistrée", L"플로팅 작업 표시줄 설정을 저장하지 못했어요") \
+ X(DockSaveBody, L"Windows denied saving the floating taskbar preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence de la barre des tâches flottante. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 플로팅 작업 표시줄 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.") \
+ X(DockSymbols, L"downloading taskbar symbols", L"téléchargement des symboles de la barre des tâches", L"작업 표시줄 기호를 다운로드하는 중") \
+ X(DockSymbolsBody, L"Floating makes the taskbar taller. To find where Windows sizes it, jellyflower downloads Microsoft's public symbols for the taskbar once (about 7 MB), keeps two numbers and deletes the file. This happens again only after a Windows update changes the taskbar.", L"Le mode flottant agrandit la barre des tâches. Pour trouver où Windows la dimensionne, jellyflower télécharge une seule fois les symboles publics de Microsoft pour la barre des tâches (environ 7 Mo), en garde deux nombres et supprime le fichier. Cela ne se reproduit qu’après une mise à jour de Windows qui modifie la barre des tâches.", L"플로팅을 켜면 작업 표시줄이 더 높아져요. Windows가 작업 표시줄 크기를 정하는 곳을 찾기 위해 jellyflower가 Microsoft의 공개 작업 표시줄 기호 파일(약 7MB)을 한 번 다운로드하고, 숫자 두 개만 남긴 뒤 파일을 삭제해요. Windows 업데이트로 작업 표시줄이 바뀔 때만 다시 다운로드해요.")
 
 enum class TextId {
 #define JF_ENUM(id,en,fr,ko) id,

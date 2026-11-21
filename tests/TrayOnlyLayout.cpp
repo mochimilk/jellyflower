@@ -110,6 +110,11 @@ void Run() {
             xaml::Automation::AutomationProperties::SetName(flower, L"something else");
             view.Refresh(true); taskbar.UpdateLayout();
             Check(!view.Found() && !Hidden(notifyStack) && Hidden(flower) && view.Hidden() == 6, "without jellyflower on the taskbar the chevron stays reachable");
+            // The compact status bar opens the menu, so nothing has to stay.
+            view.Refresh(true, true); taskbar.UpdateLayout();
+            Check(!view.Found() && Hidden(notifyStack) && view.Hidden() == 7, "with the menu in the status bar the chevron is hidden too");
+            view.Refresh(true); taskbar.UpdateLayout();
+            Check(!Hidden(notifyStack) && view.Hidden() == 6, "leaving the status bar brings the chevron back");
             xaml::Automation::AutomationProperties::SetName(flower, Tr(acrylic::TextId::TrayTip, acrylic::Language::Korean));
             view.Refresh(true);
             Check(view.Found() && Hidden(notifyStack) && !Hidden(flower), "jellyflower's icon in another display language restores the minimal tray");

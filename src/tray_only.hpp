@@ -23,7 +23,9 @@ bool IsJellyflowerTip(std::wstring_view name) noexcept;
 // other notification icons, the input indicator and status stacks, Quick
 // Settings and the clock/notification button. The show-hidden-icons chevron
 // is collapsed only while jellyflower's icon is on this taskbar, so its menu
-// stays reachable. Each part's own Visibility value or binding is restored.
+// stays reachable, or when the menu lives in the compact status bar at the top
+// of the screen (menuElsewhere). Each part's own Visibility value or binding
+// is restored.
 class TrayOnlyView {
 public:
     explicit TrayOnlyView(const winrt::Windows::UI::Xaml::FrameworkElement& frame, TrayClassName className = nullptr);
@@ -31,7 +33,7 @@ public:
     TrayOnlyView(const TrayOnlyView&) = delete;
     TrayOnlyView& operator=(const TrayOnlyView&) = delete;
     // Throws only when the tray cannot be read; per-part failures are kept in Error().
-    void Refresh(bool enabled);
+    void Refresh(bool enabled, bool menuElsewhere = false);
     void Restore() noexcept;
     unsigned Hidden() const noexcept;
     bool Found() const noexcept;
