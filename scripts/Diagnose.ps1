@@ -19,3 +19,7 @@ Write-Host 'clockDate reports the saved date toggle. The single-line clock uses 
 Write-Host 'startSurfaces/startAttached count accepted Start background layers/connection. Inspect Start visually; startLastResult reports an HRESULT.'
 
 Write-Host 'trayOnlyJellyflower reports the saved tray choice. hiddenTrayParts counts collapsed tray parts; trayJellyflowerIcons counts taskbars where the flower was found (the chevron stays visible where it is 0). trayLastResult reports an HRESULT.'
+
+Write-Host 'keyboardLayout reports the saved touch keyboard choice. keyboardAttached is the touch keyboard host connection (attached only once symmetric is chosen); keyboardSymmetricGrids counts keyboard pages showing the symmetric layout (0 while the keyboard is hidden or on a page it leaves stock). keyboardLastResult reports an HRESULT.'
+
+Write-Host 'keyboardField is what the touch keyboard''s return key follows: empty (dimmed), text (accent), unknown (Windows'' look; passwords and apps that report no text), or off when the symmetric layout is off.'

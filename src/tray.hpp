@@ -25,6 +25,8 @@ inline constexpr UINT TrayWallpaperMenuCommand = 15, TrayWallpaperThemeCommand =
 // wParam 0: auto-hide state. wParam 1: jellyflower-only tray state.
 inline constexpr UINT TrayTaskbarQueryMessage = WM_APP + 52;
 inline constexpr UINT TrayOnlyCommand = 17;
+// Touch keyboard layout. The query returns 1 when the symmetric layout is on.
+inline constexpr UINT TrayKeyboardCommand = 18, TrayKeyboardQueryMessage = WM_APP + 53;
 inline constexpr wchar_t GithubUrl[] = L"https://github.com/mochimilk/jellyflower";
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
 inline constexpr UINT TrayCursorPreviewMessage = WM_APP + 50;

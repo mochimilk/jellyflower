@@ -20,4 +20,13 @@ inline constexpr double UserAvatar = 28;
 inline constexpr double UserBadgeHeight = 40;
 inline constexpr double UserBadgeRadius = 10;
 inline constexpr double UserBadgeVerticalReduction = 4;
+// Narrow layout, for displays too narrow for Start's native width (a tall,
+// small tablet at a high scale). The menu takes the display's width and the
+// pinned list spreads four columns across it. Targets fill their column but
+// stay 80 DIP tall, so wide columns don't make tall rows. The inset matches the
+// pinned list's 24-DIP indicator column, so the grid sits evenly in the menu.
+inline constexpr unsigned NarrowPinnedColumns = 4;
+inline constexpr double NarrowPinnedHeight = 80;
+inline constexpr double NarrowPinnedInset = 24;
+inline constexpr double NarrowPinnedRowGap = 8;
 }

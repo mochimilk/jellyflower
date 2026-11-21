@@ -14,7 +14,7 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
 HRESULT wallpaperError=E_FAIL;
-bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true;UINT autoHideActions=0,trayActions=0;
+bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true,keyboardSymmetric=false;UINT autoHideActions=0,trayActions=0;
 AcrylicMode selectedAcrylic=AcrylicMode::System;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
@@ -194,6 +194,8 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
     }
     if(message==TraySettingMessage && parameter==TrayWallpaperThemeCommand){wallpaperAutomatic=!wallpaperAutomatic;return wallpaperAutomatic;}
     if(message==TrayTaskbarQueryMessage)return parameter==1?(trayOnly?1u:0u)|(trayXaml?2u:0u):(autoHide?1u:0u)|(taskbarBottom?2u:0u);
+    if(message==TrayKeyboardQueryMessage)return keyboardSymmetric;
+    if(message==TraySettingMessage && parameter==TrayKeyboardCommand){keyboardSymmetric=!keyboardSymmetric;return keyboardSymmetric;}
     if(message==TraySettingMessage && parameter==TrayOnlyCommand){++trayActions;if(trayXaml)trayOnly=!trayOnly;return (trayOnly?1u:0u)|(trayXaml?2u:0u);}
     if(message==TraySettingMessage && parameter==TrayAutoHideCommand){++autoHideActions;if(taskbarBottom)autoHide=!autoHide;return (autoHide?1u:0u)|(taskbarBottom?2u:0u);}
     if(message==TraySettingMessage && parameter==TrayToggleCommand){selectedAcrylic=NextAcrylicMode(selectedAcrylic);return static_cast<UINT>(selectedAcrylic);}
@@ -390,15 +392,19 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             wallpaperState=WallpaperStatus::Off;wallpapers.RefreshWallpaper();
             Capture(wallpapers,std::filesystem::path(argv[1])/(std::wstring(light?L"wallpaper-light-":L"wallpaper-dark-")+std::to_wstring(dpi)+L".bmp"));
             SubmenuToggleChecks(popup,2);
-            Check(popup.rows.size()==5 && popup.rows[4].command==TrayGeneralCommand && popup.rows[4].label==L"general"
-                && HasSubmenu(popup.rows[4].command) && popup.generalIcon,"general replaces root update/exit and has the supplied gear icon");
+            Check(popup.rows.size()==6 && popup.rows[5].command==TrayGeneralCommand && popup.rows[5].label==L"general"
+                && HasSubmenu(popup.rows[5].command) && popup.generalIcon,"general replaces root update/exit and has the supplied gear icon");
+            Check(popup.rows[4].command==TrayKeyboardCommand && popup.rows[4].label==L"keyboard" && popup.rows[4].secondary==L"system"
+                && !HasSubmenu(popup.rows[4].command) && popup.keyboardIcon,"keyboard sits after colors with the system layout and its own icon");
+            popup.Activate(4,false);Check(keyboardSymmetric && popup.rows[4].secondary==L"symmetric" && !popup.done,"keyboard switches to symmetric in place");
+            popup.Activate(4,true);Check(!keyboardSymmetric && popup.rows[4].secondary==L"system" && !popup.done,"keyboard switches back to system");
             Check(std::none_of(popup.rows.begin(),popup.rows.end(),[](const Row& row){return row.command==TrayUpdateCommand || row.command==TrayExitCommand;}),"update and exit only appear inside general");
             Capture(popup,std::filesystem::path(argv[1])/(std::wstring(light?L"root-light-":L"root-dark-")+std::to_wstring(dpi)+L".bmp"));
-            popup.Activate(4,true);
+            popup.Activate(5,true);
             Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows.size()==3,"general contains only github, version and exit");
             auto& general=*popup.child;
             const HWND generalWindow=general.window;
-            SubmenuToggleChecks(popup,4);
+            SubmenuToggleChecks(popup,5);
             GithubChecks(general);
             IndicatorChecks(general);
             general.hovered=0;
@@ -431,7 +437,7 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             }
             ExitTextChecks(general);
             general.Key(VK_LEFT);Check(!IsWindowVisible(generalWindow) && !popup.done,"left arrow closes general without dismissing root");
-            state=UpdateStatus::Available;popup.RefreshUpdate();popup.Activate(4,true);
+            state=UpdateStatus::Available;popup.RefreshUpdate();popup.Activate(5,true);
             Check(popup.child->window==generalWindow && popup.child->rows[1].secondary==L"download","reopening general preserves latest update state");
             popup.child->Key(VK_ESCAPE);Check(!IsWindowVisible(generalWindow) && !popup.done,"escape closes nested general only");
             popup.child->HideBranch();popup.child.reset();
@@ -477,7 +483,7 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             popup.highContrast=false;popup.ConfigureBackdrop();Check(popup.acrylic,"acrylic recovers after fallback");
             popup.OpenChild(3,true);Check(popup.child && popup.child->kind==TrayCursorCommand && !popup.done,"cursor replaces the previous general branch");
             SubmenuToggleChecks(popup,3);
-            popup.OpenChild(4,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[1].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
+            popup.OpenChild(5,true);Check(popup.child && popup.child->kind==TrayGeneralCommand && popup.child->rows[1].secondary==L"download" && !popup.done,"general replaces cursor and queries current update state");
             popup.child->Activate(2,true);
             Check(popup.done && popup.result==TrayExitCommand && !IsWindowVisible(popup.child->window),"nested exit returns the existing controller shutdown command and dismisses every menu");
         }
@@ -526,7 +532,7 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             Capture(*local.child,std::filesystem::path(argv[1])/(L"localized-taskbar-"+suffix));
             local.CloseChild(false);local.Activate(2,true);fits(*local.child);
             for(const auto id:{TextId::TryAgain,TextId::ImageMissing,TextId::NotAllowed,TextId::FileInUse,TextId::StorageFull,TextId::ImageTooLarge,TextId::BackupIssue}){local.child->rows[0].secondary=Tr(id);fits(*local.child);}
-            local.CloseChild(false);local.Activate(4,true);
+            local.CloseChild(false);local.Activate(5,true);
             for(const auto status:{UpdateStatus::Checking,UpdateStatus::Current,UpdateStatus::Available,UpdateStatus::NoRelease,UpdateStatus::Error,UpdateStatus::Downloading,UpdateStatus::Installing}){state=status;local.RefreshUpdate();fits(*local.child);}
             local.child->rows[0].label=L"a deliberately long overflowing menu label that needs a hover ticker";
             local.child->tickerMotion=true;local.child->Hover(0);local.child->hovered=-1;local.child->RepaintRow(0);

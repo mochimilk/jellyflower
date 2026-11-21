@@ -3,9 +3,9 @@
 #include "shared.hpp"
 #include "search_text.hpp"
 namespace acrylic {
-inline constexpr GUID StartTapClass={0x62c9cbea,0x5dd9,0x49b1,{0x9b,0x6e,0x67,0xcb,0x86,0xa5,0x68,0xb1}};
-inline constexpr LONG StartMagic=0x4a465314;
-inline constexpr wchar_t StartNotifyClass[]=L"jellyflower.StartNotify.v20";
+inline constexpr GUID StartTapClass={0x64d206c7,0x55a4,0x4b53,{0x8a,0xcc,0x39,0x61,0x57,0xb1,0x90,0x68}};
+inline constexpr LONG StartMagic=0x4a465315;
+inline constexpr wchar_t StartNotifyClass[]=L"jellyflower.StartNotify.v21";
 inline constexpr UINT StartRefreshMessage=WM_APP+73;
 struct StartState {
     volatile LONG magic,controllerPid,epoch,running,enabled,light,attached,count,result,searches,spacing;
@@ -18,6 +18,12 @@ struct StartState {
     // Start/Search UI threads when the local time crosses a greeting boundary.
     volatile LONG greetingPeriod;
     wchar_t greetings[3*static_cast<unsigned>(Language::Count)][SearchPlaceholderCapacity];
+    // Touch keyboard host (v21+): the symmetric layout switch, and how many
+    // keyboard grids currently show it.
+    volatile LONG keyboard,keyboards;
+    // The focused text field (KeyboardField: 0 unknown, 1 empty, 2 text),
+    // from the controller's UI Automation watcher, for the return key.
+    volatile LONG keyboardField;
 };
-inline std::wstring StartMappingName(DWORD pid) { return L"Local\\jellyflower.Start.v20."+std::to_wstring(pid); }
+inline std::wstring StartMappingName(DWORD pid) { return L"Local\\jellyflower.Start.v21."+std::to_wstring(pid); }
 }

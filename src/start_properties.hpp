@@ -46,6 +46,10 @@ public:
     StartSearchValues(const StartSearchValues&) = delete;
     StartSearchValues& operator=(const StartSearchValues&) = delete;
     ~StartSearchValues() { Clear(); }
+    bool Contains(const sx::FrameworkElement& object,const sx::DependencyProperty& key) const {
+        for(const auto& item:items_) if(item.object==object && item.key==key) return true;
+        return false;
+    }
     auto Original(const sx::FrameworkElement& object,const sx::DependencyProperty& key) const {
         for(const auto& item:items_) if(item.object==object && item.key==key) return item.effective;
         return object.GetValue(key);

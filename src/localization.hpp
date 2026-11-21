@@ -106,7 +106,11 @@ enum class Language : unsigned { English, French, Korean, Count };
  X(Tray, L"tray", L"zone de notification", L"알림 영역") \
  X(All, L"all", L"tout", L"모두") \
  X(TraySaveError, L"tray setting could not be saved", L"préférence de la zone de notification non enregistrée", L"알림 영역 설정을 저장하지 못했어요") \
- X(TraySaveBody, L"Windows denied saving the tray preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence de la zone de notification. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 알림 영역 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.")
+ X(TraySaveBody, L"Windows denied saving the tray preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence de la zone de notification. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 알림 영역 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.") \
+ X(Keyboard, L"keyboard", L"clavier", L"키보드") \
+ X(Symmetric, L"symmetric", L"symétrique", L"대칭") \
+ X(KeyboardSaveError, L"keyboard setting could not be saved", L"préférence du clavier non enregistrée", L"키보드 설정을 저장하지 못했어요") \
+ X(KeyboardSaveBody, L"Windows denied saving the keyboard preference. Your previous choice is unchanged. Windows error: {error}.", L"Windows a refusé d’enregistrer la préférence du clavier. Votre choix précédent est conservé. Erreur Windows : {error}.", L"Windows에서 키보드 설정 저장을 거부했어요. 이전 설정은 유지돼요. Windows 오류: {error}.")
 
 enum class TextId {
 #define JF_ENUM(id,en,fr,ko) id,

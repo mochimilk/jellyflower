@@ -50,10 +50,12 @@ std::vector<Row> CursorRows(UINT mask, UINT selected) {
     return rows;
 }
 bool HasCursorPack(UINT mask) { return (mask & ((1u << CursorDisabled) - 1)) != 0; }
-std::vector<Row> RootRows(bool light, UINT mask) {
+std::wstring KeyboardLabel(bool symmetric) { return symmetric ? Tr(TextId::Symmetric) : Tr(TextId::System); }
+std::vector<Row> RootRows(bool light, UINT mask, bool keyboard = false) {
     return {{TrayThemeCommand, Tr(TextId::System), false, false, light ? Tr(TextId::Light) : Tr(TextId::Dark)},
         {TrayTaskbarCommand, Tr(TextId::Taskbar)}, {TrayWallpaperMenuCommand,Tr(TextId::Wallpaper)},
         HasCursorPack(mask) ? Row{TrayCursorCommand, Tr(TextId::Cursor)} : Row{TrayCursorUnlockCommand, Tr(TextId::Colors), false, false, Tr(TextId::Unlock)},
+        {TrayKeyboardCommand, Tr(TextId::Keyboard), false, false, KeyboardLabel(keyboard)},
         {TrayGeneralCommand, Tr(TextId::General), true}};
 }
 std::vector<Row> GeneralRows() {
@@ -164,7 +166,7 @@ struct Popup {
     HHOOK mouseHook = nullptr;
     HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
-    HICON githubIcon = nullptr, wallpaperIcon = nullptr;
+    HICON githubIcon = nullptr, wallpaperIcon = nullptr, keyboardIcon = nullptr;
     MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
@@ -209,6 +211,7 @@ struct Popup {
         if (generalIcon) DestroyIcon(generalIcon);
         if (githubIcon) DestroyIcon(githubIcon);
         if (wallpaperIcon) DestroyIcon(wallpaperIcon);
+        if (keyboardIcon) DestroyIcon(keyboardIcon);
         for (const auto icon : colorIcons) if (icon) DestroyIcon(icon);
         if (background) DeleteObject(background);
         if (highlight) DeleteObject(highlight);
@@ -266,6 +269,13 @@ struct Popup {
         }
         RepaintButtons();
         if(child)child->UpdateDate(date);
+    }
+    void UpdateKeyboard(bool symmetric){
+        for(size_t i=0;i<rows.size();++i)if(rows[i].command==TrayKeyboardCommand){
+            rows[i].secondary=KeyboardLabel(symmetric);
+            if(i<buttons.size())SetWindowTextW(buttons[i],(rows[i].label+L", "+rows[i].secondary).c_str());
+            RepaintRow(static_cast<int>(i));
+        }
     }
     void UpdateAcrylic(AcrylicMode selected){
         mode=selected;
@@ -450,6 +460,7 @@ struct Popup {
             if(!load(acrylicIcons[2],IDI_ACRYLIC_PURE_LIGHT,IDI_ACRYLIC_PURE_DARK)
                 || !load(generalIcon,IDI_SETTINGS_LIGHT,IDI_SETTINGS_DARK)
                 || !load(wallpaperIcon,IDI_WALLPAPER_LIGHT,IDI_WALLPAPER_DARK)
+                || !load(keyboardIcon,IDI_KEYBOARD_LIGHT,IDI_KEYBOARD_DARK)
                 || !load(themeIcon,autoSelected?IDI_SUNSET_LIGHT:systemLight?IDI_SUN_LIGHT:IDI_MOON_LIGHT,
                     autoSelected?IDI_SUNSET_DARK:systemLight?IDI_SUN_DARK:IDI_MOON_DARK))return false;
             RefreshCursorIcon();
@@ -683,6 +694,8 @@ struct Popup {
                 root->UpdateTheme(state != 0);
             } else if (command == TrayDateCommand) {
                 root->UpdateDate((state & 1) != 0);
+            } else if (command == TrayKeyboardCommand) {
+                root->UpdateKeyboard(state != 0);
             } else if (parent && command >= CursorCommandBase && command <= CursorCommandBase + CursorDisabled) {
                 // Selection applies the full scheme once. End the local
                 // preview without closing the menus.
@@ -780,7 +793,7 @@ struct Popup {
                 ? (updateStatus == UpdateStatus::Available ? packageOpenIcon : UpdateBusy(updateStatus) ? updateIcon : packageIcon)
                 : row.command == TrayGithubCommand ? githubIcon : (row.command == TrayWallpaperCommand || row.command==TrayWallpaperMenuCommand) ? wallpaperIcon
                 : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayOnlyCommand?trayOnlyIcon.Get(!row.enabled)
-                : row.command==TrayTaskbarCommand?acrylicIcons[2]:nullptr;
+                : row.command==TrayTaskbarCommand?acrylicIcons[2]:row.command==TrayKeyboardCommand?keyboardIcon:nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
         // The cursor's pointed silhouette looks high at the mathematical center.
@@ -1085,7 +1098,8 @@ UINT ShowTrayMenu(HWND owner, POINT anchor, UINT dpi, AcrylicMode mode, bool lig
     const UINT clockState = static_cast<UINT>(SendMessageW(owner, TrayDateQueryMessage, 0, 0));
     popup.clockDate = (clockState & 1) != 0;
     SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &popup.hoverDelay, 0);
-    popup.rows = RootRows(popup.systemLight, static_cast<UINT>(SendMessageW(owner, TrayCursorQueryMessage, 0, 0)));
+    popup.rows = RootRows(popup.systemLight, static_cast<UINT>(SendMessageW(owner, TrayCursorQueryMessage, 0, 0)),
+        SendMessageW(owner, TrayKeyboardQueryMessage, 0, 0) != 0);
     popup.RefreshUpdate();
     if (!popup.Create(owner, anchor, false)) return 0;
     activePopup = &popup;

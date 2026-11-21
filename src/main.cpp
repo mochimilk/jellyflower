@@ -17,6 +17,8 @@
 #include "wallpaper_theme.hpp"
 #include "taskbar_options.hpp"
 #include "tray_options.hpp"
+#include "keyboard_options.hpp"
+#include "keyboard_field.hpp"
 #include "start_session.hpp"
 #include <shellapi.h>
 #include <shlobj.h>
@@ -125,7 +127,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[36]{};
+    LONG values[41]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -182,6 +184,11 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"hiddenTrayParts\": " << values[33]
         << ",\n  \"trayJellyflowerIcons\": " << values[34]
         << ",\n  \"trayLastResult\": " << values[35]
+        << ",\n  \"keyboardLayout\": \"" << (values[36] ? "symmetric" : "system") << "\""
+        << ",\n  \"keyboardAttached\": " << values[37]
+        << ",\n  \"keyboardSymmetricGrids\": " << values[38]
+        << ",\n  \"keyboardLastResult\": " << values[39]
+        << ",\n  \"keyboardField\": \"" << (values[40] == 2 ? "text" : values[40] == 1 ? "empty" : values[40] == 0 ? "unknown" : "off") << "\""
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -198,6 +205,10 @@ public:
     TrayIcon tray;
     StartSession start;
     StartSession search{ShellHost::Search};
+    StartSession keyboard{ShellHost::Keyboard};
+    // Watches the focused text field only while the keyboard layout is on.
+    std::unique_ptr<KeyboardFieldWatcher> field;
+    bool keyboardLayout = LoadKeyboardLayout();
     UpdateChecker updates;
     std::unique_ptr<AutoTheme> autoTheme;
     std::unique_ptr<WallpaperManager> wallpaper;
@@ -377,6 +388,14 @@ public:
         RefreshTaskbar();
         start.Refresh(SystemLightTheme(),window);
         search.Refresh(SystemLightTheme(),window);
+        // Attach to the touch keyboard only once the layout is chosen; once
+        // attached, keep refreshing so turning it off restores Windows' layout.
+        if (keyboardLayout && !field) field = std::make_unique<KeyboardFieldWatcher>(window);
+        else if (!keyboardLayout && field) field.reset();
+        if (keyboardLayout || keyboard.Pid()) {
+            keyboard.Refresh(SystemLightTheme(), window, keyboardLayout);
+            keyboard.KeyboardField(field ? static_cast<LONG>(field->State()) : 0);
+        }
         tray.Refresh(window, mode);
         const DWORD cursorBefore = cursors->Error();
         cursors->Refresh();
@@ -519,6 +538,18 @@ public:
     UINT TrayState() const {
         return (trayOnly ? 1u : 0u) | (backend != Legacy && backend != Unsupported ? 2u : 0u);
     }
+    UINT ChangeKeyboard() {
+        const DWORD error = SaveKeyboardLayout(!keyboardLayout);
+        if (error) {
+            Log(L"Keyboard setting error=" + std::to_wstring(error));
+            tray.UpdateNotice(Tr(TextId::KeyboardSaveError), Text(TextId::KeyboardSaveBody, {{L"error", std::to_wstring(error)}}).c_str(), true);
+        } else {
+            keyboardLayout = !keyboardLayout;
+            Log(std::wstring(L"Keyboard layout=") + (keyboardLayout ? L"symmetric" : L"system"));
+            Refresh();
+        }
+        return keyboardLayout ? 1 : 0;
+    }
     UINT ChangeTrayOnly() {
         const DWORD error = SaveTrayOnly(!trayOnly);
         if (error) {
@@ -565,6 +596,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == SearchAttachedQuery) return self->search.Attached();
         if (wParam == SearchInputQuery) return self->search.SearchCount();
         if (wParam == SearchResultQuery) return self->search.Result();
+        if (wParam == KeyboardLayoutQuery) return self->keyboardLayout;
+        if (wParam == KeyboardAttachedQuery) return self->keyboard.Attached();
+        if (wParam == KeyboardCountQuery) return self->keyboard.KeyboardCount();
+        if (wParam == KeyboardResultQuery) return self->keyboard.Result();
+        if (wParam == KeyboardFieldQuery) return self->field ? static_cast<LONG>(self->field->State()) : -1;
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult
@@ -612,6 +648,11 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         return self->wallpaper ? (wParam ? self->wallpaper->Error() : static_cast<LRESULT>(self->wallpaper->Status())) : 0;
     } else if (message == TrayUpdateQueryMessage) {
         return static_cast<UINT>(self->updates.Status());
+    } else if (message == KeyboardFieldMessage) {
+        if (self->field) self->keyboard.KeyboardField(static_cast<LONG>(self->field->State()));
+        return 0;
+    } else if (message == TrayKeyboardQueryMessage) {
+        return self->keyboardLayout ? 1 : 0;
     } else if (message == TrayCursorQueryMessage) {
         return wParam == 1 ? self->cursors->Mode() : self->cursors->Available();
     } else if (message == TrayCursorPreviewMessage) {
@@ -641,6 +682,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         }
         if (wParam == TrayDateCommand) return self->ChangeDate();
         if (wParam == TrayOnlyCommand) return self->ChangeTrayOnly();
+        if (wParam == TrayKeyboardCommand) return self->ChangeKeyboard();
         if (wParam == TrayThemeCommand) {
             const auto state = self->autoTheme->Status();
             if (state == AutoThemeStatus::Manual && !SystemLightTheme()) {

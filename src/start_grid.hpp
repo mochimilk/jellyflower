@@ -2,6 +2,7 @@
 #pragma once
 #include "start_properties.hpp"
 #include "start_metrics.hpp"
+#include "start_frame.hpp"
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <cmath>
 #include <algorithm>
@@ -64,7 +65,7 @@ class StartGrid {
         sx::Controls::Button categoryButton{nullptr};
         sx::Controls::ItemsWrapGrid mini{nullptr};
         std::vector<sx::FrameworkElement> miniTargets;
-        double native=0,nativeHeight=0,gutter=0,lastWidth=-1;
+        double native=0,nativeHeight=0,gutter=0,rowGap=StartMetrics::PinnedRowGap,lastWidth=-1;
         bool pinned=false;
         double NativeWidth() {
             if(root){const double width=winrt::unbox_value<double>(content.Original(root,sx::FrameworkElement::WidthProperty()));
@@ -99,7 +100,7 @@ class StartGrid {
             }
             values.Set(item,sx::FrameworkElement::MarginProperty(),nullptr,[this](const auto& value){
                 auto m=winrt::unbox_value<sx::Thickness>(value);m.Left=m.Right=gutter/2;
-                if(pinned)m.Top=m.Bottom=StartMetrics::PinnedRowGap/2;
+                if(pinned)m.Top=m.Bottom=rowGap/2;
                 return winrt::box_value(m);
             });
         }
@@ -189,9 +190,12 @@ class StartGrid {
                 }
             }
         }
-        void Layout(double slot,double gap,StartClassName name) {
+        void Layout(double slot,double gap,double rows,StartClassName name) {
             Discover(name);
-            if(std::abs(gutter-gap)>.01){gutter=gap;auto m=element.Margin();m.Left=m.Right=gap/2;values.Update(element,sx::FrameworkElement::MarginProperty(),winrt::box_value(m));}
+            if(std::abs(gutter-gap)>.01 || (pinned && std::abs(rowGap-rows)>.01)){
+                gutter=gap;rowGap=rows;auto m=element.Margin();m.Left=m.Right=gap/2;if(pinned)m.Top=m.Bottom=rows/2;
+                values.Update(element,sx::FrameworkElement::MarginProperty(),winrt::box_value(m));
+            }
             const double width=std::max(0.0,slot-gap-element.Padding().Left-element.Padding().Right);
             if(std::abs(width-lastWidth)<.01)return;lastWidth=width;
             // A concrete width is required at the React boundary; it is always
@@ -219,10 +223,19 @@ class StartGrid {
     bool applied_=false,updating_=false,contentDirty_=false;unsigned passes_=0;
     double panelLeft_=0,panelRight_=0,hostLeft_=0;
     double nativePinnedRow_=0,pinnedPitch_=0;
+    unsigned pinnedColumns_=0,nativePinnedColumns_=0;uint32_t pinnedItems_=0;
     double PinnedHeight(double original) const {
         if(!std::isfinite(original) || original<=0 || nativePinnedRow_<=0 || pinnedPitch_<=0)return original;
         const double rows=std::max(1.0,std::floor(original/nativePinnedRow_+.01));
-        return rows*pinnedPitch_+std::max(0.0,original-rows*nativePinnedRow_);
+        double shown=rows;
+        // With fewer columns than Windows lays out (narrow layout), keep the
+        // same number of apps visible: collapsed stays collapsed and the
+        // expanded list still shows every pinned app.
+        if(pinnedColumns_ && nativePinnedColumns_ && pinnedColumns_!=nativePinnedColumns_) {
+            double slots=rows*nativePinnedColumns_;if(pinnedItems_)slots=std::min(slots,static_cast<double>(pinnedItems_));
+            shown=std::max(1.0,std::ceil(slots/pinnedColumns_-.01));
+        }
+        return shown*pinnedPitch_+std::max(0.0,original-rows*nativePinnedRow_);
     }
     void PinnedViewport() {
         for(const auto& f:{view_.as<sx::FrameworkElement>(),pinnedHost_})if(f) {
@@ -233,7 +246,7 @@ class StartGrid {
     }
     struct Observation {
         void *panel=nullptr,*first=nullptr,*last=nullptr;uint32_t count=0;
-        std::array<double,10> geometry{};
+        std::array<double,13> geometry{};
         bool operator==(const Observation& o)const{return panel==o.panel && first==o.first && last==o.last && count==o.count && geometry==o.geometry;}
     } observed_;
     bool observedValid_=false;
@@ -247,6 +260,8 @@ class StartGrid {
             o.geometry[8]=children.Size()?children.GetAt(0).as<sx::FrameworkElement>().ActualHeight():0;
             auto cell=cells_.find(o.first);if(cell!=cells_.end())o.geometry[9]=cell->second->NativeWidth();
         }
+        const auto narrow=StartNarrow();o.geometry[10]=narrow.active;o.geometry[11]=narrow.removed;
+        o.geometry[12]=static_cast<double>(view_.Items().Size());
         return o;
     }
     void Schedule() noexcept {
@@ -277,23 +292,40 @@ class StartGrid {
             double viewport=view_.ActualWidth()-view_.Padding().Left-view_.Padding().Right;
             auto ancestor=sx::Media::VisualTreeHelper::GetParent(panel_);
             for(unsigned i=0;ancestor && ancestor!=view_ && i<16;++i){if(auto p=ancestor.try_as<sx::Controls::ScrollContentPresenter>()){viewport=p.ActualWidth();break;}ancestor=sx::Media::VisualTreeHelper::GetParent(ancestor);}
-            const bool rows=recommended || native>pane_.ActualWidth()/2 || panel_.MaximumRowsOrColumns()==1;
+            // Narrow layout keeps Windows' own classification and column counts
+            // by measuring them against the native menu width.
+            const auto narrow=StartNarrow();
+            const double nativePane=pane_.ActualWidth()+narrow.removed;
+            const bool rows=recommended || native>nativePane/2 || panel_.MaximumRowsOrColumns()==1;
             const double gap=rows || pinned?0:StartMetrics::GridGap;
-            const double inset=rows?StartMetrics::RowInset:StartMetrics::SectionInset-gap/2;
-            auto margin=panel_.Margin();margin.Left=inset; margin.Right=inset;
-            if(pinned)margin.Right=std::max(0.0,inset-(pane_.ActualWidth()-view_.ActualWidth()));
+            const double indicator=pinned?pane_.ActualWidth()-view_.ActualWidth():0;
+            const auto sides=[&](bool narrowPinned){
+                const double inset=narrowPinned?StartMetrics::NarrowPinnedInset:rows?StartMetrics::RowInset:StartMetrics::SectionInset-gap/2;
+                return std::pair<double,double>{inset,pinned?std::max(0.0,inset-indicator):inset};
+            };
+            const auto [left,right]=sides(pinned && narrow.active);
+            auto margin=panel_.Margin();margin.Left=left;margin.Right=right;
             panelLeft_=margin.Left;panelRight_=margin.Right;
             const auto current=panel_.Margin();if(std::abs(current.Left-margin.Left)>.01 || std::abs(current.Right-margin.Right)>.01)panelValues_.Update(panel_,sx::FrameworkElement::MarginProperty(),winrt::box_value(margin));
             const double width=std::max(0.0,viewport-margin.Left-margin.Right);
-            const auto columns=StartColumns(width,native,panel_.MaximumRowsOrColumns());
+            auto columns=StartColumns(width,native,panel_.MaximumRowsOrColumns());
+            unsigned nativeColumns=columns;
+            if(narrow.active && columns) {
+                const auto [nativeLeft,nativeRight]=sides(false);
+                nativeColumns=StartColumns(std::max(0.0,viewport+narrow.removed-nativeLeft-nativeRight),native,panel_.MaximumRowsOrColumns());
+                if(pinned){columns=StartMetrics::NarrowPinnedColumns;if(panel_.MaximumRowsOrColumns()>0)columns=std::min(columns,static_cast<unsigned>(panel_.MaximumRowsOrColumns()));}
+            }
             if(columns){const double slot=width/columns;
                 if(panel_.ItemWidth()!=slot)panelValues_.Update(panel_,sx::Controls::ItemsWrapGrid::ItemWidthProperty(),winrt::box_value(slot));
+                const double rowGap=narrow.active?StartMetrics::NarrowPinnedRowGap:StartMetrics::PinnedRowGap;
                 if(pinned){
-                    pinnedPitch_=slot+StartMetrics::PinnedRowGap;
+                    // Square targets, except that narrow layout's wide columns keep 80-DIP rows.
+                    const double target=narrow.active?std::min(slot,StartMetrics::NarrowPinnedHeight):slot;
+                    pinnedPitch_=target+rowGap;pinnedColumns_=columns;nativePinnedColumns_=nativeColumns;pinnedItems_=view_.Items().Size();
                     if(panel_.ItemHeight()!=pinnedPitch_)panelValues_.Update(panel_,sx::Controls::ItemsWrapGrid::ItemHeightProperty(),winrt::box_value(pinnedPitch_));
                     PinnedViewport();
                 }
-                for(auto& item:cells_)item.second->Layout(slot,gap,name_);
+                for(auto& item:cells_)item.second->Layout(slot,gap,rowGap,name_);
             }
         }catch(...){/* Unknown/retemplating trees retry after their next layout. */}
         contentDirty_=false;updating_=false;
@@ -327,6 +359,7 @@ public:
         try{if(timer_){timer_.Stop();if(tick_.value)timer_.Tick(tick_);}}catch(...){}tick_={};timer_=nullptr;
         try{if(layout_.value)view_.LayoutUpdated(layout_);}catch(...){}layout_={};
         cells_.clear();panelValues_.Clear();panel_=nullptr;pane_=nullptr;viewValues_.Clear();pinnedHost_=nullptr;nativePinnedRow_=pinnedPitch_=0;observedValid_=false;contentDirty_=false;hostLeft_=panelLeft_=panelRight_=0;
+        pinnedColumns_=nativePinnedColumns_=0;pinnedItems_=0;
     }
     bool Applied()const noexcept{return applied_;}
     unsigned LayoutPasses()const noexcept{return passes_;}

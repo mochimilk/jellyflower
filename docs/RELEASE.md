@@ -1,11 +1,11 @@
-jellyflower 0.20.0
+jellyflower 0.21.0
 
-The taskbar menu has a new **tray** row. Switch it from `all` to `jellyflower` and the notification area shows only the flower: other app icons, the show-hidden-icons chevron, the language/input indicator, the microphone and location indicators, Quick Settings (network, volume, battery) and the clock disappear. Switch it back, or exit jellyflower, and Windows' own tray returns exactly as it was. The choice is remembered.
+The menu has a new **keyboard** row. Switch it from `system` to `symmetric` and Windows' docked touch keyboard is rearranged like a tablet keyboard, with small gaps between keys, rounder corners and a little padding around the edges. Every key still responds across its whole width, and Windows' own colors are kept in light and dark mode.
 
-Windows' own shortcuts are left alone: Win+A for Quick Settings, Win+N for notifications and the calendar, and Win+Space for input language. The show-desktop corner is left in place.
+On a narrow keyboard (a tablet in portrait), the letter page uses a minimal layout: ten letters across the top, the next row half a key in, shift and delete around z to m, and &123, the language key (a globe instead of ENG), Ctrl, space, microphone and return along the bottom. The &123 page follows the same frame. Punctuation, the second shift, Tab, Home, End and the arrow keys are hidden there. Wider keyboards keep every key, with rows that stagger like a hardware keyboard while both edges stay flush.
 
-The flower needs to be on the taskbar itself for the chevron to go. If it lives under show hidden icons, turn it on in **Settings > Personalization > Taskbar > Other system tray icons**. Until then jellyflower keeps the chevron, so its menu is always one click away.
+The return key dims and ignores taps while the text box is empty, and turns your accent color once there is something to send. Password boxes and apps that don't report their text keep the normal return key. Emoji, split and traditional layouts stay as Windows draws them; choose Default in the keyboard's own settings and the symmetric layout comes back. Set the row back to `system`, or exit jellyflower, and Windows' layout returns right away.
 
-Explorer helper v19 carries the new tray styling; Start/Search helper v20 is unchanged. A normally stopped 0.19.0 helper restores its styling before v19 attaches. Windows may keep the older helper's diagnostics connection, so if the taskbar styling does not apply after updating, sign out and back in once. Updates do not restart Explorer.
+Start now fits screens that are too narrow for it, such as a tablet in portrait. Instead of being cut off at the right edge, the menu fills the width of the screen with four pinned columns, and returns to Windows' size when you rotate back.
 
-The row is unavailable on legacy taskbars without the Windows 11 XAML tray. Unfamiliar tray layouts are left alone.
+Start/Search helper v21 carries both changes. A normally stopped 0.20.0 helper restores Start and Search before v21 attaches, so no sign-out is needed. The Explorer helper is unchanged at v19. jellyflower only connects to the touch keyboard after you choose `symmetric`. Updates do not restart Explorer.

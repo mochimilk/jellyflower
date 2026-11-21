@@ -19,13 +19,14 @@ A small Windows 11 app for a frosted taskbar, a cleaner Start menu, and a deskto
 ## Features
 
 - Acrylic taskbar with three modes: system tint, pure blur, or off.
-- Matching translucent Start and Search styling, with an icon-only pinned grid and a personal greeting.
+- Matching translucent Start and Search styling, with an icon-only pinned grid and a personal greeting. On screens too narrow for Start (a tablet in portrait), it fills the width with four pinned columns.
 - A single-line clock with an optional date, keeping the Windows calendar click and tooltip.
 - Light, dark, or automatic system themes that switch at sunrise and sunset.
 - Included light and dark jellyflower wallpapers that follow your system theme or their own sunrise/sunset schedule.
 - Optional cursor colors with hover previews, using your own separately licensed cursor pack.
 - Windows auto hide, controlled right from the taskbar menu.
 - An optional minimal tray: hide every notification-area icon, the language indicator, Quick Settings and the clock, leaving just the flower.
+- An optional tablet-style touch keyboard: a minimal layout on narrow screens and staggered, flush rows on wide ones, with roomier keys.
 - Automatic launch at login and updates you can download and install inside the app.
 - English, French, and Korean text, selected automatically from your Windows display language.
 
@@ -49,15 +50,18 @@ Jellyflower follows Windows' display language without an extra language setting.
 | taskbar | Acrylic mode, date, tray (all icons or jellyflower only), and Windows auto hide. |
 | wallpaper | Turn the jellyflower wallpapers on or off, and follow the system theme or sunrise/sunset. |
 | colors / cursor | Import your cursor pack, then preview and choose a color. |
+| keyboard | Keep Windows' touch keyboard layout (`system`) or switch to the `symmetric` one. |
 | general | Visit GitHub, check your installed version for updates, or exit. |
 
 Set **taskbar > tray** to `jellyflower` to clear the notification area down to the flower. Windows' shortcuts are untouched: Win+A for Quick Settings, Win+N for notifications and the calendar, Win+Space for input language. To hide the show-hidden-icons chevron too, the flower must be on the taskbar itself: turn it on in **Settings > Personalization > Taskbar > Other system tray icons**. Otherwise the chevron stays so the menu is always reachable.
+
+Set **keyboard** to `symmetric` to rearrange the touch keyboard's letter page like a tablet keyboard, with wider gaps and rounder keys. On keyboards narrower than 800 pixels (a tablet in portrait) it uses a minimal layout: ten letters across the top, the next row half a key in, shift and delete around z to m, and &123, the language key (a globe instead of ENG), Ctrl, space, microphone and return along the bottom. Its &123 page follows the same frame: digits, then - / : ; ( ) $ & @ ", then the next-symbols key, . , ? ! ' and delete, then abc, Ctrl, space and return. Punctuation, the second shift, Tab, Home, End and the arrow keys are hidden there, as are # ^ _ = +. The keys sit a little apart, with padding around them (more under the bottom row, so rounded screen corners don't clip it) and the suggestion bar's icons lined up with the keys. The return key dims and ignores taps while the focused text box is empty, and turns your accent color once there is something to send; password boxes and apps that don't report their text keep the normal return key, and the small digit hints over q to p are smaller and fainter. Wider keyboards keep every key: Ctrl takes the left end of a letter row and the rows stagger like a hardware keyboard while both edges stay flush. Keys still respond across their whole width, keep Windows' own colors in light and dark mode, and other pages (emoji, split and traditional layouts, and &123 on wide keyboards) stay as Windows draws them. Picking another layout in the keyboard's own settings (small, split, traditional) and then default again brings the symmetric layout back. Set it back to `system` to restore Windows' layout right away.
 
 Cursor artwork is **not bundled**. Choose **colors > unlock** for instructions, get your own full Cursor Concept 3 HDPi ZIP from [JepriCreations](https://jepricreations.com/products/cursor-concept-3-hdpi), and drop it into the folder jellyflower opens. Until you import a pack, your Windows cursor stays as it is.
 
 In **general**, select the version number to check for updates. If it says **download**, select it again to install and relaunch. Your preferences and cursor pack stay in place.
 
-Choose **general > exit** to close jellyflower and restore its taskbar, clock, Start styling, and cursor changes. Your chosen Windows theme and auto-hide preference stay selected; turn the jellyflower wallpaper off first if you want your previous wallpaper back. Uninstall through **Windows Settings > Apps > Installed apps**.
+Choose **general > exit** to close jellyflower and restore its taskbar, clock, Start styling, touch keyboard, and cursor changes. Your chosen Windows theme and auto-hide preference stay selected; turn the jellyflower wallpaper off first if you want your previous wallpaper back. Uninstall through **Windows Settings > Apps > Installed apps**.
 
 ## More details
 
@@ -78,7 +82,7 @@ Install Visual Studio 2022 Build Tools with Desktop development with C++, C++ CM
 
 Double-click `dist\x64\jellyflower-setup-x64.exe` to install. To build ARM64, install its C++ tools and run `Build.ps1 -Architecture ARM64`. Checked-in ICO files and native cursor geometry mean Python and SVG libraries are optional, only needed for regenerating artwork. The C++ runtime is linked statically; Windows supplies the remaining libraries.
 
-To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge-v19.dll`, `jellyflower-start-v20.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second taskbar recovery timer complements system and shell events; automatic theme scheduling uses its separate event timer. Other shell liveness/clock timers still run, so this change alone is not a measured battery-life improvement. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
+To run a portable build, keep `jellyflower.exe`, `jellyflower-bridge-v19.dll`, `jellyflower-start-v21.dll`, both app ICOs, and license/notices together. `Install.ps1` in the distribution enables startup from that exact directory. `Diagnose.ps1` writes the controller's JSON status. Maintenance commands include `--stop`, `--install`, `--uninstall`, `--diagnose <file>`, `--verify-cursors <folder>`, and `--restore-cursors`. A five-second taskbar recovery timer complements system and shell events; automatic theme scheduling uses its separate event timer. Other shell liveness/clock timers still run, so this change alone is not a measured battery-life improvement. Logs are bounded to roughly 64 KiB in `%LOCALAPPDATA%\jellyflower\diagnostics.log`.
 
 The GitHub workflow builds x64 and ARM64 and publishes tagged releases. `Publish.ps1` publishes the first local x64 build using the maintainer's normal GitHub CLI login. [UPDATES.md](docs/UPDATES.md) documents the release process.
 

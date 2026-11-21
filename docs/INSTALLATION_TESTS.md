@@ -253,3 +253,37 @@ Run WallpaperLogic with a fresh workspace directory and the asset directory. It 
 8. Select tray again (`all`), then separately exit, and separately end jellyflower.exe in Task Manager. Each time the stock tray returns within a few seconds with the current icons, network/volume/battery state, clock and the chevron only when hidden icons exist.
 9. Relaunch: `jellyflower` is remembered. Restart Explorer and sign out/in: the minimal tray reapplies without Explorer crashing at startup.
 10. On Windows 10 or a legacy taskbar, the tray row is greyed out and dispatches nothing.
+
+## 0.21.0 update acceptance
+
+1. Update from 0.20.0 with its version row. Without signing out, Start and Search keep their styling after the relaunch: `--diagnose` reports `startAttached` 1 and `startLastResult` 0. The taskbar keeps its styling, since Explorer stays on helper v19.
+2. `keyboard` reads `system` and `keyboardAttached` is 0: an update alone never attaches to the touch keyboard.
+
+## 0.21.0 symmetric touch keyboard acceptance
+
+Use a touch device (or set Settings > Time & language > Typing > Touch keyboard to always show) with the docked keyboard.
+
+1. Open the menu: `keyboard` sits between colors/cursor and general, reads `system`, and shows the keyboard glyph. `--diagnose` reports `keyboardLayout` "system" and `keyboardAttached` 0: jellyflower has not touched TextInputHost.
+2. In portrait (keyboard under 800 DIP wide), select keyboard: the row reads `symmetric` and the menu stays open. Show the touch keyboard on its letter page. Within a few seconds (immediately on later shows) it reads q to p edge to edge; a to l half a key in from each side; a wide shift, z to m under s to k, a wide delete; and &123, a globe, Ctrl, space, microphone, return. Keys have small gaps (about 7 DIP across, 10 between rows), rounder corners, about 8 DIP of padding at each side, 6 under the suggestion bar and 27 under the bottom row (the bar's outer icons line up with the outer keys), with touches in that padding still reaching the nearest key, and the digit hints over q to p smaller and fainter (tertiary text), and the language key a globe the size of the delete and microphone icons, in the keys' normal color; on a device with rounded screen corners, the bottom corner keys are not clipped. The apostrophe, comma, period, question mark, second shift and arrows are gone.
+3. Type a sentence with backspace and return in their new places, Ctrl+A/Ctrl+Z through Ctrl, and a language switch through the globe: the language changes (record it in the suggestion bar or the typed text) and the globe stays. Tap in the gaps between keys and just under the bottom row: the nearest key types, as before.
+4. Press shift and caps lock (double-tap shift): capitals appear without keys moving. Switch to &123: it reads 1-0; - / : ; ( ) $ & @ "; the next-symbols key where shift was, . , ? ! ' and delete where it was; abc where &123 was, Ctrl, space and return. Tab, Home, End, the arrows and # ^ _ = + are hidden; record whether the next-symbols page offers # ^ _ = +. Emoji looks exactly as Windows draws it. Return to the letters: the layout is back.
+5. Rotate to landscape (keyboard 800 DIP or wider): no key is hidden; Tab (or Ctrl) is 1.25 units at the top left, Ctrl takes the left of A when Tab exists, and a, z step right of q like a hardware keyboard while both edges stay flush. Change the keyboard size in Windows settings: the layout follows.
+6. Switch to the small (floating), split and traditional layouts from the keyboard's settings button: split and traditional stay as Windows draws them. Choose default again: the symmetric layout returns within a second or two, without changing jellyflower's setting, and `keyboardSymmetricGrids` reads 1 (the replaced grid is released).
+7. Repeat in light and dark mode and with a custom keyboard theme: keys keep Windows' colors.
+8. Select keyboard again (`system`), then separately exit, and separately end jellyflower.exe in Task Manager. Each time every key, gap and corner returns to Windows' layout within a second or two without reopening the keyboard, and the globe turns back into ENG. `keyboardSymmetricGrids` reads 0.
+9. Relaunch: `symmetric` is remembered and reapplies. End TextInputHost.exe in Task Manager; once Windows relaunches it and the keyboard is shown, the layout reapplies within five seconds.
+10. Swipe typing (if enabled) and Narrator on the moved keys: record whether swiped words and announced key names match the visible keys.
+11. Return key: tap into an empty text box (Start search, a browser address bar, VS Code's chat box with its placeholder). Return is dimmed and tapping it does nothing; `keyboardField` reads "empty". Type a letter: within half a second return fills with the accent color (light accent with a dark arrow in dark mode, dark accent with a white arrow in light mode) and works; `keyboardField` reads "text". Delete it: dimmed again. In a password box, a document (Word, Notepad's page) or an app that reports no text, return keeps Windows' look ("unknown"). Tap keys and the suggestion bar: the state does not drop to unknown. Change the accent color in Settings: return follows within a second.
+12. With the menu open, select keyboard several times quickly, including while a text box has focus: jellyflower keeps responding (no "not responding" and no restart in diagnostics.log), and the field watcher stops and starts with the setting.
+
+## 0.21.0 narrow Start acceptance
+
+Use a display narrower than about 666 DIP, such as a tablet in portrait at 300% (626 DIP wide), with the redesigned Start.
+
+1. Before launching jellyflower, open Start: its right edge, border and corners are cut off. Launch jellyflower and reopen Start: the menu fills the screen width with Windows' usual gap at both edges, and its border and all four corners show.
+2. Pinned shows four columns spread across the menu, the outer icons equally far from the left and right edges. Hover or press a pinned app: the highlight fills the column and is about 80 DIP tall with 12-DIP corners. Collapsed, three rows show the same 12 apps Windows shows in two rows of six; Show all shows every pinned app and Show less collapses again. Drag to reorder, open a folder and rename it: the folder overlay sits within the menu.
+3. Recommended (Recent) keeps two columns and two rows, with names readable; Show all opens its full-width list.
+4. Scroll the All list in list, grid and category views: rows, the app grid and category cards fill the width with no clipped or overlapping items. Search, the profile, places and power buttons work.
+5. Rotate to landscape with Start closed, then open it: the native width and six pinned columns return. Rotate back: the narrow layout returns. Repeat once with Start open.
+6. Toggle light/dark, then choose general > exit (and separately end jellyflower.exe): Start returns to Windows' width, cut-off edge included, within a second or two.
+7. On a display where Start already fits (for example 1920x1080 at 100% or 150%), nothing changes from the previous release.

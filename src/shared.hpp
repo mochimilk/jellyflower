@@ -20,7 +20,7 @@ enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, Enab
     ClockDateQuery, StartCountQuery, StartAttachedQuery, StartResultQuery, StartSearchQuery, StartSpacingQuery,
     SearchAttachedQuery,SearchInputQuery,SearchResultQuery,WallpaperStatusQuery,WallpaperResultQuery,
     AdaptiveGlyphQuery,AdaptiveBitmapQuery,AdaptiveResultQuery,TrayOnlyQuery,TrayHiddenQuery,TrayFlowerQuery,
-    TrayResultQuery };
+    TrayResultQuery, KeyboardLayoutQuery, KeyboardAttachedQuery, KeyboardCountQuery, KeyboardResultQuery, KeyboardFieldQuery };
 enum Backend : LONG { Waiting, Legacy, Modern, Unsupported };
 enum BridgeState : LONG { Idle, Starting, Attached, Failed };
 

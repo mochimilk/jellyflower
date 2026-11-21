@@ -11,13 +11,14 @@ DWORD StartPid(ShellHost host) {
     DWORD session=0;ProcessIdToSessionId(GetCurrentProcessId(),&session);
     wchar_t windows[32768]{};
     if(!GetWindowsDirectoryW(windows,32768)) return 0;
-    const bool search=host==ShellHost::Search;
-    const auto expected=std::wstring(windows)+(search?L"\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\SearchHost.exe":L"\\SystemApps\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\StartMenuExperienceHost.exe");
+    const wchar_t* name=host==ShellHost::Search?L"SearchHost.exe":host==ShellHost::Keyboard?L"TextInputHost.exe":L"StartMenuExperienceHost.exe";
+    const auto expected=std::wstring(windows)+(host==ShellHost::Start?L"\\SystemApps\\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\\"
+        :L"\\SystemApps\\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\\")+name;
     Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0));
     PROCESSENTRY32W entry{sizeof(entry)};
     if(!snapshot || !Process32FirstW(snapshot.get(),&entry)) return 0;
     do {
-        if(_wcsicmp(entry.szExeFile,search?L"SearchHost.exe":L"StartMenuExperienceHost.exe")) continue;
+        if(_wcsicmp(entry.szExeFile,name)) continue;
         DWORD targetSession=0;
         if(!ProcessIdToSessionId(entry.th32ProcessID,&targetSession) || session!=targetSession) continue;
         Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,entry.th32ProcessID));
@@ -43,9 +44,9 @@ void Notify(DWORD target) {
 }
 HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     // Earlier helpers stay pinned after an in-app update. Wait for their
-    // restorations before v20 saves original shell properties; never unload them.
+    // restorations before v21 saves original shell properties; never unload them.
     struct LegacyState { volatile LONG magic,pid,epoch,running,enabled,light,attached,count,result,searches,spacing; };
-    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17",L"v18",L"v19"}) {
+    for (const auto version : {L"v1",L"v2",L"v3",L"v4",L"v5",L"v6",L"v7",L"v8",L"v9",L"v10",L"v11",L"v12",L"v13",L"v14",L"v15",L"v16",L"v17",L"v18",L"v19",L"v20"}) {
         Handle retired(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,(L"Local\\jellyflower.Start."+std::wstring(version)+L"."+std::to_wstring(pid)).c_str()));
         if(!retired) continue;
         const std::wstring_view generation(version);
@@ -75,11 +76,12 @@ HRESULT Inject(DWORD pid,HANDLE process,HANDLE remoteMapping,ShellHost host) {
     const auto initialize=reinterpret_cast<decltype(&InitializeXamlDiagnosticsEx)>(GetProcAddress(xaml,"InitializeXamlDiagnosticsEx"));
     wchar_t file[32768]{};const DWORD length=GetModuleFileNameW(nullptr,file,32768);
     if(initialize && length && length<32768) {
-        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v20.dll";
+        std::wstring path(file);path.resize(path.find_last_of(L'\\')+1);path+=L"jellyflower-start-v21.dll";
+        // TextInputHost runs at medium integrity, like Start; only Search is an AppContainer.
         if(host==ShellHost::Search) {
             result=SearchHelperAccess(process,path.c_str());if(FAILED(result))return result;
         }
-        wchar_t data[64]{};swprintf_s(data,L"JFStart20 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
+        wchar_t data[64]{};swprintf_s(data,L"JFStart21 %llx",static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(remoteMapping)));
         // Initialization runs on a fresh background thread. Probe existing
         // endpoint names until one accepts; never create/replace Start.
         for(unsigned index=1;index<=64;++index) {
@@ -103,19 +105,25 @@ void StartSession::Release() {
     mapping_.reset();process_.reset();pid_=0;lastAttempt_=0;
 }
 StartSession::~StartSession() {Release();}
-void StartSession::Refresh(bool light,HWND notify) {
+void StartSession::KeyboardField(LONG field) {
+    if(state_ && InterlockedExchange(&state_->keyboardField,field)!=field) Notify(pid_);
+}
+void StartSession::Refresh(bool light,HWND notify,bool keyboard) {
     if(worker_.joinable() && finished_) worker_.join();
     if(process_ && WaitForSingleObject(process_.get(),0)!=WAIT_TIMEOUT) Release();
     bool newOwner=false;
     if(!pid_) {
-        const auto first=UserSearchFirstName(notify);if(!first)return;
+        // Never attach to the keyboard host just to leave it stock.
+        if(host_==ShellHost::Keyboard && !keyboard) return;
+        // Only Search shows the greeting; the other hosts need not wait for it.
+        const auto first=host_==ShellHost::Keyboard?nullptr:UserSearchFirstName(notify);if(!first && host_!=ShellHost::Keyboard)return;
         pid_=StartPid(host_);if(!pid_) return;
         process_.reset(OpenProcess(SYNCHRONIZE|PROCESS_DUP_HANDLE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid_));
         mapping_.reset(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,sizeof(StartState),StartMappingName(pid_).c_str()));
         const bool existingMapping=GetLastError()==ERROR_ALREADY_EXISTS;
         if(process_ && mapping_) state_=static_cast<StartState*>(MapViewOfFile(mapping_.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(StartState)));
         if(!state_) {Release();return;}
-        if(!existingMapping)for(unsigned language=0;language<static_cast<unsigned>(Language::Count);++language)
+        if(!existingMapping && first)for(unsigned language=0;language<static_cast<unsigned>(Language::Count);++language)
             for(unsigned period=0;period<3;++period)
                 wcsncpy_s(state_->greetings[3*language+period],SearchGreeting(*first,period,static_cast<Language>(language)).c_str(),_TRUNCATE);
         const auto lifetime=DuplicateTo(GetCurrentProcess(),process_.get(),SYNCHRONIZE);
@@ -131,8 +139,11 @@ void StartSession::Refresh(bool light,HWND notify) {
     const bool themeChanged=InterlockedExchange(&state_->light,light ? 1:0)!=(light ? 1:0);
     const auto period=static_cast<LONG>(3*static_cast<unsigned>(GetLanguage())+LocalSearchGreetingPeriod());
     const bool greetingChanged=InterlockedExchange(&state_->greetingPeriod,period)!=period;
-    if(newOwner || changed || themeChanged || greetingChanged) Notify(pid_);
+    const LONG layout=host_==ShellHost::Keyboard && keyboard ? 1:0;
+    const bool keyboardChanged=InterlockedExchange(&state_->keyboard,layout)!=layout;
+    if(newOwner || changed || themeChanged || greetingChanged || keyboardChanged) Notify(pid_);
     if(Read(state_->attached)==1 || worker_.joinable() || (lastAttempt_ && GetTickCount64()-lastAttempt_<30000)) return;
+    if(host_==ShellHost::Keyboard && !keyboard) return;
     if(!remoteMapping_) {
         InterlockedExchange(&state_->mappingClaimed,0);
         remoteMapping_=DuplicateTo(mapping_.get(),process_.get(),FILE_MAP_READ|FILE_MAP_WRITE);

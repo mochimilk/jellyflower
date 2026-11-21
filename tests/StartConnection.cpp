@@ -2,9 +2,58 @@
 #include "../src/start_session.hpp"
 #include <cstdio>
 #include <cstring>
+// --keyboard: the touch keyboard host (TextInputHost.exe). Show the touch
+// keyboard once before running it, so its key grid exists.
+int KeyboardConnection(bool hold,bool abandon) {
+    using acrylic::ShellHost;
+    if(abandon) {
+        acrylic::StartSession keyboard(ShellHost::Keyboard);
+        for(unsigned i=0;i<40;++i) {keyboard.Refresh(false,nullptr,true);Sleep(500);if(keyboard.KeyboardCount()) ExitProcess(0);}
+        ExitProcess(4); // Deliberately skip destruction to test controller loss.
+    }
+    acrylic::Handle mapping;
+    acrylic::StartState* state=nullptr;
+    const auto settle=[&](acrylic::StartSession& keyboard,bool layout,bool expected) {
+        for(unsigned i=0;i<30;++i) {keyboard.Refresh(false,nullptr,layout);Sleep(200);if((keyboard.KeyboardCount()!=0)==expected) return true;}
+        return false;
+    };
+    {
+        acrylic::StartSession keyboard(ShellHost::Keyboard);
+        keyboard.Refresh(false,nullptr,false);Sleep(200);
+        if(keyboard.Pid()) {std::puts("FAIL: attached to the keyboard host while the layout was off");return 11;}
+        for(unsigned i=0;i<40;++i) {
+            keyboard.Refresh(false,nullptr,true);Sleep(500);
+            std::printf("pid=%lu attached=%ld keyboards=%ld result=%08lx\n",keyboard.Pid(),keyboard.Attached(),keyboard.KeyboardCount(),keyboard.Result());std::fflush(stdout);
+            if(keyboard.Attached()==1 && keyboard.KeyboardCount()) break;
+        }
+        if(keyboard.Attached()!=1 || !keyboard.KeyboardCount()) return 1;
+        mapping.reset(OpenFileMappingW(FILE_MAP_ALL_ACCESS,FALSE,acrylic::StartMappingName(keyboard.Pid()).c_str()));
+        if(mapping) state=static_cast<acrylic::StartState*>(MapViewOfFile(mapping.get(),FILE_MAP_ALL_ACCESS,0,0,sizeof(acrylic::StartState)));
+        if(!state) return 2;
+        if(!settle(keyboard,false,false)) {std::puts("FAIL: turning the layout off did not restore the keyboard");return 9;}
+        if(!settle(keyboard,true,true)) {std::puts("FAIL: turning the layout on again did not re-apply it");return 10;}
+        if(hold) Sleep(30000); // Optional bounded visual inspection of the keyboard only.
+    }
+    for(unsigned i=0;i<20 && acrylic::Read(state->keyboards);++i) Sleep(100);
+    if(acrylic::Read(state->running)!=0 || acrylic::Read(state->keyboards)!=0) {UnmapViewOfFile(state);std::puts("FAIL: keyboard did not restore after owner shutdown");return 3;}
+    wchar_t path[32768]{};GetModuleFileNameW(nullptr,path,32768);
+    std::wstring command=L"\""+std::wstring(path)+L"\" --abandon --keyboard";
+    STARTUPINFOW startup{sizeof(startup)};PROCESS_INFORMATION process{};
+    if(!CreateProcessW(path,command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&startup,&process)) return 5;
+    acrylic::Handle child(process.hProcess),thread(process.hThread);
+    if(WaitForSingleObject(child.get(),25000)!=WAIT_OBJECT_0) return 6;
+    DWORD error=0;GetExitCodeProcess(child.get(),&error);if(error) return 7;
+    for(unsigned i=0;i<30 && acrylic::Read(state->keyboards);++i) Sleep(100);
+    const bool lostOwnerRestored=acrylic::Read(state->keyboards)==0;
+    UnmapViewOfFile(state);
+    if(!lostOwnerRestored) {std::puts("FAIL: lost controller did not restore the keyboard");return 8;}
+    std::puts("PASS: touch keyboard connection only when chosen, symmetric layout applied, off/on in place, graceful shutdown and abrupt owner-loss restoration.");
+    return 0;
+}
 int main(int argc,char** argv) {
-    bool hold=false,search=false,abandon=false;
-    for(int i=1;i<argc;++i){hold|=!std::strcmp(argv[i],"--hold");search|=!std::strcmp(argv[i],"--search");abandon|=!std::strcmp(argv[i],"--abandon");}
+    bool hold=false,search=false,abandon=false,keyboard=false;
+    for(int i=1;i<argc;++i){hold|=!std::strcmp(argv[i],"--hold");search|=!std::strcmp(argv[i],"--search");abandon|=!std::strcmp(argv[i],"--abandon");keyboard|=!std::strcmp(argv[i],"--keyboard");}
+    if(keyboard) return KeyboardConnection(hold,abandon);
     const auto host=search?acrylic::ShellHost::Search:acrylic::ShellHost::Start;
     if(abandon) {
         acrylic::StartSession start(host);

@@ -3,7 +3,7 @@ param([string]$CursorPackPath = (Join-Path ([Environment]::GetFolderPath('UserPr
 $ErrorActionPreference = 'Stop'
 $executable = Join-Path $PSScriptRoot 'jellyflower.exe'
 $bridge = Join-Path $PSScriptRoot 'jellyflower-bridge-v19.dll'
-$startBridge = Join-Path $PSScriptRoot 'jellyflower-start-v20.dll'
+$startBridge = Join-Path $PSScriptRoot 'jellyflower-start-v21.dll'
 if (-not (Test-Path -LiteralPath $executable) -or -not (Test-Path -LiteralPath $bridge) -or -not (Test-Path -LiteralPath $startBridge)) {
     throw 'Run Build.ps1 first, then use Install.ps1 from dist\x64 or dist\ARM64. Keep the executable and helper DLLs together.'
 }

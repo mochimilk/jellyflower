@@ -63,6 +63,8 @@ THE SOFTWARE.
 
 Start AcrylicBorder/AcrylicOverlay names, the overlay rule, and the diagnostics approach were reviewed in Ramen Software's [Windows 11 Start menu styling guide](https://github.com/ramensoftware/windows-11-start-menu-styling-guide) and [Windows 11 Start Menu Styler source](https://github.com/ramensoftware/windhawk-mods/blob/main/mods/windows-11-start-menu-styler.wh.cpp), authored by m417z and contributors (GPL-3.0), on 2026-10-11. Jellyflower's small independent adapter reuses its existing TAP pattern and does not bundle Windhawk's runtime, general styling engine or theme layouts. The effective-background workaround follows the documented source observation that AcrylicBorder's ReadLocalValue can return a different brush. See docs/START_MENU.md for implementation details and sources.
 
+The narrow layout's targets (`Grid#FrameRoot` and its 12-DIP padding, `Grid#AnimationRoot`, `Grid#MainMenu` with its code-set 642-DIP `Width`, `StartBlendedFlexFrame.IsLargeStartProperty`, and the pinned list's 24-DIP indicator column), and how the React Native Recommended list chooses its columns from the width of `Frame#StartFrame`, were read and measured in the live `StartMenuExperienceHost.exe` visual tree on Windows 11 25H2 (build 26200) with a read-only XAML diagnostics probe, plus temporary probe-only property changes that were restored, on 2026-11-21. No third-party code is included.
+
 
 ## GitHub Octicons
 
@@ -89,3 +91,5 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+The touch keyboard's element names (`KeyboardGrid`, `TEMPLATE_PART_KeyGrid`, `KeyboardKey`, `TEMPLATE_PART_KeyLabel`, `TEMPLATE_PART_KeySecondaryLabel`) and its Margin/Width/Height key placement were read from the live visual tree of `TextInputHost.exe` on Windows 11 25H2 (build 26200) with a read-only XAML diagnostics probe on 2026-11-21. Moving a key element was confirmed to move its touch target. No third-party code is included. The layout proportions follow measurements of Apple's iPadOS 26 docked keyboards: the minimal layout from a screenshot the user supplied, and the full layout's 12.5-unit rows from the keyboard figure in Apple's iPad User Guide for iPadOS 26 and 27. No Apple artwork or code is included. The keyboard menu glyph is Lucide keyboard, covered by the included ISC notice.

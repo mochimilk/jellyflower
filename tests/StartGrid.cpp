@@ -11,7 +11,7 @@ using namespace acrylic;
 void Check(bool yes,const char* text){if(!yes)throw std::runtime_error(text);}
 void Pump(){MSG m{};while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}}
 void Layout(const sx::Controls::Grid& root){for(unsigned i=0;i<16;++i){root.UpdateLayout();Pump();Sleep(8);}}
-winrt::hstring Supported(const sx::DependencyObject& o){auto f=o.try_as<sx::FrameworkElement>();if(f && f.Name()==L"MainContent")return L"StartMenu.StartHome";if(f && f.Name()==L"PinnedHost")return L"StartMenu.PinnedList";if(f && f.Name()==L"Category")return L"StartMenu.CategoryControl";if(f && f.Name()==L"PinnedApp")return L"StartMenu.PinnedListTile";if(f && f.Name()==L"PinnedFolder")return L"StartMenu.PinnedListCollapsedFolder";return winrt::get_class_name(o);}
+winrt::hstring Supported(const sx::DependencyObject& o){auto f=o.try_as<sx::FrameworkElement>();if(f && f.Name()==L"MainContent")return L"StartMenu.StartHome";if(f && f.Name()==L"FlexFrame")return L"StartMenu.StartBlendedFlexFrame";if(f && f.Name()==L"PinnedHost")return L"StartMenu.PinnedList";if(f && f.Name()==L"Category")return L"StartMenu.CategoryControl";if(f && f.Name()==L"PinnedApp")return L"StartMenu.PinnedListTile";if(f && f.Name()==L"PinnedFolder")return L"StartMenu.PinnedListCollapsedFolder";return winrt::get_class_name(o);}
 double X(const sx::FrameworkElement& item,const sx::UIElement& root){return item.TransformToVisual(root).TransformPoint({0,0}).X;}
 sx::Controls::ControlTemplate Plain(){return sx::Markup::XamlReader::Load(LR"(<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="ContentControl"><ContentPresenter HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/></ControlTemplate>)").as<sx::Controls::ControlTemplate>();}
 sx::Controls::ControlTemplate PinnedTemplate(){return sx::Markup::XamlReader::Load(LR"(<ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="GridViewItem"><Border Name="ContentBorder"><Grid Name="DroppedFlickerWorkaroundWrapper"><Border Name="BackgroundBorder" CornerRadius="4" Background="#30404040"/><ContentPresenter Name="ContentPresenter" Content="{TemplateBinding Content}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch"/><Border Name="HighContrastBorder" CornerRadius="4" IsHitTestVisible="False"/></Grid></Border></ControlTemplate>)").as<sx::Controls::ControlTemplate>();}
@@ -173,6 +173,83 @@ int main(){try{
         view.SetBinding(sx::FrameworkElement::HeightProperty(),height);style.Restore();Layout(pane);Check(view.GetBindingExpression(sx::FrameworkElement::HeightProperty()).ParentBinding()==height && view.Height()==168 && fixed.Height()==252,"latest native fixed heights and binding restore");
         pane.Children().Clear();pane.Width(832);Layout(pane);
     }
+    {
+        // Narrow layout: the menu width rule, measured on the live build 26200
+        // tree (642-DIP menu, 12-DIP frame padding) on a 626-DIP-wide tablet.
+        Check(StartMenuWidth(642,700)==642 && StartMenuWidth(642,642)==642,"a menu that fits keeps its native width");
+        Check(StartMenuWidth(642,602)==602 && StartMenuWidth(642,300)==300,"a menu that does not fit takes all the width there is");
+        Check(std::isnan(StartMenuWidth(std::numeric_limits<double>::quiet_NaN(),300)),"an auto-sized menu is untouched");
+        host.Content(nullptr);
+        sx::Controls::Grid flex;flex.Name(L"FlexFrame");flex.Width(626);flex.HorizontalAlignment(sx::HorizontalAlignment::Left);
+        sx::Controls::Grid frame;frame.Name(L"FrameRoot");frame.Padding({12,12,12,12});frame.HorizontalAlignment(sx::HorizontalAlignment::Center);flex.Children().Append(frame);
+        sx::Controls::Grid animation;animation.Name(L"AnimationRoot");frame.Children().Append(animation);
+        sx::Controls::Grid menu;menu.Name(L"MainMenu");menu.Width(642);menu.Height(200);animation.Children().Append(menu);
+        sx::Controls::Grid content;content.Name(L"MainContent");content.Margin({1,1,1,1});menu.Children().Append(content);
+        host.Content(flex);Layout(flex);
+        Check(IsStartMenuColumn(menu,Supported) && !IsStartMenuColumn(menu) && !IsStartMenuColumn(content,Supported),"only the menu column under a Start frame is adapted");
+        {
+            StartFrame style(menu);style.Refresh(true);Layout(flex);
+            Check(menu.Width()==602 && StartNarrow().active && std::abs(StartNarrow().removed-40)<.01,"a display too narrow for the native menu gets the narrow layout at its full width");
+            Check(frame.ActualWidth()<=626.01 && std::abs(menu.TransformToVisual(flex).TransformPoint({0,0}).X-12)<.5,"the menu fills the display inside the native 12-DIP frame padding");
+            flex.Width(900);Layout(flex);Check(menu.Width()==642 && !StartNarrow().active,"rotating to a wide display restores the native width");
+            flex.Width(380);Layout(flex);Check(menu.Width()==356 && StartNarrow().active,"a narrower display still gets all its width");
+            flex.Width(626);menu.Width(834);Layout(flex);Check(menu.Width()==602 && std::abs(StartNarrow().removed-232)<.01,"a later native width (the large layout) becomes the original and still fits");
+            style.Restore();Check(menu.Width()==834 && !StartNarrow().active,"the latest native width restores and the narrow state clears");
+            style.Refresh(true);Layout(flex);style.Refresh(false);Check(menu.Width()==834 && !StartNarrow().active,"disabling restores");
+        }
+        host.Content(nullptr);flex.Children().Clear();host.Content(pane);pane.Width(832);Layout(pane);
+    }
+    {
+        // Narrow layout on the real portrait tablet: a 602-DIP menu, so a
+        // 600-DIP MainContent, 40 DIP narrower than native.
+        StartNarrow()={true,40};pane.Width(600);
+        sx::Controls::Grid container;container.Name(L"TopLevelSuggestionsContainer");container.Margin({20,0,20,0});container.VerticalAlignment(sx::VerticalAlignment::Top);pane.Children().Append(container);
+        auto recommended=sx::Markup::XamlReader::Load(LR"(<GridView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" VerticalAlignment="Top" Padding="0"><GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal"/></ItemsPanelTemplate></GridView.ItemsPanel></GridView>)").as<sx::Controls::GridView>();recommended.Name(L"RecommendedList");
+        std::vector<Item> files;for(unsigned j=0;j<4;++j){files.push_back(Make(7));recommended.Items().Append(files.back().cell);}
+        container.Children().Append(recommended);Layout(pane);
+        {
+            StartGrid style(recommended,Supported);style.Refresh(true);Layout(pane);
+            const auto panel=recommended.ItemsPanelRoot().as<sx::Controls::ItemsWrapGrid>();
+            const double y0=files[0].cell.TransformToVisual(pane).TransformPoint({0,0}).Y,y1=files[1].cell.TransformToVisual(pane).TransformPoint({0,0}).Y;
+            std::printf("narrow recommended cell=%.3f x=%.3f,%.3f\n",panel.ItemWidth(),X(files[0].cell,pane),X(files[1].cell,pane));
+            Check(std::abs(y0-y1)<1 && std::abs(panel.ItemWidth()-280)<.5,"Recommended keeps Windows' two columns across the narrow menu");
+            Check(std::abs(X(files[0].cell,pane)-StartMetrics::RowInset)<1.5 && std::abs(X(files[1].cell,pane)+files[1].cell.ActualWidth()-(600-StartMetrics::RowInset))<1.5,"narrow Recommended rows keep the 20-DIP row inset");
+            style.Restore();
+        }
+        pane.Children().Clear();
+        sx::Controls::Grid fixed;fixed.Name(L"PinnedHost");fixed.Height(168);fixed.VerticalAlignment(sx::VerticalAlignment::Top);
+        sx::Controls::ColumnDefinition main,indicator;indicator.Width({24,sx::GridUnitType::Pixel});fixed.ColumnDefinitions().Append(main);fixed.ColumnDefinitions().Append(indicator);
+        auto view=sx::Markup::XamlReader::Load(LR"(<GridView xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" Name="PinnedList" Height="168" VerticalAlignment="Top" Padding="0"><GridView.ItemsPanel><ItemsPanelTemplate><ItemsWrapGrid Orientation="Horizontal"/></ItemsPanelTemplate></GridView.ItemsPanel></GridView>)").as<sx::Controls::GridView>();
+        std::vector<Item> items;for(unsigned j=0;j<32;++j){items.push_back(Make(j%2?2:1));view.Items().Append(items.back().cell);}
+        fixed.Children().Append(view);pane.Children().Append(fixed);Layout(pane);
+        {
+            StartGrid style(view,Supported);style.Refresh(true);
+            std::vector<std::unique_ptr<StartPinned>> pins;for(auto& item:items){pins.push_back(std::make_unique<StartPinned>(item.tile));pins.back()->Refresh(true);}
+            Layout(pane);
+            const auto panel=view.ItemsPanelRoot().as<sx::Controls::ItemsWrapGrid>();
+            unsigned n=1;for(;n<items.size();++n)if(std::abs(items[n].cell.TransformToVisual(pane).TransformPoint({0,0}).Y-items[0].cell.TransformToVisual(pane).TransformPoint({0,0}).Y)>2)break;
+            const auto first=items[0].cell,last=items[n-1].cell;
+            const double left=X(first,pane),right=pane.ActualWidth()-X(last,pane)-last.ActualWidth();
+            std::printf("narrow pinned columns=%u gaps=%.3f/%.3f cell=%.3fx%.3f pitch=%.3f height=%.3f\n",n,left,right,first.ActualWidth(),first.ActualHeight(),panel.ItemHeight(),view.Height());
+            Check(n==StartMetrics::NarrowPinnedColumns,"narrow pinned list has four columns");
+            Check(std::abs(left-StartMetrics::NarrowPinnedInset)<1.5 && std::abs(right-StartMetrics::NarrowPinnedInset)<1.5,"four columns fill the menu between 24-DIP insets, the right one being the native indicator column");
+            Check(std::abs(first.ActualWidth()-138)<.5 && std::abs(first.ActualHeight()-StartMetrics::NarrowPinnedHeight)<.5,"narrow pinned targets fill their column and stay 80 DIP tall");
+            Check(std::abs(panel.ItemHeight()-(StartMetrics::NarrowPinnedHeight+StartMetrics::NarrowPinnedRowGap))<.5,"narrow rows are eight DIP apart");
+            auto logo=items[0].logo;const auto p=logo.TransformToVisual(first).TransformPoint({0,0});
+            Check(std::abs(p.X+(logo.ActualWidth()-first.ActualWidth())/2)<1.5 && std::abs(p.Y+(logo.ActualHeight()-first.ActualHeight())/2)<1.5,"icons stay centered in the wide targets");
+            Check(std::abs(view.Height()-3*panel.ItemHeight())<.5 && std::abs(fixed.Height()-view.Height())<.5,"collapsed: Windows' 2x6 = 12 visible apps become 3 rows of 4");
+            fixed.Height(504);view.Height(504);Layout(pane);
+            Check(std::abs(view.Height()-8*panel.ItemHeight())<.5,"expanded: all 32 pinned apps stay visible in 8 rows of 4");
+            pane.Width(272);Layout(pane);
+            Check(std::abs(items[0].cell.ActualWidth()-56)<.5 && std::abs(items[0].cell.ActualHeight()-56)<.5,"columns narrower than 80 DIP keep square targets");
+            fixed.Height(168);view.Height(168);StartNarrow()={};pane.Width(642);Layout(pane);
+            unsigned wide=1;for(;wide<items.size();++wide)if(std::abs(items[wide].cell.TransformToVisual(pane).TransformPoint({0,0}).Y-items[0].cell.TransformToVisual(pane).TransformPoint({0,0}).Y)>2)break;
+            Check(wide==6 && std::abs(panel.ItemHeight()-(panel.ItemWidth()+StartMetrics::PinnedRowGap))<.5 && std::abs(view.Height()-2*panel.ItemHeight())<.5,"leaving the narrow layout returns to Windows' six columns of squares and two rows");
+            style.Restore();for(auto& pin:pins)pin->Restore();
+        }
+        Check(view.Height()==168 && fixed.Height()==168 && items[1].root.Width()==96,"narrow pinned sizes restore");
+        StartNarrow()={};pane.Children().Clear();pane.Width(832);Layout(pane);
+    }
     host.Content(nullptr);host.Close();DestroyWindow(window);manager.Close();Pump();
-    std::printf("PASS: %u live XAML layout cases with unconstrained native wrappers, nested fixed templates, category cards, pinned apps/folders, list/grid and compact/expanded Recommended; centered icons, identity, resize/recycling/idle/restoration.\n",cases);return 0;
+    std::printf("PASS: %u live XAML layout cases with unconstrained native wrappers, nested fixed templates, category cards, pinned apps/folders, list/grid and compact/expanded Recommended; centered icons, identity, resize/recycling/idle/restoration; narrow menu width, four-column pinned and two-column Recommended.\n",cases);return 0;
 }catch(const winrt::hresult_error& e){std::printf("FAIL HRESULT %08lx %s\n",static_cast<unsigned long>(e.code()),winrt::to_string(e.message()).c_str());}catch(const std::exception& e){std::printf("FAIL %s\n",e.what());}return 1;}
