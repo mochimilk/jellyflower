@@ -29,3 +29,5 @@ Write-Host 'compactDisplays counts displays narrower than Start that have window
 Write-Host 'floatingDock reports the saved dock choice. dockTaskbars counts taskbars drawn as a floating pill (0 while no app button is visible), clickThroughTaskbars those whose empty parts pass clicks through. dockLastResult reports an HRESULT: ERROR_ALREADY_EXISTS (0x800700B7) means another program shapes the taskbar and click-through was left off, TYPE_E_AMBIGUOUSNAME (0x8002802C) that two identical taskbars could not be told apart.'
 
 Write-Host 'taskbarHeight is the taller bar in DIPs (64 while floating is on, 0 for the stock bar). taskbarHeightResult reports an HRESULT: ERROR_NOT_FOUND (0x80070490) or an HTTP error if Taskbar.dll''s public symbols could not be found or downloaded, ERROR_REVISION_MISMATCH (0x8007049A) if the slot no longer holds Windows'' method. Either way the dock keeps floating at 48 DIPs.'
+
+Write-Host 'menuGlassResult reports an HRESULT: the last failure to draw a menu''s fluted glass, 0 once a menu has it again. A menu without it falls back to Windows'' acrylic, as it does while energy saver is on.'

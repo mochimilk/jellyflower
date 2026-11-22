@@ -688,3 +688,15 @@ CompactLogic (CI) passes: the compact width rule, app-bar proposal and placement
 Seen on the portrait 300% touch tablet (build 26200) while the dock was tested: maximized windows sat inside the side and top margins, and the work area ended 24 pixels (8 DIP) above the taskbar, including above the 64-DIP dock bar. In VS Code, selecting its maximize button has sometimes maximized the window and then closed it; the cause is not investigated.
 
 Not checked on a desktop for this release: the acceptance steps in INSTALLATION_TESTS (the status bar menu, notices with the flower hidden, full screen, turning the status bar off, rotation, exit and Explorer restart), more than one display, light theme, keyboard and screen-reader access (there is no keyboard path to the menu yet), and ARM64.
+
+## 0.23.0 fluted glass menus validation (2026-11-21)
+
+Build: every target builds at x64 Release with `/W4`, with no new warnings. `ctest -L unit` passes all 18 unit tests, including the new MenuReeds (CI): reeds of about 14 DIP at 96, 144 and 288 DPI that are equal, touch and fill the menu, bends that never read past the menu's edge, and full bends in the middle. MenuPresentation passes in both themes at five DPIs; it paints into memory, so it covers the menu's composed pixels, not the glass.
+
+Checked by hand on the portrait 300% touch tablet (Windows 11 25H2, build 26200, one display, dark theme, on AC power):
+
+- The root menu and the taskbar submenu draw the reeds over the windows behind them, with text, icons, the keyboard focus ring and the animated colors icon on top. `--diagnose` reports `menuGlassResult` 0.
+- A scratch window with the same effect over a striped test pattern showed each reed flipping and squeezing the stripes, with red and blue split, and no stray lines at the edges.
+- Setting any accent policy on the window, even disabling it, turns Windows' host backdrop black; the menu doesn't set one while it has the glass.
+
+Not checked on a desktop: light theme, energy saver, transparency off and high contrast with this build, 100% and 150% scale, more than one display, the wallpaper and general submenus, the status bar's menu, and ARM64.

@@ -16,6 +16,7 @@ jellyflower_add_test(DesktopOptions CXX20 LABELS unit ci
   LIBS windowsapp user32 ole32 oleaut32 uuid advapi32 shell32)
 jellyflower_add_test(KeyboardLayout LABELS unit ci)
 jellyflower_add_test(Localization LABELS unit ci LIBS user32)
+jellyflower_add_test(MenuReeds LABELS unit ci)
 jellyflower_add_test(SetupLockLogic LABELS unit ci)
 jellyflower_add_test(SetupRecovery RESOURCES LABELS unit ci SOURCES src/startup.cpp
   LIBS user32 shell32 ole32 oleaut32 uuid advapi32 taskschd)
@@ -55,9 +56,9 @@ jellyflower_add_test(VolumeLayout XAML LABELS desktop SOURCES src/volume.cpp LIB
 # Need arguments: MenuPresentation <output-folder> [--compositor];
 # WallpaperLogic <fresh-output-folder> <assets-folder>.
 jellyflower_add_test(MenuPresentation MANUAL RESOURCES
-  SOURCES src/cursor_icon.cpp src/updates.cpp src/update_download.cpp src/resources.rc
-  LIBS user32 gdi32 gdiplus d2d1 dwrite dwmapi comctl32 msimg32 advapi32 shell32 ole32 oleaut32 uuid
-    winhttp bcrypt windowsapp)
+  SOURCES src/cursor_icon.cpp src/updates.cpp src/update_download.cpp src/menu_glass.cpp src/resources.rc
+  LIBS user32 gdi32 gdiplus d2d1 d3d11 dxguid dwrite dwmapi comctl32 msimg32 advapi32 shell32 ole32 oleaut32 uuid
+    winhttp bcrypt windowsapp CoreMessaging)
 jellyflower_add_test(WallpaperLogic MANUAL RESOURCES SOURCES src/wallpaper_state.cpp src/resources.rc
   LIBS user32 ole32 shell32 uuid bcrypt)
 

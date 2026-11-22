@@ -22,7 +22,7 @@ enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, Enab
     AdaptiveGlyphQuery,AdaptiveBitmapQuery,AdaptiveResultQuery,TrayOnlyQuery,TrayHiddenQuery,TrayFlowerQuery,
     TrayResultQuery, KeyboardLayoutQuery, KeyboardAttachedQuery, KeyboardCountQuery, KeyboardResultQuery, KeyboardFieldQuery,
     CompactDisplaysQuery, StatusBarQuery, CompactResultQuery, DockQuery, DockCountQuery, DockRegionQuery, DockResultQuery,
-    BarHeightQuery, BarHeightResultQuery };
+    BarHeightQuery, BarHeightResultQuery, MenuGlassResultQuery };
 enum Backend : LONG { Waiting, Legacy, Modern, Unsupported };
 enum BridgeState : LONG { Idle, Starting, Attached, Failed };
 

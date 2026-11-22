@@ -19,6 +19,7 @@ A small Windows 11 app for a frosted taskbar, a cleaner Start menu, and a deskto
 ## Features
 
 - Acrylic taskbar with three modes: system tint, pure blur, or off.
+- Menus in fluted glass: what's behind them, seen through soft vertical reeds under your light or dark tint.
 - Matching translucent Start and Search styling, with an icon-only pinned grid and a personal greeting. On screens too narrow for Start (a tablet in portrait), it fills the width with four pinned columns.
 - A single-line clock with an optional date, keeping the Windows calendar click and tooltip.
 - Light, dark, or automatic system themes that switch at sunrise and sunset.

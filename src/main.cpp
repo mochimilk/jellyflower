@@ -9,6 +9,7 @@
 #include "auto_theme.hpp"
 #include <winrt/base.h>
 #include "popup.hpp"
+#include "menu_glass.hpp"
 #include "updates.hpp"
 #include "update_download.hpp"
 #include "version.hpp"
@@ -131,7 +132,7 @@ DWORD Diagnose(const wchar_t* output) {
     const HWND window = FindWindowW(WindowClass, nullptr);
     DWORD pid = 0;
     if (window) GetWindowThreadProcessId(window, &pid);
-    LONG values[50]{};
+    LONG values[51]{};
     bool responsive = window != nullptr;
     for (WPARAM query = 0; query < std::size(values) && window; ++query) {
         DWORD_PTR result = 0;
@@ -202,6 +203,7 @@ DWORD Diagnose(const wchar_t* output) {
         << ",\n  \"dockLastResult\": " << values[47]
         << ",\n  \"taskbarHeight\": " << values[48]
         << ",\n  \"taskbarHeightResult\": " << values[49]
+        << ",\n  \"menuGlassResult\": " << values[50]
         << ",\n  \"visualBlurVerified\": false\n}\n";
     Handle file(CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
     if (!file) return GetLastError();
@@ -742,6 +744,7 @@ LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lPa
         if (wParam == BarHeightQuery) return self->shared ? Read(self->shared->barHeightShown) : 0;
         if (wParam == BarHeightResultQuery) return self->minSizeReady && FAILED(self->minSizeResult) ? self->minSizeResult
             : self->shared ? Read(self->shared->barHeightResult) : S_OK;
+        if (wParam == MenuGlassResultQuery) return MenuGlass::LastResult();
         if (wParam == BackendQuery) return self->backend;
         if (wParam == AppliedQuery) return self->shared ? Read(self->shared->appliedCount) : self->applied;
         if (wParam == ResultQuery) return self->lastResult != S_OK ? self->lastResult

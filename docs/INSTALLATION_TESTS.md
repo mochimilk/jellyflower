@@ -317,3 +317,14 @@ Use a display narrower than about 666 DIP, such as a tablet in portrait at 300% 
 7. Rotate to landscape (or use a display 666 DIP or wider): the margins and status bar go away, and the status bar row greys out. Rotate back: they return.
 8. Exit jellyflower, and separately end jellyflower.exe in Task Manager: maximized windows grow back to the full work area within a few seconds. Restart Explorer: the margins return.
 9. Known issue: in VS Code, selecting its maximize button has sometimes maximized the window and then closed it. Check whether it still happens, with and without the margins.
+
+## Fluted glass menus acceptance (0.23.0)
+
+1. Update from 0.22.0 in the app. The taskbar keeps its styling without a sign-out, and `--diagnose` reports `menuGlassResult` 0 after the menu has opened once.
+2. Open the menu over a bright, detailed wallpaper: vertical reeds about 14 DIP wide fill it from edge to edge, each showing the wallpaper flipped and squeezed with a slight color fringe, under the light or dark tint. Text, icons, the hover and keyboard focus highlights, the spinner and the colors icon are crisp on top.
+3. Open taskbar, wallpaper and general: each submenu has the same glass. Move the pointer across rows and use the arrow keys: highlights follow without flicker.
+4. Check light and dark themes, and switch the theme while the menu is open: the tint follows.
+5. Turn on energy saver, then open the menu: it uses Windows' acrylic, or Windows' solid fallback. Turn energy saver off: the next menu has the glass again.
+6. Turn off transparency effects, then turn on high contrast: the menu is solid in each, as before.
+7. Open the menu from the status bar on a compact display: it drops down with the glass.
+8. At 100%, 150% and 300% scale the reeds stay about 14 DIP wide, and the outer reeds never show a hard line at the menu's edge.

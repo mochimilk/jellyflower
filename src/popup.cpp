@@ -11,6 +11,7 @@
 #include "menu_surface.hpp"
 #include "menu_style.hpp"
 #include "menu_material.hpp"
+#include "menu_glass.hpp"
 #include "menu_text.hpp"
 #include "auto_theme.hpp"
 #include "cursor_icon.hpp"
@@ -193,6 +194,7 @@ struct Popup {
     AcrylicMode mode = AcrylicMode::System;
     bool light = false, systemLight = false, keyboard = false, done = false, closing = false;
     bool acrylic = false, highContrast = false;
+    MenuGlass glass;
     RECT restingBounds{};
     ULONGLONG entranceStarted = 0;
     bool entering = false;
@@ -202,6 +204,7 @@ struct Popup {
         ClearPreviewCursors();
         if (mouseHook) UnhookWindowsHookEx(mouseHook);
         child.reset();
+        glass.Detach();
         if (window) DestroyWindow(window);
         if (font) DeleteObject(font);
         for (const auto icon : acrylicIcons) if (icon) DestroyIcon(icon);
@@ -513,6 +516,7 @@ struct Popup {
     }
     void DisableBackdrop() {
         acrylic = false;
+        glass.Detach();
         const int none = 1;
         DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &none, sizeof(none));
         const MARGINS margins{1, 1, 1, 1};
@@ -538,7 +542,10 @@ struct Popup {
         const int none = 1;
         DwmSetWindowAttribute(window, static_cast<DWMWINDOWATTRIBUTE>(38), &none, sizeof(none));
         const MARGINS full{-1, -1, -1, -1};
-        acrylic = !highContrast && transparency && SUCCEEDED(DwmExtendFrameIntoClientArea(window, &full)) && SetAccent(4);
+        acrylic = !highContrast && transparency && SUCCEEDED(DwmExtendFrameIntoClientArea(window, &full));
+        // Fluted glass where it can be drawn, Windows' accent acrylic where it can't. Setting any accent,
+        // even none, turns the glass's host backdrop black, so the glass never touches it.
+        if (!acrylic || !glass.Attach(window, dpi, light)) acrylic = acrylic && SetAccent(4);
         if (!acrylic) DisableBackdrop();
     }
     void Focus(int index, int direction = 1) {
@@ -836,13 +843,17 @@ struct Popup {
         }
         SelectObject(item.hDC, oldFont);
     }
-    void Paint(HDC dc) {
+    // The window's own paint goes onto the fluted glass when it's attached; a print still gets the pixels.
+    void Paint(HDC dc, bool onScreen = false) {
         RECT bounds{},dirty{};
         GetClientRect(window, &bounds);
         if(GetClipBox(dc,&dirty)==ERROR || !IntersectRect(&dirty,&dirty,&bounds))return;
         const auto frameTime = GetTickCount64();
         if (acrylic) {
-            if (MenuSurface::Paint(dc, dirty, [&](HDC layer) { PaintContent(layer, bounds, false, frameTime,dirty); })) return;
+            const auto draw = [&](HDC layer) { PaintContent(layer, bounds, false, frameTime,dirty); };
+            if (onScreen && glass.Attached()
+                    ? MenuSurface::Compose(dc, dirty, draw, [&](const MenuSurface& layer) { return glass.Present(dirty, layer.pixels); })
+                    : MenuSurface::Paint(dc, dirty, draw)) return;
             DisableBackdrop();
         }
         PaintContent(dc, bounds, true, frameTime,dirty);
@@ -999,7 +1010,7 @@ LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM wParam, LPARAM lPar
     case WM_PAINT: {
         PAINTSTRUCT paint{};
         const auto dc = BeginPaint(window, &paint);
-        popup->Paint(dc);
+        popup->Paint(dc, true);
         EndPaint(window, &paint);
         return 0;
     }

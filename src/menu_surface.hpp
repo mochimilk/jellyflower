@@ -7,7 +7,7 @@
 namespace acrylic {
 // GDI does not preserve alpha for text and lines. Render the same foreground
 // over black and white to recover its coverage, then copy premultiplied pixels
-// to the glass frame. Empty pixels reveal DWM's acrylic, without fading text.
+// to the glass frame, or to the menu's fluted glass. Empty pixels reveal the glass, without fading text.
 class MenuSurface {
     HDC dc_ = nullptr;
     HBITMAP bitmap_ = nullptr;
@@ -58,7 +58,8 @@ public:
         GdiFlush(); // Finish reading the DIB before its storage is released.
         SelectObject(mask.Dc(),previous);
     }
-    template<class Draw> static bool Paint(HDC target, const RECT& bounds, Draw draw) {
+    // Hands the foreground's premultiplied pixels for `bounds` to `copy`.
+    template<class Draw, class Copy> static bool Compose(HDC target, const RECT& bounds, Draw draw, Copy copy) {
         MenuSurface black(target, bounds, false), white(target, bounds, true);
         if (!black.pixels || !white.pixels) return false;
         draw(black.Dc()); draw(white.Dc());
@@ -74,10 +75,15 @@ public:
             for (int shift : {0, 8, 16}) pixel |= std::min(alpha, (b >> shift) & 255) << shift;
             black.pixels[i] = pixel;
         }
-        const bool copied = BitBlt(target, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
-            black.Dc(), bounds.left, bounds.top, SRCCOPY) != FALSE;
-        GdiFlush();
-        return copied;
+        return copy(black);
+    }
+    template<class Draw> static bool Paint(HDC target, const RECT& bounds, Draw draw) {
+        return Compose(target, bounds, draw, [&](const MenuSurface& layer) {
+            const bool copied = BitBlt(target, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top,
+                layer.Dc(), bounds.left, bounds.top, SRCCOPY) != FALSE;
+            GdiFlush();
+            return copied;
+        });
     }
 };
 }
