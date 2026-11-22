@@ -12,11 +12,13 @@
 jellyflower_add_test(Autocorrect LABELS unit ci LIBS user32
   DEFINES "JELLYFLOWER_DICTIONARIES=L\"${CMAKE_CURRENT_SOURCE_DIR}/assets/dictionaries\"")
 jellyflower_add_test(CompactLogic LABELS unit ci LIBS user32 advapi32)
+jellyflower_add_test(TopBarLayout LABELS unit ci LIBS user32 advapi32)
 jellyflower_add_test(DesktopOptions CXX20 LABELS unit ci
   LIBS windowsapp user32 ole32 oleaut32 uuid advapi32 shell32)
 jellyflower_add_test(KeyboardLayout LABELS unit ci)
 jellyflower_add_test(Localization LABELS unit ci LIBS user32)
-jellyflower_add_test(MenuReeds LABELS unit ci)
+jellyflower_add_test(FlutedReeds LABELS unit ci)
+jellyflower_add_test(GlassState LABELS unit ci LIBS user32 advapi32)
 jellyflower_add_test(SetupLockLogic LABELS unit ci)
 jellyflower_add_test(SetupRecovery RESOURCES LABELS unit ci SOURCES src/startup.cpp
   LIBS user32 shell32 ole32 oleaut32 uuid advapi32 taskschd)
@@ -42,6 +44,8 @@ jellyflower_add_test(ClockLayout XAML LABELS desktop SOURCES src/clock.cpp src/c
   LIBS user32 windowsapp ole32 gdi32 advapi32 shell32 uuid dxguid)
 jellyflower_add_test(DockGeometry LABELS unit ci LIBS user32)
 jellyflower_add_test(DockLayout XAML LABELS desktop SOURCES src/dock.cpp LIBS user32 gdi32 windowsapp ole32)
+jellyflower_add_test(FlutedLayout XAML LABELS desktop SOURCES src/taskbar_glass.cpp src/glass_compositor.cpp src/dock.cpp
+  LIBS user32 gdi32 advapi32 dwmapi windowsapp ole32 dxguid CoreMessaging)
 jellyflower_add_test(BarHeight LABELS unit ci SOURCES src/bar_height.cpp src/taskbar_slot.cpp LIBS user32 shcore dbghelp winhttp shell32 ole32)
 jellyflower_add_test(KeyboardMirror XAML LABELS desktop LIBS windowsapp user32 ole32)
 jellyflower_add_test(SearchInput XAML LABELS desktop LIBS windowsapp user32 ole32 dxguid)
@@ -56,14 +60,15 @@ jellyflower_add_test(VolumeLayout XAML LABELS desktop SOURCES src/volume.cpp LIB
 # Need arguments: MenuPresentation <output-folder> [--compositor];
 # WallpaperLogic <fresh-output-folder> <assets-folder>.
 jellyflower_add_test(MenuPresentation MANUAL RESOURCES
-  SOURCES src/cursor_icon.cpp src/updates.cpp src/update_download.cpp src/menu_glass.cpp src/resources.rc
+  SOURCES src/cursor_icon.cpp src/updates.cpp src/update_download.cpp src/menu_glass.cpp src/glass_compositor.cpp src/resources.rc
   LIBS user32 gdi32 gdiplus d2d1 d3d11 dxguid dwrite dwmapi comctl32 msimg32 advapi32 shell32 ole32 oleaut32 uuid
     winhttp bcrypt windowsapp CoreMessaging)
 jellyflower_add_test(WallpaperLogic MANUAL RESOURCES SOURCES src/wallpaper_state.cpp src/resources.rc
   LIBS user32 ole32 shell32 uuid bcrypt)
 
 # Touch the real shell, the work area or a real cursor pack.
-jellyflower_add_test(CompactScreen MANUAL SOURCES src/compact_screen.cpp
+# CompactScreen [capture.bmp [top-bar.bmp]]; links the resources for the top bar's flower.
+jellyflower_add_test(CompactScreen MANUAL RESOURCES SOURCES src/compact_screen.cpp src/resources.rc
   LIBS user32 gdi32 shell32 advapi32 dwmapi shcore d2d1 dwrite)
 jellyflower_add_test(CursorIcons MANUAL SOURCES src/cursor_icon.cpp LIBS user32 gdi32)
 jellyflower_add_test(CursorLogic MANUAL SOURCES src/cursor_icon.cpp

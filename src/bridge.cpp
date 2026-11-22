@@ -12,6 +12,7 @@
 #include "dock.hpp"
 #include "bar_height.hpp"
 #include "acrylic_material.hpp"
+#include "glass_state.hpp"
 #include <unknwn.h>
 #include <shobjidl.h>
 #include <xamlOM.h>
@@ -22,7 +23,6 @@
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Shapes.h>
-#include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -81,21 +81,44 @@ void RefreshTrays() noexcept;
 void RefreshDocks() noexcept;
 void SoonDocks() noexcept;
 
+// Slots in glass_state.hpp, shared by every taskbar thread in Explorer.
+std::atomic<unsigned> glassSlots{0};
+int TakeGlassSlot() noexcept {
+    for (unsigned slot = 0; slot < GlassSlotCount; ++slot) {
+        const unsigned bit = 1u << slot;
+        if (!(glassSlots.fetch_or(bit) & bit)) return static_cast<int>(slot);
+    }
+    return -1;
+}
+void GiveGlassSlot(int slot) noexcept { glassSlots.fetch_and(~(1u << slot)); }
+// The controller draws the glass; tell it where it goes now.
+void NotifyGlass() noexcept {
+    const HWND controller = FindWindowW(WindowClass, nullptr);
+    DWORD pid = 0;
+    if (controller) GetWindowThreadProcessId(controller, &pid);
+    if (state && pid && pid == static_cast<DWORD>(Read(state->controllerPid))) PostMessageW(controller, GlassMessage, 0, 0);
+}
+
 class Background : public std::enable_shared_from_this<Background> {
 public:
     shapes::Rectangle shape;
     media::Brush original{nullptr};
     media::AcrylicBrush acrylic{nullptr};
+    media::Brush clear{nullptr}; // The border's fill, and the background's under fluted glass.
     media::Brush effect{nullptr};
-    bool border = false, light = false;
+    GlassSlot published{};
+    int slot = -1;
+    winrt::event_token layout{};
+    bool border = false, light = false, fluted = false, listening = false;
     AcrylicMode mode = AcrylicMode::Off;
     UINT_PTR timer = 0;
     int64_t changedToken = 0;
     bool registered = false, updating = false, counted = false;
 
     explicit Background(shapes::Rectangle rectangle, bool isBorder) : shape(std::move(rectangle)), original(shape.Fill()), border(isBorder) {
+        clear = media::SolidColorBrush(winrt::Windows::UI::Color{0, 0, 0, 0});
         if (border) {
-            effect = media::SolidColorBrush(winrt::Windows::UI::Color{0, 0, 0, 0});
+            effect = clear;
             return;
         }
         acrylic = media::AcrylicBrush();
@@ -144,11 +167,14 @@ public:
             // stays clear while the dock is on, even with acrylic off.
             if (owner.Alive() && (Read(state->active) != 0 || (border && DockOn(*state)))) {
                 if (!border && (light != SystemLightTheme() || mode != DecodeAcrylicMode(Read(state->active)))) UpdateTheme();
+                const bool flutes = !border && Flute();
                 if (shape.Fill() != effect) {
                     updating = true;
                     shape.Fill(effect);
                     updating = false;
                 }
+                // The fill is back before the glass goes, so the pill never shows bare.
+                if (!border && !flutes) Release();
                 if (!counted) {
                     counted = true;
                     InterlockedIncrement(border ? &state->borderCount : &state->appliedCount);
@@ -159,13 +185,71 @@ public:
             Result(winrt::to_hresult());
         }
     }
+    // Fluted glass where Windows allows its materials, acrylic otherwise, which
+    // follows Windows' own fallbacks. The controller draws the glass behind the
+    // taskbar (glass_state.hpp); the fill stays acrylic until it says the glass
+    // is up, then clears so the glass shows through. True while fluted is wanted.
+    bool Flute() noexcept {
+        const bool wanted = mode == AcrylicMode::Fluted && FlutedGlassAllowed();
+        if (wanted) InterlockedExchange(&state->flutedResult, Publish());
+        const bool on = wanted && slot >= 0 && GlassShown(*state, static_cast<size_t>(slot));
+        Count(on);
+        effect = on ? clear : acrylic;
+        return wanted;
+    }
+    // The background's place relative to its taskbar window, followed through
+    // layout passes such as the dock's pill growing and shrinking.
+    HRESULT Publish() noexcept {
+        try {
+            if (slot < 0 && (slot = TakeGlassSlot()) < 0) return HRESULT_FROM_WIN32(ERROR_NO_MORE_ITEMS);
+            if (!listening) {
+                const std::weak_ptr<Background> weak = shared_from_this();
+                layout = shape.LayoutUpdated([weak](const auto&, const auto&) { if (const auto self = weak.lock()) self->Publish(); });
+                listening = true;
+            }
+            RECT bounds{};
+            double scale = 1;
+            HRESULT error = S_OK;
+            GlassSlot next{};
+            if (const HWND bar = TaskbarBounds(shape, bounds, scale, error))
+                next = {bar, bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top, std::lround(shape.RadiusX() * scale)};
+            if (next != published) {
+                WriteGlassSlot(*state, static_cast<size_t>(slot), next);
+                published = next;
+                NotifyGlass();
+            }
+            return error;
+        } catch (...) {
+            return winrt::to_hresult();
+        }
+    }
+    void Release() noexcept {
+        if (listening) {
+            listening = false;
+            try { shape.LayoutUpdated(layout); } catch (...) {}
+        }
+        if (slot < 0) return;
+        if (state) WriteGlassSlot(*state, static_cast<size_t>(slot), {});
+        GiveGlassSlot(slot);
+        slot = -1;
+        published = {};
+        NotifyGlass();
+    }
+    void Count(bool on) noexcept {
+        if (on == fluted) return;
+        fluted = on;
+        if (on) InterlockedIncrement(&state->flutedCount);
+        else InterlockedDecrement(&state->flutedCount);
+    }
     void Restore() noexcept {
         try {
+            if (state) Count(false);
             if (shape.Fill() == effect) {
                 updating = true;
                 shape.Fill(original);
                 updating = false;
             }
+            Release();
             if (counted) {
                 counted = false;
                 if (state) InterlockedDecrement(border ? &state->borderCount : &state->appliedCount);
@@ -501,22 +585,11 @@ public:
     HRESULT Shape(bool wanted) noexcept {
         if (!wanted || view.Hits().empty()) { region.Restore(); return S_OK; }
         try {
-            const auto root = frame.XamlRoot();
-            if (!root) { region.Restore(); return S_OK; }
-            const double scale = root.RasterizationScale();
-            const auto size = root.Size();
+            if (!frame.XamlRoot()) { region.Restore(); return S_OK; }
             POINT offset{};
+            double scale = 1;
             HRESULT error = S_OK;
-            const SIZE island{std::lround(size.Width * scale), std::lround(size.Height * scale)};
-            HWND window = FindDockWindow(island, nullptr, GetCurrentThreadId(), offset, error);
-            if (!window && error == TYPE_E_AMBIGUOUSNAME) {
-                // Identical monitors: the frame's automation peer knows where on screen it is.
-                if (const auto peer = xaml::Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(frame)) {
-                    const auto bounds = peer.GetBoundingRectangle();
-                    const POINT center{std::lround(bounds.X + bounds.Width / 2), std::lround(bounds.Y + bounds.Height / 2)};
-                    window = FindDockWindow(island, &center, GetCurrentThreadId(), offset, error);
-                }
-            }
+            const HWND window = FindTaskbarWindow(frame, offset, scale, error);
             if (!window) { region.Restore(); return error; }
             RECT bounds{};
             if (!GetWindowRect(window, &bounds)) { region.Restore(); return HRESULT_FROM_WIN32(GetLastError()); }

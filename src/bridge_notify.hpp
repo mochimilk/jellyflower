@@ -3,7 +3,7 @@
 #include "shared.hpp"
 
 namespace acrylic {
-inline constexpr wchar_t BridgeNotifyClass[] = L"AcrylicTaskbar.BridgeNotify.v20";
+inline constexpr wchar_t BridgeNotifyClass[] = L"AcrylicTaskbar.BridgeNotify.v21";
 inline constexpr UINT BridgeRefreshMessage = WM_APP + 71;
 using BridgeRefreshCallback = void (*)() noexcept;
 

@@ -14,7 +14,7 @@ UpdateStatus state = UpdateStatus::Idle;
 bool dateEnabled = true;
 WallpaperStatus wallpaperState = WallpaperStatus::Off;
 HRESULT wallpaperError=E_FAIL;
-bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true,keyboardSymmetric=false,statusBarOn=true,compactDisplay=true,dockOn=false;UINT autoHideActions=0,trayActions=0,statusBarActions=0,dockActions=0;
+bool wallpaperAutomatic=false,autoHide=false,taskbarBottom=true,trayOnly=false,trayXaml=true,keyboardSymmetric=false,statusBarOn=true,compactDisplay=true,dockOn=false,topBarOn=false;UINT autoHideActions=0,trayActions=0,statusBarActions=0,dockActions=0,topBarActions=0;
 AcrylicMode selectedAcrylic=AcrylicMode::System;
 UINT cursorMask = 1u << CursorDisabled, cursorChoice = CursorDisabled, settings = 0;
 UINT githubOpens=0;
@@ -193,10 +193,13 @@ LRESULT CALLBACK Owner(HWND window, UINT message, WPARAM parameter, LPARAM other
         return static_cast<UINT>(wallpaperState);
     }
     if(message==TraySettingMessage && parameter==TrayWallpaperThemeCommand){wallpaperAutomatic=!wallpaperAutomatic;return wallpaperAutomatic;}
-    if(message==TrayTaskbarQueryMessage && parameter==2)return (statusBarOn?1u:0u)|(compactDisplay?2u:0u);
+    // The top bar takes the status bar's place on a compact display.
+    if(message==TrayTaskbarQueryMessage && parameter==2)return (statusBarOn?1u:0u)|(compactDisplay && !topBarOn?2u:0u);
+    if(message==TrayTaskbarQueryMessage && parameter==4)return (topBarOn?1u:0u)|2u;
+    if(message==TraySettingMessage && parameter==TrayTopBarCommand){++topBarActions;topBarOn=!topBarOn;return (topBarOn?1u:0u)|2u;}
     if(message==TrayTaskbarQueryMessage && parameter==3)return (dockOn?1u:0u)|(trayXaml?2u:0u);
     if(message==TraySettingMessage && parameter==TrayDockCommand){++dockActions;if(trayXaml)dockOn=!dockOn;return (dockOn?1u:0u)|(trayXaml?2u:0u);}
-    if(message==TraySettingMessage && parameter==TrayStatusBarCommand){++statusBarActions;if(compactDisplay)statusBarOn=!statusBarOn;return (statusBarOn?1u:0u)|(compactDisplay?2u:0u);}
+    if(message==TraySettingMessage && parameter==TrayStatusBarCommand){++statusBarActions;if(compactDisplay)statusBarOn=!statusBarOn;return (statusBarOn?1u:0u)|(compactDisplay && !topBarOn?2u:0u);}
     if(message==TrayTaskbarQueryMessage)return parameter==1?(trayOnly?1u:0u)|(trayXaml?2u:0u):(autoHide?1u:0u)|(taskbarBottom?2u:0u);
     if(message==TrayKeyboardQueryMessage)return keyboardSymmetric;
     if(message==TraySettingMessage && parameter==TrayKeyboardCommand){keyboardSymmetric=!keyboardSymmetric;return keyboardSymmetric;}
@@ -358,39 +361,53 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             Check(popup.rows[3].label==L"colors" && popup.rows[3].secondary==L"unlock" && !HasSubmenu(popup.rows[3].command),"no pack shows one unlock action, no submenu");
             Check(popup.colorIcons.size()==9,"all cursor preview colors render without redistributing cursor files");
             const HWND same=popup.window;
-            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;trayOnly=false;trayXaml=true;statusBarOn=true;compactDisplay=true;dockOn=false;
+            dateEnabled=true;selectedAcrylic=AcrylicMode::System;taskbarBottom=true;autoHide=false;trayOnly=false;trayXaml=true;statusBarOn=true;compactDisplay=true;dockOn=false;topBarOn=false;
             Check(popup.rows[1].command==TrayTaskbarCommand && popup.rows[2].command==TrayWallpaperMenuCommand && HasSubmenu(TrayTaskbarCommand) && HasSubmenu(TrayWallpaperMenuCommand),"root groups taskbar and wallpaper settings");
             popup.OpenChild(1,true);auto& taskbar=*popup.child;const HWND taskbarWindow=taskbar.window;
-            Check(taskbar.rows.size()==6 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayDateCommand && taskbar.rows[2].command==TrayOnlyCommand && taskbar.rows[3].command==TrayAutoHideCommand && taskbar.rows[4].command==TrayStatusBarCommand && taskbar.rows[5].command==TrayDockCommand,"taskbar order is acrylic, date, tray, auto hide, status bar, floating");
-            Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.dateIcons[0] && taskbar.dateIcons[1],"taskbar submenu owns its themed setting icons");
-            for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeLabel(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
-            taskbar.Activate(1,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && taskbar.rows[1].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
-            taskbar.Activate(1,false);Check(dateEnabled && popup.clockDate && taskbar.clockDate && taskbar.rows[1].secondary==L"on","nested date on persists in the existing branch");
-            Check(taskbar.rows[2].label==Tr(TextId::Tray) && taskbar.rows[2].secondary==Tr(TextId::All) && taskbar.rows[2].enabled && taskbar.trayOnlyIcon,"tray row starts with the stock notification area and its flower icon");
-            taskbar.Activate(2,false);Check(trayOnly && taskbar.rows[2].secondary==L"jellyflower" && !popup.done && taskbar.window==taskbarWindow,"tray switches to jellyflower only in place");
-            taskbar.Activate(2,false);Check(!trayOnly && taskbar.rows[2].secondary==Tr(TextId::All) && !popup.done,"tray switches back to all icons in place");
-            trayXaml=false;popup.RefreshTaskbar();{const auto previousTray=trayActions;taskbar.Activate(2,false);
-            Check(!taskbar.rows[2].enabled && !IsWindowEnabled(taskbar.buttons[2]) && trayActions==previousTray,"legacy taskbars grey out the tray row");}
-            trayXaml=true;popup.RefreshTaskbar();Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"XAML taskbar re-enables the tray row");
-            Check(taskbar.rows[3].enabled && IsWindowEnabled(taskbar.buttons[3]),"bottom taskbar enables auto hide");
-            taskbar.Activate(3,false);Check(autoHide && taskbar.rows[3].secondary==L"on" && !popup.done,"auto hide toggles native preference in place");
-            taskbarBottom=false;popup.RefreshTaskbar();const auto previousActions=autoHideActions;taskbar.Activate(3,false);
-            Check(!taskbar.rows[3].enabled && !IsWindowEnabled(taskbar.buttons[3]) && autoHideActions==previousActions && autoHide,"non-bottom row greys out and cannot dispatch a change");
+            Check(taskbar.rows.size()==4 && taskbar.rows[0].command==TrayToggleCommand && taskbar.rows[1].command==TrayAutoHideCommand && taskbar.rows[2].command==TrayDockCommand && taskbar.rows[3].command==TraySystemTrayCommand && HasSubmenu(TraySystemTrayCommand),"taskbar order is acrylic, auto hide, floating, system tray");
+            Check(taskbar.acrylicIcons[0] && taskbar.acrylicIcons[1] && taskbar.acrylicIcons[2] && taskbar.acrylicIcons[3] && taskbar.systemTrayIcon && taskbar.rows[3].label==Tr(TextId::SystemTray),"taskbar submenu owns its themed setting icons and the system tray row");
+            for(const auto expected:{AcrylicMode::Pure,AcrylicMode::Off,AcrylicMode::Fluted,AcrylicMode::System}){taskbar.Activate(0,false);Check(popup.mode==expected && taskbar.mode==expected && taskbar.rows[0].secondary==AcrylicModeLabel(expected) && taskbar.window==taskbarWindow && !popup.done,"acrylic modes cycle and update nested state in place");}
+            Check(taskbar.rows[1].enabled && IsWindowEnabled(taskbar.buttons[1]),"bottom taskbar enables auto hide");
+            taskbar.Activate(1,false);Check(autoHide && taskbar.rows[1].secondary==L"on" && !popup.done,"auto hide toggles native preference in place");
+            taskbarBottom=false;popup.RefreshTaskbar();const auto previousActions=autoHideActions;taskbar.Activate(1,false);
+            Check(!taskbar.rows[1].enabled && !IsWindowEnabled(taskbar.buttons[1]) && autoHideActions==previousActions && autoHide,"non-bottom row greys out and cannot dispatch a change");
             {const auto gray=GetSysColor(COLOR_GRAYTEXT);for(const auto pixel:IconPixels(taskbar.autoHideIcon.Get(true))){const auto alpha=pixel>>24;Check(((pixel>>16)&255)==(GetRValue(gray)*alpha+127)/255 && ((pixel>>8)&255)==(GetGValue(gray)*alpha+127)/255 && (pixel&255)==(GetBValue(gray)*alpha+127)/255,"disabled auto-hide icon uses the same gray ink as its label");}}
             Capture(taskbar,std::filesystem::path(argv[1])/(std::wstring(light?L"taskbar-light-":L"taskbar-dark-")+std::to_wstring(dpi)+L".bmp"));
-            taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(3,false);Check(!autoHide && taskbar.rows[3].secondary==L"off","external edge changes re-enable the current state");
-            Check(taskbar.rows[4].label==Tr(TextId::StatusBar) && taskbar.rows[4].secondary==L"on" && taskbar.rows[4].enabled && taskbar.statusBarIcon,"status bar starts on, with its clock icon, on a compact display");
-            taskbar.Activate(4,false);Check(!statusBarOn && taskbar.rows[4].secondary==L"off" && !popup.done && taskbar.window==taskbarWindow,"status bar turns off in place");
-            taskbar.Activate(4,false);Check(statusBarOn && taskbar.rows[4].secondary==L"on" && !popup.done,"status bar turns back on in place");
-            compactDisplay=false;popup.RefreshTaskbar();{const auto previousStatus=statusBarActions;taskbar.Activate(4,false);
-            Check(!taskbar.rows[4].enabled && !IsWindowEnabled(taskbar.buttons[4]) && statusBarActions==previousStatus && statusBarOn,"without a compact display the status bar row greys out");}
-            compactDisplay=true;popup.RefreshTaskbar();Check(taskbar.rows[4].enabled && IsWindowEnabled(taskbar.buttons[4]),"a compact display re-enables the status bar row");
-            Check(taskbar.rows[5].label==Tr(TextId::Floating) && taskbar.rows[5].secondary==L"off" && taskbar.rows[5].enabled && taskbar.dockIcon,"floating starts off, with its dock icon");
-            taskbar.Activate(5,false);Check(dockOn && taskbar.rows[5].secondary==L"on" && !popup.done && taskbar.window==taskbarWindow,"floating dock turns on in place");
-            taskbar.Activate(5,false);Check(!dockOn && taskbar.rows[5].secondary==L"off" && !popup.done,"floating dock turns back off in place");
-            trayXaml=false;popup.RefreshTaskbar();{const auto previousDock=dockActions;taskbar.Activate(5,false);
-            Check(!taskbar.rows[5].enabled && !IsWindowEnabled(taskbar.buttons[5]) && dockActions==previousDock && !dockOn,"legacy taskbars grey out the floating row");}
-            trayXaml=true;popup.RefreshTaskbar();Check(taskbar.rows[5].enabled && IsWindowEnabled(taskbar.buttons[5]),"XAML taskbar re-enables the floating row");
+            taskbarBottom=true;popup.RefreshTaskbar();taskbar.Activate(1,false);Check(!autoHide && taskbar.rows[1].secondary==L"off","external edge changes re-enable the current state");
+            Check(taskbar.rows[2].label==Tr(TextId::Floating) && taskbar.rows[2].secondary==L"off" && taskbar.rows[2].enabled && taskbar.dockIcon,"floating starts off, with its dock icon");
+            taskbar.Activate(2,false);Check(dockOn && taskbar.rows[2].secondary==L"on" && !popup.done && taskbar.window==taskbarWindow,"floating dock turns on in place");
+            taskbar.Activate(2,false);Check(!dockOn && taskbar.rows[2].secondary==L"off" && !popup.done,"floating dock turns back off in place");
+            trayXaml=false;popup.RefreshTaskbar();{const auto previousDock=dockActions;taskbar.Activate(2,false);
+            Check(!taskbar.rows[2].enabled && !IsWindowEnabled(taskbar.buttons[2]) && dockActions==previousDock && !dockOn,"legacy taskbars grey out the floating row");}
+            trayXaml=true;popup.RefreshTaskbar();Check(taskbar.rows[2].enabled && IsWindowEnabled(taskbar.buttons[2]),"XAML taskbar re-enables the floating row");
+            // The system tray submenu opens from inside taskbar: a third level.
+            taskbar.OpenChild(3,true);Check(taskbar.child && taskbar.child->kind==TraySystemTrayCommand && taskbar.child->parent==&taskbar && popup.child.get()==&taskbar,"system tray opens a third level beside taskbar");
+            auto& tray=*taskbar.child;const HWND trayWindow=tray.window;
+            Check(tray.rows.size()==4 && tray.rows[0].command==TrayTopBarCommand && tray.rows[1].command==TrayOnlyCommand && tray.rows[2].command==TrayDateCommand && tray.rows[3].command==TrayStatusBarCommand,"system tray order is position, show, date, status bar");
+            Check(tray.dateIcons[0] && tray.dateIcons[1] && tray.topBarIcon && tray.trayOnlyIcon && tray.statusBarIcon,"system tray owns the date, position, show and status bar icons");
+            Check(tray.rows[0].label==Tr(TextId::Position) && tray.rows[0].secondary==Tr(TextId::Bottom) && tray.rows[0].enabled,"position starts at the bottom");
+            {const auto previousTopBar=topBarActions;tray.Activate(0,false);
+            Check(topBarOn && topBarActions==previousTopBar+1 && tray.rows[0].secondary==Tr(TextId::Top) && !popup.done && tray.window==trayWindow,"position moves to the top in place");}
+            Check(!tray.rows[3].enabled && !IsWindowEnabled(tray.buttons[3]),"the top bar takes the status bar's place, so its row greys out");
+            tray.Activate(0,false);Check(!topBarOn && tray.rows[0].secondary==Tr(TextId::Bottom) && tray.rows[3].enabled && !popup.done,"position returns to the bottom and the status bar row comes back");
+            tray.Activate(2,false);Check(!dateEnabled && !popup.clockDate && !taskbar.clockDate && !tray.clockDate && tray.rows[2].secondary==L"off" && !popup.done,"nested date off propagates to root without dismissal");
+            tray.Activate(2,false);Check(dateEnabled && popup.clockDate && tray.clockDate && tray.rows[2].secondary==L"on","nested date on persists in the existing branch");
+            Check(tray.rows[1].label==Tr(TextId::TrayShow) && tray.rows[1].secondary==Tr(TextId::All) && tray.rows[1].enabled,"show starts with the stock notification area and its flower icon");
+            tray.Activate(1,false);Check(trayOnly && tray.rows[1].secondary==L"jellyflower" && !popup.done && tray.window==trayWindow,"show switches to jellyflower only in place");
+            tray.Activate(1,false);Check(!trayOnly && tray.rows[1].secondary==Tr(TextId::All) && !popup.done,"show switches back to all icons in place");
+            trayXaml=false;popup.RefreshTaskbar();{const auto previousTray=trayActions;tray.Activate(1,false);
+            Check(!tray.rows[1].enabled && !IsWindowEnabled(tray.buttons[1]) && trayActions==previousTray,"legacy taskbars grey out the show row");}
+            trayXaml=true;popup.RefreshTaskbar();Check(tray.rows[1].enabled && IsWindowEnabled(tray.buttons[1]),"XAML taskbar re-enables the show row");
+            Check(tray.rows[3].label==Tr(TextId::StatusBar) && tray.rows[3].secondary==L"on" && tray.rows[3].enabled,"status bar starts on, with its clock icon, on a compact display");
+            tray.Activate(3,false);Check(!statusBarOn && tray.rows[3].secondary==L"off" && !popup.done && tray.window==trayWindow,"status bar turns off in place");
+            tray.Activate(3,false);Check(statusBarOn && tray.rows[3].secondary==L"on" && !popup.done,"status bar turns back on in place");
+            compactDisplay=false;popup.RefreshTaskbar();{const auto previousStatus=statusBarActions;tray.Activate(3,false);
+            Check(!tray.rows[3].enabled && !IsWindowEnabled(tray.buttons[3]) && statusBarActions==previousStatus && statusBarOn,"without a compact display the status bar row greys out");}
+            compactDisplay=true;popup.RefreshTaskbar();Check(tray.rows[3].enabled && IsWindowEnabled(tray.buttons[3]),"a compact display re-enables the status bar row");
+            Capture(tray,std::filesystem::path(argv[1])/(std::wstring(light?L"system-tray-light-":L"system-tray-dark-")+std::to_wstring(dpi)+L".bmp"));
+            tray.Focus(0);tray.Key(VK_LEFT);Check(!IsWindowVisible(trayWindow) && IsWindowVisible(taskbarWindow) && !popup.done,"left closes the third level back to taskbar");
+            taskbar.Focus(3);taskbar.Key(VK_RIGHT);Check(taskbar.child && IsWindowVisible(taskbar.child->window),"right reopens the system tray from the keyboard");
+            taskbar.CloseChild(true);
             SubmenuToggleChecks(popup,1);
             popup.OpenChild(2,true);auto& wallpapers=*popup.child;const HWND wallpaperWindow=wallpapers.window;
             Check(wallpapers.rows.size()==2 && wallpapers.rows[0].label==L"jellyflower" && wallpapers.rows[1].command==TrayWallpaperThemeCommand,"wallpaper has jellyflower toggle then theme row");
@@ -553,8 +570,13 @@ int wmain(int argc,wchar_t** argv) { acrylic::SetTextLanguage(acrylic::Language:
             fits(local);
             const auto suffix=std::wstring(language==Language::French?L"fr-":L"ko-")+(light?L"light-":L"dark-")+std::to_wstring(localDpi)+L".bmp";
             Capture(local,std::filesystem::path(argv[1])/(L"localized-root-"+suffix));
-            local.Activate(1,true);Check(local.child && local.child->rows[3].label==Tr(TextId::AutoHide) && local.child->rows[2].label==Tr(TextId::Tray),"translated taskbar submenu");fits(*local.child);
+            local.Activate(1,true);Check(local.child && local.child->rows[1].label==Tr(TextId::AutoHide) && local.child->rows[3].label==Tr(TextId::SystemTray),"translated taskbar submenu");fits(*local.child);
             Capture(*local.child,std::filesystem::path(argv[1])/(L"localized-taskbar-"+suffix));
+            local.child->Activate(3,true);Check(local.child->child && local.child->child->rows[1].label==Tr(TextId::TrayShow) && local.child->child->rows[0].label==Tr(TextId::Position),"translated system tray submenu");
+            fits(*local.child->child);
+            for(const auto id:{TextId::Top,TextId::Bottom}){local.child->child->rows[0].secondary=Tr(id);fits(*local.child->child);}
+            Capture(*local.child->child,std::filesystem::path(argv[1])/(L"localized-system-tray-"+suffix));
+            local.child->CloseChild(false);
             local.CloseChild(false);local.Activate(2,true);fits(*local.child);
             for(const auto id:{TextId::TryAgain,TextId::ImageMissing,TextId::NotAllowed,TextId::FileInUse,TextId::StorageFull,TextId::ImageTooLarge,TextId::BackupIssue}){local.child->rows[0].secondary=Tr(id);fits(*local.child);}
             local.CloseChild(false);local.Activate(5,true);

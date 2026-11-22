@@ -33,6 +33,10 @@ inline constexpr UINT TrayStatusBarCommand = 19;
 // The floating dock. Its state is TrayTaskbarQueryMessage wParam 3: bit 0
 // on, bit 1 the XAML taskbar can apply it.
 inline constexpr UINT TrayDockCommand = 20;
+// Command 21 is reserved for autocorrect. The system tray submenu (inside
+// taskbar) and its position row: the top bar. Its state is
+// TrayTaskbarQueryMessage wParam 4: bit 0 on, bit 1 available.
+inline constexpr UINT TraySystemTrayCommand = 22, TrayTopBarCommand = 23;
 inline constexpr wchar_t GithubUrl[] = L"https://github.com/mochimilk/jellyflower";
 inline constexpr UINT TrayCursorUnlockCommand = 9, TrayCursorQueryMessage = WM_APP + 49;
 inline constexpr UINT TrayCursorPreviewMessage = WM_APP + 50;
@@ -42,12 +46,12 @@ class TrayIcon {
 public:
     ~TrayIcon();
     // hidden keeps the icon registered, so notices still show, but takes it
-    // off the taskbar: the status bar opens the menu instead.
+    // off the taskbar: the top bar or the status bar opens the menu instead.
     void Refresh(HWND owner, AcrylicMode mode, bool hidden = false);
     void ShellRestarted() noexcept { present_ = false; }
     void Remove() noexcept;
     // Opens above the notification icon, or below `below` (screen pixels, at
-    // that display's dpi) when the status bar's button opened it.
+    // that display's dpi) when a menu button at the top of the screen opened it.
     UINT Menu(AcrylicMode mode, UINT cursorMode, const RECT* below = nullptr, UINT dpi = 0) const;
     void CursorError(DWORD error, bool saveFailure = false) const;
     void ThemeError(DWORD error, bool partial = false, bool notification = false) const;

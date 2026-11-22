@@ -700,3 +700,32 @@ Checked by hand on the portrait 300% touch tablet (Windows 11 25H2, build 26200,
 - Setting any accent policy on the window, even disabling it, turns Windows' host backdrop black; the menu doesn't set one while it has the glass.
 
 Not checked on a desktop: light theme, energy saver, transparency off and high contrast with this build, 100% and 150% scale, more than one display, the wallpaper and general submenus, the status bar's menu, and ARM64.
+
+## 0.24.0 fluted taskbar validation (2026-11-21)
+
+Build: every target builds at x64 Release with `/W4`, with no new warnings. `ctest -L unit` passes all 19 unit tests, including GlassState (CI: slots read whole under an even sequence, cleared and out-of-range slots, window handles across processes, shown bits) and FlutedReeds (renamed from MenuReeds). BridgeNotify retires a stopped v20 helper, its dock and taller-bar counters included, and keeps a live or unrestored one. `ctest -L desktop` passes all 15 desktop fixtures; the new FlutedLayout passed 8 of 8 runs and covers the helper's geometry (a background's place relative to its taskbar window, from a XAML island) and the controller's glass window: placed there directly below the taskbar, into and out of the topmost band with it, bending what's behind with see-through corners, taking up a window opened behind it, following moves and a growing or shrinking pill, hidden with the taskbar, never focused or hit, and removed when the slot empties, on remove and on destruction. MenuPresentation passes.
+
+Checked by hand on the portrait 300% touch tablet (Windows 11 25H2, build 26200, one display, dark theme, floating on, tray `jellyflower`), with this code loaded in Explorer under a temporary helper generation name, because this machine still had development builds pinned:
+
+- The pill shows the reeds over the wallpaper; the bar around it and the bare tray stay see-through.
+- A window appearing behind the pill showed through within 300 ms in 8 of 8 tries, and cleared within 0.7 to 1.2 seconds after it went.
+- Cycling fluted, system, pure, off and fluted showed each style, with one glass window directly below the taskbar while fluted and none otherwise.
+- The glass followed the pill as an app's button was added and removed.
+- `--stop` left the stock taskbar and no glass window.
+
+Found on the way: Explorer's taskbar can't lend composition a live backdrop. Its host backdrop is black; turning on `DWMWA_USE_HOSTBACKDROPBRUSH` for the taskbar window blackens every see-through part of the bar, so jellyflower never sets it. A host backdrop is a snapshot for any window that isn't active, which is why the glass takes new ones when windows change.
+
+Not checked on a desktop: the final v21 build in Explorer (it needs Explorer restarted or a sign-out on this machine), the full-width bar with floating off, light theme, energy saver, transparency effects off and high contrast, auto hide, full-screen apps, more than one display, 100% and 150% scale, and ARM64.
+
+## 0.24.0 top bar and system tray menu validation (2026-11-21)
+
+Built x64 Release with MSVC 19.43 and Windows SDK 10.0.22621 on Windows 11 25H2 (build 26200), with the fluted taskbar work in the same tree.
+
+- `ctest -L unit` passed all 20 tests, among them the new TopBarLayout (bar height on ordinary and compact displays, button placement at 100% and 300%, and Quick Settings, then the clock, dropping out of a narrow bar), CompactLogic and Localization.
+- MenuPresentation passed in both themes at 96, 120, 144, 168 and 192 DPI: taskbar's new order, system tray as a third menu level beside it, position switching in place and greying out the status bar row, show, date and status bar working from the third level, Left and Right between the levels, and the French and Korean labels fitting.
+- CompactScreen passed live on the portrait 300% tablet (1878 x 2670 pixels), stacked under the installed 0.23.0 controller's own margins: the status bar, then the top bar in the compact display's top margin without moving windows, the flower and the clock taking clicks with the space between them passing them through, the status bar returning when the top bar is turned off, and the stock work area returning when the frame is removed. The capture showed the flower, the Equalizer glyph and "Sat Nov 21  6:57 pm" centered in the margin in dark-theme ink.
+- `ms-actioncenter:controlcenter/&showFooter=true` and `ms-actioncenter:` opened Quick Settings and notifications with the calendar on the same tablet, launched from a script rather than from the bar.
+
+Found on the way: Windows' Quick Settings is `ControlCenterWindow` in ShellHost.exe, a shell-band window that spans from the top of the screen to the taskbar and draws its panel at the bottom. It accepts `SetWindowPos` from another process, but its pages grow upward from the bottom, so a moved window would clip them, and the move could only follow the panel's appearance. Notifications are a ShellExperienceHost CoreWindow that spans the work area. jellyflower leaves both where Windows puts them.
+
+Not checked on a desktop: the controller end to end (the flower opening the menu from the bar, the panel buttons and whether those panels take keyboard focus, the flower leaving the tray, the tray's chevron), hover and pressed fills, a display that isn't compact (the 32-DIP bar), more than one display, 100%, 125% and 150% scale, light theme, full-screen apps, Explorer restarts, ARM64, and Windows 10's Segoe MDL2 glyph.

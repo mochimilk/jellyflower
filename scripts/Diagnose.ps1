@@ -31,3 +31,7 @@ Write-Host 'floatingDock reports the saved dock choice. dockTaskbars counts task
 Write-Host 'taskbarHeight is the taller bar in DIPs (64 while floating is on, 0 for the stock bar). taskbarHeightResult reports an HRESULT: ERROR_NOT_FOUND (0x80070490) or an HTTP error if Taskbar.dll''s public symbols could not be found or downloaded, ERROR_REVISION_MISMATCH (0x8007049A) if the slot no longer holds Windows'' method. Either way the dock keeps floating at 48 DIPs.'
 
 Write-Host 'menuGlassResult reports an HRESULT: the last failure to draw a menu''s fluted glass, 0 once a menu has it again. A menu without it falls back to Windows'' acrylic, as it does while energy saver is on.'
+
+Write-Host 'flutedTaskbars counts taskbar backgrounds showing fluted glass (0 for the other acrylic modes, and while energy saver, transparency effects off or high contrast give system acrylic instead). flutedLastResult reports an HRESULT: ERROR_NOT_FOUND (0x80070490) if no taskbar window holds the background, ERROR_NO_MORE_ITEMS (0x80070103) past four taskbars, or a failure to make the glass''s window, which leaves that taskbar acrylic.'
+
+Write-Host 'topBar reports the saved system tray position (true for top). topBarDisplays counts displays showing the top bar; while it is above 0 the flower leaves the notification area and the menu opens from the bar. A failure to reserve or draw the bar is in compactLastResult.'

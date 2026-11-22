@@ -62,13 +62,19 @@ std::vector<Row> RootRows(bool light, UINT mask, bool keyboard = false) {
 std::vector<Row> GeneralRows() {
     return {{TrayGithubCommand, L"github"}, {TrayUpdateCommand, std::wstring(L"v") + AppVersion}, {TrayExitCommand, Tr(TextId::Exit), true}};
 }
-std::vector<Row> TaskbarRows(AcrylicMode mode,bool date){
+std::vector<Row> TaskbarRows(AcrylicMode mode){
     return {{TrayToggleCommand,Tr(TextId::Acrylic),false,false,AcrylicModeLabel(mode)},
-        {TrayDateCommand,Tr(TextId::Date),false,false,date?Tr(TextId::On):Tr(TextId::Off)},
-        {TrayOnlyCommand,Tr(TextId::Tray),false,false,Tr(TextId::All)},
         {TrayAutoHideCommand,Tr(TextId::AutoHide),false,false,Tr(TextId::Off),false},
-        {TrayStatusBarCommand,Tr(TextId::StatusBar),false,false,Tr(TextId::On),false},
-        {TrayDockCommand,Tr(TextId::Floating),false,false,Tr(TextId::Off),false}};
+        {TrayDockCommand,Tr(TextId::Floating),false,false,Tr(TextId::Off),false},
+        {TraySystemTrayCommand,Tr(TextId::SystemTray)}};
+}
+// Everything that lives in the notification area: where it is, what it shows,
+// the clock's date and, on compact displays, the status bar that takes its place.
+std::vector<Row> SystemTrayRows(bool date){
+    return {{TrayTopBarCommand,Tr(TextId::Position),false,false,Tr(TextId::Bottom)},
+        {TrayOnlyCommand,Tr(TextId::TrayShow),false,false,Tr(TextId::All)},
+        {TrayDateCommand,Tr(TextId::Date),false,false,date?Tr(TextId::On):Tr(TextId::Off)},
+        {TrayStatusBarCommand,Tr(TextId::StatusBar),false,false,Tr(TextId::On),false}};
 }
 std::vector<Row> WallpaperRows(){
     return {{TrayWallpaperCommand,L"jellyflower",false,false,Tr(TextId::Off)},
@@ -100,7 +106,10 @@ std::unique_ptr<Gdiplus::Bitmap> SpinnerBitmap(HICON icon) {
     result->UnlockBits(&target);
     return result;
 }
-bool HasSubmenu(UINT command) { return command == TrayCursorCommand || command == TrayGeneralCommand || command==TrayTaskbarCommand || command==TrayWallpaperMenuCommand; }
+bool HasSubmenu(UINT command) {
+    return command == TrayCursorCommand || command == TrayGeneralCommand || command == TrayTaskbarCommand
+        || command == TraySystemTrayCommand || command == TrayWallpaperMenuCommand;
+}
 HICON LoadTintedIcon(int resource, int pixels, COLORREF ink) {
     const auto source = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(resource), IMAGE_ICON, pixels, pixels, 0));
     ICONINFO info{};
@@ -167,10 +176,10 @@ struct Popup {
     MenuText menuText;
     UINT textFallbacks = 0;
     HHOOK mouseHook = nullptr;
-    HICON acrylicIcons[3]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
+    HICON acrylicIcons[4]{}, dateIcons[2]{}, cursorIcon = nullptr, themeIcon = nullptr, updateIcon = nullptr;
     HICON packageIcon = nullptr, packageOpenIcon = nullptr, generalIcon = nullptr;
     HICON githubIcon = nullptr, wallpaperIcon = nullptr, keyboardIcon = nullptr;
-    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon, statusBarIcon, dockIcon;
+    MenuIndicator checkIcon, chevronIcon, externalIcon, autoHideIcon, trayOnlyIcon, statusBarIcon, dockIcon, systemTrayIcon, topBarIcon;
     std::vector<HICON> colorIcons;
     size_t colorFrame = 0;
     bool hasCursorPack = false;
@@ -198,7 +207,7 @@ struct Popup {
     RECT restingBounds{};
     ULONGLONG entranceStarted = 0;
     bool entering = false;
-    bool below = false; // The root menu opens below its anchor (the status bar) rather than above it.
+    bool below = false; // The root menu opens below its anchor (a button at the top of the screen) rather than above it.
     ~Popup() {
         PreviewCursor(-1);
         ClearPreviewCursors();
@@ -238,7 +247,7 @@ struct Popup {
         if (elapsed >= MenuEntranceDuration) { CompleteEntrance(); return; }
         const int offset = static_cast<int>(std::lround(Px(MenuEntranceDistance)
             * (1 - MenuEntranceProgress(static_cast<double>(elapsed) / MenuEntranceDuration))));
-        // Slide toward the anchor: up from the taskbar, down from the status bar.
+        // Slide toward the anchor: up from the taskbar, down from the top of the screen.
         SetWindowPos(window, nullptr, restingBounds.left, restingBounds.top + (below ? -offset : offset), 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     void BeginEntrance() {
@@ -294,19 +303,22 @@ struct Popup {
         if(child)child->UpdateAcrylic(selected);
     }
     void RefreshTaskbar(){
-        if(kind==TrayTaskbarCommand){
+        if(kind==TrayTaskbarCommand || kind==TraySystemTrayCommand){
             const auto state=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,0,0));
             const auto tray=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,1,0));
             const auto statusBar=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,2,0));
             const auto dock=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,3,0));
+            const auto topBar=static_cast<UINT>(SendMessageW(controller,TrayTaskbarQueryMessage,4,0));
             for(size_t i=0;i<rows.size();++i){
                 auto& row=rows[i];
                 if(row.command==TrayAutoHideCommand){row.secondary=(state&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(state&2)!=0;}
                 else if(row.command==TrayOnlyCommand){row.secondary=(tray&1)?L"jellyflower":Tr(TextId::All);row.enabled=(tray&2)!=0;}
-                // Only a display narrower than Start has a status bar to show.
+                // Only a display narrower than Start has a status bar to show,
+                // and the top bar takes its place there.
                 else if(row.command==TrayStatusBarCommand){row.secondary=(statusBar&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(statusBar&2)!=0;}
                 // The floating dock needs the XAML taskbar.
                 else if(row.command==TrayDockCommand){row.secondary=(dock&1)?Tr(TextId::On):Tr(TextId::Off);row.enabled=(dock&2)!=0;}
+                else if(row.command==TrayTopBarCommand){row.secondary=(topBar&1)?Tr(TextId::Top):Tr(TextId::Bottom);row.enabled=(topBar&2)!=0;}
                 else continue;
                 if(i<buttons.size()){SetWindowTextW(buttons[i],(row.label+L", "+row.secondary).c_str());EnableWindow(buttons[i],row.enabled);}
                 RepaintRow(static_cast<int>(i));
@@ -432,9 +444,11 @@ struct Popup {
         return checkIcon.Load(IDI_CHECK_LIGHT, Px(MenuGlyphSize), text, highlightedText)
             && chevronIcon.Load(IDI_CHEVRON_RIGHT_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true))
             && (kind!=TrayTaskbarCommand || (autoHideIcon.Load(IDI_ACRYLIC_PURE_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
+                && dockIcon.Load(IDI_DOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
+                && systemTrayIcon.Load(IDI_SYSTEM_TRAY_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
+            && (kind!=TraySystemTrayCommand || (topBarIcon.Load(IDI_TOP_BAR_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
                 && trayOnlyIcon.Load(IDI_FLOWER_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
-                && statusBarIcon.Load(IDI_CLOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))
-                && dockIcon.Load(IDI_DOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
+                && statusBarIcon.Load(IDI_CLOCK_LIGHT,Px(MenuGlyphSize),text,GetSysColor(COLOR_GRAYTEXT))))
             && (kind != TrayGeneralCommand || externalIcon.Load(IDI_EXTERNAL_LIGHT, Px(MenuGlyphSize), SecondaryInk(false), SecondaryInk(true)));
     }
     bool UpdateTheme(bool systemMode) {
@@ -489,7 +503,9 @@ struct Popup {
             if(!load(acrylicIcons[0],IDI_ACRYLIC_OFF_LIGHT,IDI_ACRYLIC_OFF_DARK)
                 || !load(acrylicIcons[1],IDI_ACRYLIC_SYSTEM_LIGHT,IDI_ACRYLIC_SYSTEM_DARK)
                 || !load(acrylicIcons[2],IDI_ACRYLIC_PURE_LIGHT,IDI_ACRYLIC_PURE_DARK)
-                || !load(dateIcons[0],IDI_CALENDAR_OFF_LIGHT,IDI_CALENDAR_OFF_DARK)
+                || !load(acrylicIcons[3],IDI_ACRYLIC_FLUTED_LIGHT,IDI_ACRYLIC_FLUTED_DARK))return false;
+        }else if(kind==TraySystemTrayCommand){
+            if(!load(dateIcons[0],IDI_CALENDAR_OFF_LIGHT,IDI_CALENDAR_OFF_DARK)
                 || !load(dateIcons[1],IDI_CALENDAR_LIGHT,IDI_CALENDAR_DARK))return false;
         }else if(kind==TrayWallpaperMenuCommand){
             wallpaperAuto=SendMessageW(controller,TrayWallpaperQueryMessage,2,0)!=0;
@@ -592,7 +608,8 @@ struct Popup {
             if (command == TrayCursorCommand) {
                 const auto mask = static_cast<UINT>(SendMessageW(root->controller, TrayCursorQueryMessage, 0, 0));
                 child->rows = CursorRows(mask, root->cursorMode);
-            }else if(command==TrayTaskbarCommand)child->rows=TaskbarRows(root->mode,root->clockDate);
+            }else if(command==TrayTaskbarCommand)child->rows=TaskbarRows(root->mode);
+            else if(command==TraySystemTrayCommand)child->rows=SystemTrayRows(root->clockDate);
             else if(command==TrayWallpaperMenuCommand)child->rows=WallpaperRows();
             else child->rows=GeneralRows();
             RECT bounds{}, row{};
@@ -707,7 +724,8 @@ struct Popup {
                 root->RefreshUpdate();
             } else if (command == TrayWallpaperCommand || command==TrayWallpaperThemeCommand) {
                 root->RefreshWallpaper();
-            } else if(command==TrayAutoHideCommand || command==TrayOnlyCommand || command==TrayStatusBarCommand || command==TrayDockCommand){
+            } else if(command==TrayAutoHideCommand || command==TrayOnlyCommand || command==TrayStatusBarCommand || command==TrayDockCommand
+                    || command==TrayTopBarCommand){
                 root->RefreshTaskbar();
             } else if (command == TrayThemeCommand) {
                 root->UpdateTheme(state != 0);
@@ -814,6 +832,8 @@ struct Popup {
                 : row.command==TrayAutoHideCommand?autoHideIcon.Get(!row.enabled):row.command==TrayOnlyCommand?trayOnlyIcon.Get(!row.enabled)
                 : row.command==TrayStatusBarCommand?statusBarIcon.Get(!row.enabled)
                 : row.command==TrayDockCommand?dockIcon.Get(!row.enabled)
+                : row.command==TraySystemTrayCommand?systemTrayIcon.Get(!row.enabled)
+                : row.command==TrayTopBarCommand?topBarIcon.Get(!row.enabled)
                 : row.command==TrayTaskbarCommand?acrylicIcons[2]:row.command==TrayKeyboardCommand?keyboardIcon:nullptr;
         // Cursor and Lucide glyphs share one square slot and row alignment.
         const int iconSize = Px(MenuGlyphSize);
@@ -913,7 +933,8 @@ struct Popup {
         const int separators = static_cast<int>(std::count_if(rows.begin(), rows.end(), [](const Row& row) { return row.divider; })) * Px(SeparatorHeight);
         rowHeight = std::min<int>(Px(40), (area.bottom - area.top - 2 * Px(Padding) - separators) / static_cast<int>(rows.size()));
         const int height = 2 * Px(Padding) + static_cast<int>(rows.size()) * rowHeight + separators;
-        // From the status bar the menu drops down, centered under its button.
+        // From the top of the screen the menu drops down, centered under its
+        // button and kept inside the work area, so the flower's menu starts at the left.
         int x = !submenu && below ? anchor.x - width / 2 : anchor.x;
         if (submenu && x + width > area.right) {
             RECT ownerBounds{};
@@ -924,7 +945,7 @@ struct Popup {
         const int y = std::clamp(submenu ? anchor.y : below ? anchor.y + Px(MenuEdgeGap) : anchor.y - height - Px(MenuEdgeGap), area.top,
             std::max(area.top, area.bottom - height));
         restingBounds = {x, y, x + width, y + height};
-        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? Tr(TextId::Cursor) : kind == TrayGeneralCommand ? Tr(TextId::General) : kind==TrayTaskbarCommand?Tr(TextId::Taskbar):kind==TrayWallpaperMenuCommand?Tr(TextId::Wallpaper):L"jellyflower",
+        window = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, kind == TrayCursorCommand ? Tr(TextId::Cursor) : kind == TrayGeneralCommand ? Tr(TextId::General) : kind==TrayTaskbarCommand?Tr(TextId::Taskbar):kind==TraySystemTrayCommand?Tr(TextId::SystemTray):kind==TrayWallpaperMenuCommand?Tr(TextId::Wallpaper):L"jellyflower",
             WS_POPUP, x, y, width, height,
             owner, nullptr, GetModuleHandleW(nullptr), this);
         if (!window) return false;

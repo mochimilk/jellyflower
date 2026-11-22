@@ -11,7 +11,8 @@ thread_local int index = 0;
 int failures = 0;
 volatile LONG* retiring=nullptr;
 LRESULT CALLBACK RetireProc(HWND window,UINT message,WPARAM wParam,LPARAM lParam){
-    if(message==acrylic::BridgeRefreshMessage && retiring){InterlockedExchange(&retiring[14],0);InterlockedExchange(&retiring[15],0);InterlockedExchange(&retiring[18],0);return 0;}
+    if(message==acrylic::BridgeRefreshMessage && retiring){InterlockedExchange(&retiring[14],0);InterlockedExchange(&retiring[15],0);InterlockedExchange(&retiring[18],0);
+        InterlockedExchange(&retiring[22],0);InterlockedExchange(&retiring[28],0);return 0;} // v20's dockCount and barHeightShown share the fixture's page
     return DefWindowProcW(window,message,wParam,lParam);
 }
 void Check(bool value, const char* name) {
@@ -30,9 +31,16 @@ bool WaitForCount(int count) {
 }
 int main() {
     using acrylic::AcrylicMode;
-    Check(acrylic::NextAcrylicMode(AcrylicMode::System) == AcrylicMode::Pure
+    Check(acrylic::NextAcrylicMode(AcrylicMode::Fluted) == AcrylicMode::System
+        && acrylic::NextAcrylicMode(AcrylicMode::System) == AcrylicMode::Pure
         && acrylic::NextAcrylicMode(AcrylicMode::Pure) == AcrylicMode::Off
-        && acrylic::NextAcrylicMode(AcrylicMode::Off) == AcrylicMode::System, "system/pure/off cycle order");
+        && acrylic::NextAcrylicMode(AcrylicMode::Off) == AcrylicMode::Fluted, "fluted/system/pure/off cycle order");
+    Check(acrylic::DecodeAcrylicMode(3) == AcrylicMode::Fluted && acrylic::DecodeAcrylicMode(7) == AcrylicMode::Off, "fluted decodes; unknown values are off");
+    for (bool light : {false, true}) {
+        const auto fluted = acrylic::Recipe(AcrylicMode::Fluted, light), system = acrylic::Recipe(AcrylicMode::System, light);
+        Check(fluted.tint == system.tint && fluted.luminosity == system.luminosity && fluted.legacyColor == system.legacyColor,
+            "fluted glass takes system's tint, and is system acrylic where it can't be drawn");
+    }
     for (bool light : {false, true}) {
         const auto pure = acrylic::Recipe(AcrylicMode::Pure, light);
         Check(pure.tint == 0.0 && pure.luminosity == 0.0, "pure has no color or luminosity tint in either theme");
@@ -136,6 +144,28 @@ int main() {
             InterlockedExchange(&retiring[7],0);
             InterlockedExchange(&retiring[8],1);InterlockedExchange(&retiring[18],1);
             Check(acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[18])==1,"live v19 is never retired by another controller");
+            if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
+        }
+    }
+    {
+        const auto name=L"Local\\AcrylicTaskbar.Bridge.v20."+std::to_wstring(pid);
+        acrylic::Handle old(CreateFileMappingW(INVALID_HANDLE_VALUE,nullptr,PAGE_READWRITE,0,4096,name.c_str()));
+        retiring=static_cast<volatile LONG*>(MapViewOfFile(old.get(),FILE_MAP_ALL_ACCESS,0,0,30*sizeof(LONG)));
+        Check(retiring!=nullptr,"known v20 fixture mapping");
+        if(retiring){
+            InterlockedExchange(&retiring[0],0x41544243);
+            Check(acrylic::OlderBridgePresent(pid),"v20 mapping with another generation's magic remains blocked");
+            InterlockedExchange(&retiring[0],0x41544244);InterlockedExchange(&retiring[22],1);InterlockedExchange(&retiring[28],64);
+            Check(acrylic::OlderBridgePresent(pid),"unrestored v20 dock and taller bar remain blocked");
+            WNDCLASSW wc{};wc.hInstance=GetModuleHandleW(nullptr);wc.lpfnWndProc=RetireProc;wc.lpszClassName=L"AcrylicTaskbar.BridgeNotify.v20";RegisterClassW(&wc);
+            const HWND receiver=CreateWindowExW(0,wc.lpszClassName,nullptr,0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,nullptr);
+            Check(receiver && !acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[22])==0 && acrylic::Read(retiring[28])==0,
+                "stopped v20 presentation, dock and taller bar included, is synchronously restored before v21 attaches");
+            InterlockedExchange(&retiring[23],1);
+            Check(acrylic::OlderBridgePresent(pid),"stopped v20 with a click-through region left remains blocked");
+            InterlockedExchange(&retiring[23],0);
+            InterlockedExchange(&retiring[8],1);InterlockedExchange(&retiring[22],1);
+            Check(acrylic::OlderBridgePresent(pid) && acrylic::Read(retiring[22])==1,"live v20 is never retired by another controller");
             if(receiver)DestroyWindow(receiver);UnmapViewOfFile(const_cast<LONG*>(retiring));retiring=nullptr;
         }
     }

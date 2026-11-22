@@ -3,14 +3,17 @@
 // narrower than Start (compact.hpp) and changes the real work area while it
 // runs, so it is not part of CI. Run it with no other jellyflower controller
 // changing app bars:
-//   CompactScreen.exe [capture.bmp]
+//   CompactScreen.exe [capture.bmp [top-bar.bmp]]
 // It frames the compact displays, checks every margin through the monitor's
 // work area, optionally saves the top band (status bar included), turns the
-// status bar off and on, then removes the frame and checks the work area is
-// back.
+// status bar off and on, turns the top bar on (every display) and off again,
+// then removes the frame and checks the work area is back.
 #include "../src/compact.hpp"
 #include "../src/compact_screen.hpp"
+#include "../src/top_bar.hpp"
 #include <shellscalingapi.h>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -28,18 +31,36 @@ void Pump(DWORD milliseconds) {
         MsgWaitForMultipleObjects(0, nullptr, FALSE, 20, QS_ALLINPUT);
     }
 }
-struct Display { HMONITOR handle; RECT monitor, work; UINT dpi; };
-std::vector<Display> Compact() {
+struct Display { HMONITOR handle; RECT monitor, work; UINT dpi; bool compact; };
+std::vector<Display> AllDisplays() {
     std::vector<Display> result;
     EnumDisplayMonitors(nullptr, nullptr, [](HMONITOR monitor, HDC, LPRECT, LPARAM data) -> BOOL {
         MONITORINFO info{sizeof(info)};
         UINT dpi = 0, unused = 0;
-        if (GetMonitorInfoW(monitor, &info) && SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi, &unused))
-            && IsCompactDisplay(info.rcMonitor.right - info.rcMonitor.left, dpi))
-            reinterpret_cast<std::vector<Display>*>(data)->push_back({monitor, info.rcMonitor, info.rcWork, dpi});
+        if (GetMonitorInfoW(monitor, &info) && SUCCEEDED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi, &unused)))
+            reinterpret_cast<std::vector<Display>*>(data)->push_back({monitor, info.rcMonitor, info.rcWork, dpi,
+                IsCompactDisplay(info.rcMonitor.right - info.rcMonitor.left, dpi)});
         return TRUE;
     }, reinterpret_cast<LPARAM>(&result));
     return result;
+}
+std::vector<Display> Compact() {
+    auto result = AllDisplays();
+    result.erase(std::remove_if(result.begin(), result.end(), [](const Display& display) { return !display.compact; }), result.end());
+    return result;
+}
+// This process's top edge on a display (or on any, for an empty monitor). A
+// running jellyflower's own bar can sit above it: app bars stack.
+HWND OwnTopEdge(const RECT& monitor = {}) {
+    HWND window = nullptr;
+    while ((window = FindWindowExW(nullptr, window, L"AcrylicTaskbar.ScreenEdge.v1", L"jellyflower status bar")) != nullptr) {
+        DWORD pid = 0;
+        RECT bounds{}, inside{};
+        GetWindowThreadProcessId(window, &pid);
+        if (pid == GetCurrentProcessId() && GetWindowRect(window, &bounds)
+            && (IsRectEmpty(&monitor) || (IntersectRect(&inside, &bounds, &monitor) && EqualRect(&inside, &bounds)))) return window;
+    }
+    return nullptr;
 }
 RECT Work(HMONITOR monitor) {
     MONITORINFO info{sizeof(info)};
@@ -49,7 +70,7 @@ RECT Work(HMONITOR monitor) {
 std::wstring Text(const RECT& r) {
     return std::to_wstring(r.left) + L"," + std::to_wstring(r.top) + L"," + std::to_wstring(r.right) + L"," + std::to_wstring(r.bottom);
 }
-HWND StatusBar() { return FindWindowW(L"AcrylicTaskbar.ScreenEdge.v1", L"jellyflower status bar"); }
+HWND StatusBar() { return OwnTopEdge(); }
 // CAPTUREBLT includes layered windows such as the status bar.
 void Capture(const RECT& area, const wchar_t* path) {
     const int width = area.right - area.left, height = area.bottom - area.top;
@@ -84,7 +105,7 @@ int wmain(int argc, wchar_t** argv) {
         const auto displays = Compact();
         Check(!displays.empty(), "no display is narrower than Start; nothing to frame");
         CompactScreen screen;
-        screen.Refresh(true, false);
+        screen.Refresh({true, false, true, false});
         Pump(1500);
         Check(screen.Displays() == static_cast<LONG>(displays.size()) && screen.Result() == S_OK, "every compact display is framed without an error");
         for (const auto& display : displays) {
@@ -111,14 +132,53 @@ int wmain(int argc, wchar_t** argv) {
             Capture(band, argv[1]);
         }
         const RECT framed = Work(displays[0].handle);
-        screen.Refresh(false, false);
+        screen.Refresh({false, false, true, false});
         Pump(300);
         Check(!IsWindowVisible(StatusBar()), "turning the status bar off hides the time");
         const RECT unchanged = Work(displays[0].handle);
         Check(EqualRect(&framed, &unchanged) != FALSE, "turning it off keeps the top margin, so windows do not move");
-        screen.Refresh(true, false);
+        screen.Refresh({true, false, true, false});
         Pump(300);
         Check(IsWindowVisible(StatusBar()), "turning it back on shows the time again");
+
+        // The top bar takes the status bar's place in a compact display's top
+        // margin and a strip of its own from every other display.
+        const auto every = AllDisplays();
+        screen.Refresh({true, true, true, false});
+        Pump(1500);
+        Check(screen.TopBars() == static_cast<LONG>(every.size()) && screen.Result() == S_OK, "every display shows the top bar without an error");
+        for (const auto& display : every) {
+            const RECT work = Work(display.handle);
+            std::wprintf(L"top bar on %ls: work %ls -> %ls\n", Text(display.monitor).c_str(), Text(display.work).c_str(), Text(work).c_str());
+            if (display.compact) Check(EqualRect(&work, &display.work) != FALSE, "a compact display keeps its margins");
+            else Check(work.top == display.work.top + TopEdgePixels(false, display.dpi) && work.bottom == display.work.bottom,
+                "another display gives the top bar 32 DIP at the top");
+        }
+        // The flower and the clock take clicks; the rest of the bar lets them through.
+        const auto& first = displays[0];
+        const HWND top = OwnTopEdge(first.monitor);
+        RECT strip{};
+        Check(top && IsWindowVisible(top) && GetWindowRect(top, &strip), "the compact display shows the top bar");
+        std::wprintf(L"top bar %ls\n", Text(strip).c_str());
+        const float scale = static_cast<float>(first.dpi) / 96;
+        const LONG y = (strip.top + strip.bottom) / 2;
+        const POINT flower{strip.left + std::lround((TopBarEdge + StatusButtonPadding + TopBarIconSize / 2) * scale), y};
+        const POINT clock{strip.right - std::lround((TopBarEdge + StatusButtonPadding) * scale), y};
+        const POINT middle{(strip.left + strip.right) / 2, y};
+        Check(WindowFromPoint(flower) == top && WindowFromPoint(clock) == top, "the flower and the clock take clicks");
+        Check(WindowFromPoint(middle) != top, "clicks between them fall through");
+        if (argc > 2) {
+            RECT band = strip;
+            band.bottom = band.top + 2 * (strip.bottom - strip.top);
+            Capture(band, argv[2]);
+        }
+        screen.Refresh({true, false, true, false});
+        Pump(500);
+        Check(screen.TopBars() == 0 && IsWindowVisible(StatusBar()), "turning the top bar off brings the status bar back");
+        for (const auto& display : every) {
+            const RECT work = Work(display.handle);
+            Check(EqualRect(&work, &display.work) != FALSE, "turning the top bar off gives other displays their work area back");
+        }
         screen.Remove();
         Pump(500);
         for (const auto& display : displays) {

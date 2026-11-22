@@ -5,6 +5,7 @@
 // button geometry were read from the live taskbar tree. See
 // THIRD_PARTY_NOTICES.md. No styling engine or Windhawk code is included.
 #include "dock.hpp"
+#include <winrt/Windows.UI.Xaml.Automation.Peers.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Data.h>
 #include <winrt/Windows.UI.Xaml.Shapes.h>
@@ -449,6 +450,43 @@ HWND FindDockWindow(SIZE island, const POINT* screen, DWORD thread, POINT& offse
     offset = match->offset;
     error = S_OK;
     return match->window;
+}
+HWND FindTaskbarWindow(const xaml::FrameworkElement& element, POINT& offset, double& scale, HRESULT& error) noexcept {
+    try {
+        const auto root = element.XamlRoot();
+        if (!root) { error = HRESULT_FROM_WIN32(ERROR_NOT_FOUND); return nullptr; }
+        scale = root.RasterizationScale();
+        const auto size = root.Size();
+        const SIZE island{std::lround(size.Width * scale), std::lround(size.Height * scale)};
+        HWND window = FindDockWindow(island, nullptr, GetCurrentThreadId(), offset, error);
+        if (!window && error == TYPE_E_AMBIGUOUSNAME) {
+            // Identical monitors: the element's automation peer knows where on screen it is.
+            if (const auto peer = xaml::Automation::Peers::FrameworkElementAutomationPeer::CreatePeerForElement(element)) {
+                const auto bounds = peer.GetBoundingRectangle();
+                const POINT center{std::lround(bounds.X + bounds.Width / 2), std::lround(bounds.Y + bounds.Height / 2)};
+                window = FindDockWindow(island, &center, GetCurrentThreadId(), offset, error);
+            }
+        }
+        return window;
+    } catch (...) {
+        error = winrt::to_hresult();
+        return nullptr;
+    }
+}
+HWND TaskbarBounds(const xaml::FrameworkElement& element, RECT& bounds, double& scale, HRESULT& error) noexcept {
+    POINT offset{};
+    const HWND window = FindTaskbarWindow(element, offset, scale, error);
+    if (!window) return nullptr;
+    try {
+        const auto box = element.TransformToVisual(nullptr).TransformBounds(
+            {0, 0, static_cast<float>(element.ActualWidth()), static_cast<float>(element.ActualHeight())});
+        bounds = {offset.x + std::lround(box.X * scale), offset.y + std::lround(box.Y * scale),
+            offset.x + std::lround((box.X + box.Width) * scale), offset.y + std::lround((box.Y + box.Height) * scale)};
+        return window;
+    } catch (...) {
+        error = winrt::to_hresult();
+        return nullptr;
+    }
 }
 
 bool DockRegion::Ours() const noexcept {

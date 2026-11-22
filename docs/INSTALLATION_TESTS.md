@@ -328,3 +328,27 @@ Use a display narrower than about 666 DIP, such as a tablet in portrait at 300% 
 6. Turn off transparency effects, then turn on high contrast: the menu is solid in each, as before.
 7. Open the menu from the status bar on a compact display: it drops down with the glass.
 8. At 100%, 150% and 300% scale the reeds stay about 14 DIP wide, and the outer reeds never show a hard line at the menu's edge.
+
+## Fluted taskbar acceptance (0.24.0, Explorer helper v21)
+
+1. Update from 0.23.0 in the app. The taskbar turns fluted without a sign-out, `--diagnose` reports `bridgeState` 2, `acrylicMode` "fluted", `flutedTaskbars` 1 and `flutedLastResult` 0, and `Acrylic` is not yet saved under `HKCU\Software\jellyflower`.
+2. With floating off, the whole bar shows reeds about 14 DIP wide over the wallpaper, under the theme tint; with floating on, only the pill does, and the bar around it stays see-through and click-through. The tray, clock and every button respond as before, and the glass never takes focus.
+3. Open taskbar > acrylic: the row reads `fluted` with the reeded glyph. Select it four times: system, pure, off, then fluted again, each applied at once. `Acrylic` holds 1, 2, 0 and 3, and the setting survives exit and restart.
+4. Drag a window under the bar (or turn auto hide on and open one beneath it): it shows through the glass within about a second of appearing or stopping, and the glass clears soon after it goes.
+5. Open and close apps, pin and unpin one: the fluted pill grows and shrinks with its buttons, and its glass never shows outside the pill's outline.
+6. Play a video full screen and press F11 in a browser: no glass is left over the full-screen app, and it returns with the taskbar afterwards.
+7. Switch light and dark: the tint follows. Turn on energy saver, turn off transparency effects, and turn on high contrast in turn: the taskbar falls back to Windows' own look for each, and fluted returns when each is undone.
+8. Exit, `--stop`, and end jellyflower.exe in Task Manager: each time the stock taskbar returns within a few seconds and no `jellyflower.FlutedGlass` window is left. Restart Explorer: fluted comes back.
+9. With two displays, each taskbar has its own glass; at 100%, 150% and 300% scale the reeds stay about 14 DIP wide.
+
+## Top bar and system tray menu acceptance (0.24.0)
+
+1. Open taskbar: acrylic, auto hide, floating, then system tray with a chevron. Open system tray: position (`bottom`), show, date and status bar, each with its icon. From the keyboard, Right opens it and Left returns to taskbar.
+2. Set position to `top`. Every display gets a bar along its top edge, 32 DIP tall (in the 40-DIP top margin on a compact display), with no background: the flower at the left, the Quick Settings glyph and the clock at the right. Maximized windows stop below it. The flower leaves the taskbar's tray; with show set to `jellyflower`, the tray's chevron is hidden too. `--diagnose` reports `topBar` true, `topBarDisplays` equal to the number of displays and `compactLastResult` 0.
+3. Select the flower: the jellyflower menu drops down at the top left and the flower stays highlighted while it is open. Select it again: the menu closes.
+4. Select the glyph: Windows' Quick Settings opens from the taskbar's corner and Esc closes it. Select the clock: notifications and the calendar open.
+5. Hover and press each button: the status bar's subtle fills. Clicks and taps between the buttons reach the desktop or the window behind.
+6. Turn date off and on: the bar's clock drops and regains the date together with the taskbar's clock. Switch light and dark: the bar's ink follows.
+7. Play a video full screen or press F11: it covers the bar. Leave full screen: the bar returns.
+8. On a compact display the bar replaces the time and chevron, and the status bar row is greyed out. Set position to `bottom`: the status bar returns there, the other displays get their full height back, and the flower returns to the tray.
+9. With position `top`, exit jellyflower, and separately end jellyflower.exe in Task Manager: the bars disappear and maximized windows grow back within a few seconds. Restart Explorer: the bar returns.

@@ -2,6 +2,7 @@
 #pragma once
 #include <windows.h>
 #include <shellapi.h>
+#include "bool_setting.hpp"
 
 namespace acrylic {
 // Compact displays are the ones too narrow for Start's native menu: the small
@@ -78,13 +79,5 @@ inline constexpr float StatusChevronGap = 6, StatusChevronWidth = 8, StatusChevr
 inline constexpr float StatusButtonPadding = 8, StatusButtonInset = 4, StatusButtonRadius = 4;
 
 // On by default: compact displays show the time in the top margin.
-inline bool LoadStatusBar() {
-    DWORD value = 1, size = sizeof(value);
-    if (RegGetValueW(HKEY_CURRENT_USER, L"Software\\jellyflower", L"StatusBar", RRF_RT_REG_DWORD, nullptr, &value, &size)) return true;
-    return value != 0;
-}
-inline DWORD SaveStatusBar(bool enabled) {
-    const DWORD value = enabled ? 1 : 0;
-    return static_cast<DWORD>(RegSetKeyValueW(HKEY_CURRENT_USER, L"Software\\jellyflower", L"StatusBar", REG_DWORD, &value, sizeof(value)));
-}
+inline constexpr BoolSetting StatusBarSetting{L"StatusBar", true};
 } // namespace acrylic

@@ -4,21 +4,24 @@
 #include <windows.h>
 
 namespace acrylic {
-enum class AcrylicMode : LONG { Off = 0, System = 1, Pure = 2 };
+// Fluted is the default: the taskbar seen through fluted glass (taskbar_glass.hpp).
+enum class AcrylicMode : LONG { Off = 0, System = 1, Pure = 2, Fluted = 3 };
 constexpr AcrylicMode NextAcrylicMode(AcrylicMode mode) noexcept {
-    return mode == AcrylicMode::System ? AcrylicMode::Pure : mode == AcrylicMode::Pure ? AcrylicMode::Off : AcrylicMode::System;
+    return mode == AcrylicMode::Fluted ? AcrylicMode::System : mode == AcrylicMode::System ? AcrylicMode::Pure
+        : mode == AcrylicMode::Pure ? AcrylicMode::Off : AcrylicMode::Fluted;
 }
 constexpr AcrylicMode DecodeAcrylicMode(LONG value) noexcept {
-    return value == 2 ? AcrylicMode::Pure : value == 1 ? AcrylicMode::System : AcrylicMode::Off;
+    return value == 3 ? AcrylicMode::Fluted : value == 2 ? AcrylicMode::Pure : value == 1 ? AcrylicMode::System : AcrylicMode::Off;
 }
 constexpr const wchar_t* AcrylicLabel(AcrylicMode mode) noexcept {
-    return mode == AcrylicMode::System ? L"acrylic (system)" : mode == AcrylicMode::Pure ? L"acrylic pure" : L"acrylic off";
+    return mode == AcrylicMode::Fluted ? L"acrylic fluted" : mode == AcrylicMode::System ? L"acrylic (system)"
+        : mode == AcrylicMode::Pure ? L"acrylic pure" : L"acrylic off";
 }
 constexpr const wchar_t* AcrylicModeName(AcrylicMode mode) noexcept {
-    return mode == AcrylicMode::System ? L"system" : mode == AcrylicMode::Pure ? L"pure" : L"off";
+    return mode == AcrylicMode::Fluted ? L"fluted" : mode == AcrylicMode::System ? L"system" : mode == AcrylicMode::Pure ? L"pure" : L"off";
 }
 inline const wchar_t* AcrylicModeLabel(AcrylicMode mode) noexcept {
-    return Tr(mode==AcrylicMode::System?TextId::System:mode==AcrylicMode::Pure?TextId::Pure:TextId::Off);
+    return Tr(mode==AcrylicMode::Fluted?TextId::Fluted:mode==AcrylicMode::System?TextId::System:mode==AcrylicMode::Pure?TextId::Pure:TextId::Off);
 }
 struct AcrylicRecipe { double tint, luminosity; DWORD legacyColor; };
 constexpr AcrylicRecipe Recipe(AcrylicMode mode, bool light) noexcept {
@@ -26,6 +29,8 @@ constexpr AcrylicRecipe Recipe(AcrylicMode mode, bool light) noexcept {
     // luminosity still looks black over black wallpaper. Set the brightness
     // layer explicitly in both themes. Legacy accents use ABGR alpha instead.
     // Pure keeps the required nonzero legacy alpha without adding XAML tint.
+    // Fluted glass takes system's tint over its reeds, and is system acrylic
+    // wherever the glass can't be drawn.
     return mode == AcrylicMode::Pure ? AcrylicRecipe{0.0, 0.0, 0x01000000u}
         : light ? AcrylicRecipe{0.30, 0.30, 0x4dffffffu} : AcrylicRecipe{0.34, 0.72, 0xb8202020u};
 }

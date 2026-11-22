@@ -8,11 +8,11 @@ namespace acrylic {
 inline constexpr wchar_t WindowClass[] = L"AcrylicTaskbar.Controller.v1";
 inline constexpr wchar_t RunValue[] = L"jellyflower";
 inline constexpr wchar_t RunKey[] = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-inline constexpr GUID TapClass = {0x8811db31, 0xd2f9, 0x4f53,
-    {0xbf, 0x71, 0x37, 0xdb, 0x88, 0x93, 0xda, 0xcc}};
+inline constexpr GUID TapClass = {0x3fe9d131, 0x3885, 0x4ebf,
+    {0xbf, 0x42, 0x09, 0x54, 0xe7, 0xc9, 0x7e, 0xef}};
 inline constexpr GUID PowerSavingGuid = {0xe00958c0, 0xc213, 0x4ace,
     {0xac, 0x77, 0xfe, 0xcc, 0xed, 0x2e, 0xee, 0xa5}};
-inline constexpr LONG Magic = 0x41544244;
+inline constexpr LONG Magic = 0x41544245;
 inline constexpr UINT QueryMessage = WM_APP + 42;
 enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, EnabledQuery, TrayQuery,
     CursorModeQuery, CursorAppliedQuery, CursorErrorQuery, BorderQuery, LightQuery, AcrylicModeQuery,
@@ -22,7 +22,7 @@ enum Query : WPARAM { BackendQuery, AppliedQuery, ResultQuery, BridgeQuery, Enab
     AdaptiveGlyphQuery,AdaptiveBitmapQuery,AdaptiveResultQuery,TrayOnlyQuery,TrayHiddenQuery,TrayFlowerQuery,
     TrayResultQuery, KeyboardLayoutQuery, KeyboardAttachedQuery, KeyboardCountQuery, KeyboardResultQuery, KeyboardFieldQuery,
     CompactDisplaysQuery, StatusBarQuery, CompactResultQuery, DockQuery, DockCountQuery, DockRegionQuery, DockResultQuery,
-    BarHeightQuery, BarHeightResultQuery, MenuGlassResultQuery };
+    BarHeightQuery, BarHeightResultQuery, MenuGlassResultQuery, FlutedQuery, FlutedResultQuery, TopBarQuery, TopBarDisplaysQuery };
 enum Backend : LONG { Waiting, Legacy, Modern, Unsupported };
 enum BridgeState : LONG { Idle, Starting, Attached, Failed };
 
@@ -31,7 +31,7 @@ struct SharedState {
     volatile LONG magic;
     volatile LONG controllerPid;
     volatile LONG epoch;
-    volatile LONG active; // AcrylicMode: off / system / pure, published atomically.
+    volatile LONG active; // AcrylicMode: off / system / pure / fluted, published atomically.
     volatile LONG bridgeState;
     volatile LONG appliedCount;
     volatile LONG lastResult;
@@ -61,6 +61,13 @@ struct SharedState {
     volatile LONG minSizeFunction;
     volatile LONG barHeightShown;
     volatile LONG barHeightResult;
+    volatile LONG flutedCount; // Taskbar backgrounds showing fluted glass (v21).
+    volatile LONG flutedResult;
+    // Where the controller draws each taskbar's fluted glass: glass_state.hpp.
+    volatile LONG glassSequence;
+    volatile LONG glassSlots[4][6];
+    volatile LONG glassShown;
+    volatile LONG glassResult;
 };
 inline LONG Read(volatile LONG& value) noexcept {
     return InterlockedCompareExchange(&value, 0, 0);
@@ -72,7 +79,7 @@ inline bool BareTray(SharedState& state) noexcept {
     return DecodeAcrylicMode(Read(state.active)) == AcrylicMode::Pure || DockOn(state);
 }
 inline std::wstring MappingName(DWORD explorerPid) {
-    return L"Local\\AcrylicTaskbar.Bridge.v20." + std::to_wstring(explorerPid);
+    return L"Local\\AcrylicTaskbar.Bridge.v21." + std::to_wstring(explorerPid);
 }
 
 class Handle {
@@ -91,17 +98,17 @@ private:
     HANDLE value_;
 };
 inline bool OlderBridgePresent(DWORD explorerPid) {
-    for (UINT version = 1; version < 20; ++version) {
+    for (UINT version = 1; version < 21; ++version) {
         Handle older(OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE,
             (L"Local\\AcrylicTaskbar.Bridge.v" + std::to_wstring(version) + L"." + std::to_wstring(explorerPid)).c_str()));
         if (!older) continue;
         if(version<15)return true;
-        // The v15 through v19 ABIs are known. A normally stopped old controller
+        // The v15 through v20 ABIs are known. A normally stopped old controller
         // can retire its presentation synchronously before the uniquely named
-        // v20 DLL takes over. Unknown/live generations still require a shell reload.
-        auto old=static_cast<volatile LONG*>(MapViewOfFile(older.get(),FILE_MAP_ALL_ACCESS,0,0,(version==15?14:version<19?17:21)*sizeof(LONG)));
+        // v21 DLL takes over. Unknown/live generations still require a shell reload.
+        auto old=static_cast<volatile LONG*>(MapViewOfFile(older.get(),FILE_MAP_ALL_ACCESS,0,0,(version==15?14:version<19?17:version<20?21:30)*sizeof(LONG)));
         if(!old)return true;
-        const LONG magic=version==15?0x4154423F:version==16?0x41544240:version==17?0x41544241:version==18?0x41544242:0x41544243;
+        const LONG magic=version==15?0x4154423F:version==16?0x41544240:version==17?0x41544241:version==18?0x41544242:version==19?0x41544243:0x41544244;
         bool retired=Read(old[0])==magic && Read(old[8])==0;
         const auto receiverClass=L"AcrylicTaskbar.BridgeNotify.v"+std::to_wstring(version);
         if(retired){HWND receiver=nullptr;while((receiver=FindWindowExW(HWND_MESSAGE,receiver,receiverClass.c_str(),nullptr))){
@@ -111,6 +118,7 @@ inline bool OlderBridgePresent(DWORD explorerPid) {
         retired=retired && Read(old[5])==0 && Read(old[7])==0 && Read(old[9])==0 && Read(old[11])==0;
         if(version>=16)retired=retired && Read(old[14])==0 && Read(old[15])==0;
         if(version>=19)retired=retired && Read(old[18])==0; // trayHidden
+        if(version>=20)retired=retired && Read(old[22])==0 && Read(old[23])==0 && Read(old[28])==0; // dockCount, dockRegions, barHeightShown
         UnmapViewOfFile(const_cast<LONG*>(old));if(!retired)return true;
     }
     return false;

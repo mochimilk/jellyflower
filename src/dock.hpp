@@ -54,6 +54,12 @@ private:
 // inside the island, when the caller has one. Null (with error set) when
 // none or more than one match.
 HWND FindDockWindow(SIZE island, const POINT* screen, DWORD thread, POINT& offset, HRESULT& error) noexcept;
+// The taskbar window on this thread that holds an element's island, with the
+// island's offset inside it and the island's scale. Identical taskbars are told
+// apart by the element's automation peer.
+HWND FindTaskbarWindow(const winrt::Windows::UI::Xaml::FrameworkElement& element, POINT& offset, double& scale, HRESULT& error) noexcept;
+// An element's bounds in pixels relative to that taskbar window, which it returns.
+HWND TaskbarBounds(const winrt::Windows::UI::Xaml::FrameworkElement& element, RECT& bounds, double& scale, HRESULT& error) noexcept;
 
 // Owns a window region. The stock taskbar has either no region or one
 // covering the whole window (Windows 11 sets the latter); that stock state is
